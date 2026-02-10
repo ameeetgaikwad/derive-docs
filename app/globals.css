@@ -1,26 +1,223 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
-
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-cream: #f0ebe3;
+  --color-cream-dark: #e5dfd6;
+  --color-terminal: #1a1a1a;
+  --color-terminal-header: #0d0d0d;
+  --color-accent-green: #22c55e;
+  --color-accent-red: #ef4444;
+  --color-border: #d4cfc6;
+  --color-border-dashed: #c8c3ba;
+  --color-text-primary: #1a1a1a;
+  --color-text-secondary: #6b6560;
+  --color-text-muted: #9b9590;
+  --font-mono: "SF Mono", "Fira Code", "Fira Mono", "Roboto Mono", monospace;
+  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    sans-serif;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+@layer base {
+  html {
+    color-scheme: light !important;
+  }
+
+  body {
+    background-color: #f0ebe3 !important;
+    color: #1a1a1a !important;
+    font-family: var(--font-sans);
+    margin: 0;
+    padding: 0;
   }
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+@layer components {
+  /* Grid background pattern like Rysk */
+  .grid-bg {
+    background-image: linear-gradient(
+        rgba(0, 0, 0, 0.04) 1px,
+        transparent 1px
+      ),
+      linear-gradient(90deg, rgba(0, 0, 0, 0.04) 1px, transparent 1px);
+    background-size: 60px 60px;
+  }
+
+  /* Terminal wrapper - contains tab + card */
+  .terminal-wrapper {
+    position: relative;
+  }
+
+  /* Terminal tab - sits on top of card like a folder tab */
+  .terminal-tab {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    background: #0d0d0d;
+    color: #ffffff;
+    padding: 8px 24px 8px 16px;
+    font-family: var(--font-mono);
+    font-size: 14px;
+    border-radius: 8px 8px 0 0;
+    position: relative;
+  }
+
+  .terminal-tab .green-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #22c55e;
+    flex-shrink: 0;
+  }
+
+  /* Angled edge on the right side of the tab */
+  .terminal-tab::after {
+    content: "";
+    position: absolute;
+    right: -16px;
+    bottom: 0;
+    width: 16px;
+    height: 100%;
+    background: #0d0d0d;
+    clip-path: polygon(0 0, 0 100%, 100% 100%);
+  }
+
+  /* Terminal card style */
+  .terminal-card {
+    background: #ffffff;
+    border: 1px solid #d4cfc6;
+    border-radius: 0 8px 8px 8px;
+    overflow: hidden;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06), 0 1px 2px rgba(0, 0, 0, 0.04);
+  }
+
+  /* Legacy terminal-header for backwards compat */
+  .terminal-header {
+    background: #0d0d0d;
+    color: #ffffff;
+    padding: 8px 16px;
+    font-family: var(--font-mono);
+    font-size: 14px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .terminal-header .green-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #22c55e;
+    flex-shrink: 0;
+  }
+
+  .terminal-body {
+    padding: 16px;
+  }
+
+  /* Dashed row separators */
+  .dashed-border {
+    border-bottom: 1px dashed #c8c3ba;
+  }
+
+  /* Pill button */
+  .pill-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 20px;
+    border: 1px solid #d4cfc6;
+    border-radius: 8px;
+    background: #ffffff;
+    font-family: var(--font-mono);
+    font-size: 13px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    color: #1a1a1a;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+  }
+
+  .pill-btn:hover {
+    background: #f5f0eb;
+    border-color: #1a1a1a;
+  }
+
+  /* Connect button style */
+  .connect-btn {
+    padding: 10px 28px;
+    border: 1px solid #1a1a1a;
+    border-radius: 8px;
+    background: #ffffff;
+    font-family: var(--font-mono);
+    font-size: 14px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    color: #1a1a1a;
+    font-weight: 500;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+  }
+
+  .connect-btn:hover {
+    background: #1a1a1a;
+    color: #ffffff;
+  }
+
+  /* Tab buttons */
+  .tab-btn {
+    padding: 6px 16px;
+    border: 1px solid #d4cfc6;
+    border-radius: 6px;
+    background: transparent;
+    font-family: var(--font-mono);
+    font-size: 13px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    color: #6b6560;
+  }
+
+  .tab-btn:hover {
+    border-color: #1a1a1a;
+    color: #1a1a1a;
+  }
+
+  .tab-btn.active {
+    background: #ffffff;
+    color: #1a1a1a;
+    border-color: #1a1a1a;
+    font-weight: 500;
+  }
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #c8c3ba;
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #9b9590;
+}
+
+/* Input styling */
+input[type="number"] {
+  -moz-appearance: textfield;
+}
+
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+/* Override RainbowKit button styles */
+[data-rk] button {
+  font-family: var(--font-mono) !important;
 }

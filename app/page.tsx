@@ -1,65 +1,143 @@
-import Image from "next/image";
+"use client";
+
+import { useState } from "react";
+import { ConnectButton } from "@rainbow-me/rainbowkit";
+import { useEffect } from "react";
+import AssetsList from "./components/AssetsList";
+import EarnDetail from "./components/EarnDetail";
+import Positions from "./components/Positions";
+import DeriveSessionProvider from "./components/DeriveSessionProvider";
+
+type StrategyType = "covered_call" | "cash_secured_put";
 
 export default function Home() {
+  const [view, setView] = useState<"assets" | "earn" | "portfolio">("assets");
+  const [selectedAsset, setSelectedAsset] = useState("ETH");
+  const [selectedType, setSelectedType] = useState<StrategyType>("covered_call");
+
+  const handleEarn = (asset: string, type: StrategyType) => {
+    setSelectedAsset(asset);
+    setSelectedType(type);
+    setView("earn");
+  };
+
+  const handleBack = () => {
+    setView("assets");
+  };
+
   return (
-    <div className="flex min-h-screen items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex min-h-screen w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
+    <DeriveSessionProvider>
+      <div className="grid-bg min-h-screen">
+        {/* Header */}
+        <header className="flex items-center justify-between border-b border-[#d4cfc6] px-8 py-4">
+          <div className="flex items-center gap-8">
+            <h1 className="font-mono text-2xl font-bold tracking-tight text-[#1a1a1a]">
+              axiom
+            </h1>
+            <nav className="flex items-center gap-6">
+              <button
+                onClick={() => setView("assets")}
+                className={`font-mono text-sm transition-colors ${
+                  view !== "portfolio"
+                    ? "border-b border-[#1a1a1a] text-[#1a1a1a]"
+                    : "text-[#6b6560] hover:text-[#1a1a1a]"
+                }`}
+              >
+                Earn
+              </button>
+              <button
+                onClick={() => setView("portfolio")}
+                className={`font-mono text-sm transition-colors ${
+                  view === "portfolio"
+                    ? "border-b border-[#1a1a1a] text-[#1a1a1a]"
+                    : "text-[#6b6560] hover:text-[#1a1a1a]"
+                }`}
+              >
+                Portfolio
+              </button>
+            </nav>
+          </div>
+          <ConnectButton.Custom>
+            {({
+              account,
+              chain,
+              openAccountModal,
+              openChainModal,
+              openConnectModal,
+              mounted,
+            }) => {
+              const connected = mounted && account && chain;
+              const wrongChain = connected && chain?.unsupported;
+
+              return (
+                <div className="flex items-center gap-3">
+                  {connected ? (
+                    wrongChain ? (
+                      <WrongChainButton openChainModal={openChainModal} />
+                    ) : (
+                      <button
+                        onClick={openAccountModal}
+                        className="connect-btn"
+                      >
+                        {account.displayName}
+                      </button>
+                    )
+                  ) : (
+                    <button
+                      onClick={openConnectModal}
+                      className="connect-btn"
+                    >
+                      Connect
+                    </button>
+                  )}
+                </div>
+              );
+            }}
+          </ConnectButton.Custom>
+        </header>
+
+        {/* Main Content */}
+        <div className="mx-auto max-w-[1600px] px-6 py-6">
+          {view === "assets" ? (
+            <AssetsList onEarn={handleEarn} />
+          ) : view === "earn" ? (
+            <div className="mx-auto max-w-[800px]">
+              <EarnDetail
+                asset={selectedAsset}
+                strategyType={selectedType}
+                onBack={handleBack}
+                onChangeAsset={setSelectedAsset}
+                onChangeType={setSelectedType}
+              />
+            </div>
+          ) : (
+            <Positions />
+          )}
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
-    </div>
+      </div>
+    </DeriveSessionProvider>
+  );
+}
+
+function WrongChainButton({
+  openChainModal,
+}: {
+  openChainModal: () => void;
+}) {
+  useEffect(() => {
+    openChainModal();
+  }, [openChainModal]);
+
+  return (
+    <button
+      onClick={openChainModal}
+      className="connect-btn"
+      style={{
+        borderColor: "#ef4444",
+        color: "#ef4444",
+      }}
+    >
+      Wrong Network
+    </button>
   );
 }
