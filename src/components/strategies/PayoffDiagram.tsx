@@ -76,7 +76,7 @@ export function PayoffDiagram({
         y1={zeroY}
         x2={width - pad}
         y2={zeroY}
-        stroke="var(--border)"
+        stroke="var(--muted-foreground)"
         strokeWidth={1}
         strokeDasharray="3,3"
       />
@@ -99,7 +99,7 @@ export function PayoffDiagram({
         y1={pad}
         x2={spotX}
         y2={height - pad}
-        stroke="var(--primary)"
+        stroke="var(--foreground)"
         strokeWidth={1}
         opacity={0.5}
       />
@@ -108,7 +108,7 @@ export function PayoffDiagram({
       <polyline
         points={points.join(" ")}
         fill="none"
-        stroke="var(--primary)"
+        stroke="var(--foreground)"
         strokeWidth={2}
       />
 
@@ -119,6 +119,7 @@ export function PayoffDiagram({
         textAnchor="middle"
         fontSize={9}
         fill="var(--muted-foreground)"
+        fontFamily="var(--font-mono), monospace"
       >
         Strike
       </text>
@@ -127,7 +128,8 @@ export function PayoffDiagram({
         y={pad - 4}
         textAnchor="middle"
         fontSize={9}
-        fill="var(--primary)"
+        fill="var(--foreground)"
+        fontFamily="var(--font-mono), monospace"
       >
         Spot
       </text>
@@ -137,6 +139,7 @@ export function PayoffDiagram({
         textAnchor="start"
         fontSize={8}
         fill="var(--muted-foreground)"
+        fontFamily="var(--font-mono), monospace"
       >
         $0
       </text>

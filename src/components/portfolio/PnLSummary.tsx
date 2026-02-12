@@ -31,23 +31,27 @@ export function PnLSummary({ positions }: PnLSummaryProps) {
   const cards = [
     {
       label: "Portfolio Value",
+      path: "~/pnl/value",
       value: formatUsd(stats.portfolioValue),
       color: "text-foreground",
     },
     {
       label: "Unrealized PnL",
+      path: "~/pnl/unrealized",
       value: formatUsd(stats.unrealizedPnl),
       color:
         stats.unrealizedPnl >= 0 ? "text-success" : "text-destructive",
     },
     {
       label: "Realized PnL",
+      path: "~/pnl/realized",
       value: formatUsd(stats.realizedPnl),
       color:
         stats.realizedPnl >= 0 ? "text-success" : "text-destructive",
     },
     {
       label: "Net Delta",
+      path: "~/pnl/delta",
       value: stats.netDelta.toFixed(4),
       color: "text-foreground",
     },
@@ -56,9 +60,9 @@ export function PnLSummary({ positions }: PnLSummaryProps) {
   return (
     <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
       {cards.map((card) => (
-        <Card key={card.label} className="py-4">
-          <p className="text-xs text-muted-foreground">{card.label}</p>
-          <p className={cn("mt-1 text-xl font-bold", card.color)}>
+        <Card key={card.label} terminalPath={card.path} className="py-0">
+          <p className="font-mono text-xs text-muted-foreground">{card.label}</p>
+          <p className={cn("mt-1 font-mono text-xl font-bold", card.color)}>
             {card.value}
           </p>
         </Card>

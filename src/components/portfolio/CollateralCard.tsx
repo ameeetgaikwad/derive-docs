@@ -15,14 +15,14 @@ export function CollateralCard({ collaterals }: CollateralCardProps) {
   );
 
   return (
-    <Card>
+    <Card terminalPath="~/portfolio/collateral">
       <CardHeader>
         <CardTitle className="text-base">Collateral</CardTitle>
       </CardHeader>
       <CardContent className="space-y-3">
         <div className="flex items-center justify-between">
-          <span className="text-sm text-muted-foreground">Total Value</span>
-          <span className="text-lg font-bold">{formatUsd(totalValue)}</span>
+          <span className="font-mono text-sm text-muted-foreground">Total Value</span>
+          <span className="font-mono text-lg font-bold">{formatUsd(totalValue)}</span>
         </div>
 
         {collaterals.length > 0 ? (
@@ -30,11 +30,11 @@ export function CollateralCard({ collaterals }: CollateralCardProps) {
             {collaterals.map((c) => (
               <div
                 key={c.asset_name}
-                className="flex items-center justify-between text-sm"
+                className="flex items-center justify-between font-mono text-sm"
               >
                 <span className="text-muted-foreground">{c.asset_name}</span>
                 <div className="text-right">
-                  <span className="font-mono">{parseFloat(c.amount).toFixed(4)}</span>
+                  <span>{parseFloat(c.amount).toFixed(4)}</span>
                   <span className="ml-2 text-xs text-muted-foreground">
                     ({formatUsd(c.mark_value)})
                   </span>
@@ -43,7 +43,7 @@ export function CollateralCard({ collaterals }: CollateralCardProps) {
             ))}
           </div>
         ) : (
-          <p className="text-sm text-muted-foreground">No collateral deposited</p>
+          <p className="font-mono text-sm text-muted-foreground">No collateral deposited</p>
         )}
       </CardContent>
     </Card>

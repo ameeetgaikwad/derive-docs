@@ -13,7 +13,7 @@ export function OrderbookDisplay({ instrumentName }: OrderbookDisplayProps) {
 
   if (!instrumentName) {
     return (
-      <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+      <div className="flex h-full items-center justify-center font-mono text-sm text-muted-foreground">
         Select an instrument
       </div>
     );
@@ -30,9 +30,9 @@ export function OrderbookDisplay({ instrumentName }: OrderbookDisplayProps) {
 
   return (
     <div className="space-y-2">
-      <h3 className="text-sm font-semibold text-muted-foreground">Orderbook</h3>
+      <h3 className="font-mono text-sm font-semibold text-muted-foreground">Orderbook</h3>
 
-      <div className="space-y-0.5 text-xs font-mono">
+      <div className="space-y-0.5 font-mono text-xs">
         {/* Header */}
         <div className="flex justify-between px-1 text-muted-foreground">
           <span>Price</span>
@@ -48,7 +48,7 @@ export function OrderbookDisplay({ instrumentName }: OrderbookDisplayProps) {
               className="relative flex justify-between px-1 py-0.5"
             >
               <div
-                className="absolute inset-y-0 right-0 bg-destructive/10"
+                className="absolute inset-y-0 right-0 bg-destructive/5"
                 style={{ width: `${pct}%` }}
               />
               <span className="relative text-destructive">
@@ -83,7 +83,7 @@ export function OrderbookDisplay({ instrumentName }: OrderbookDisplayProps) {
               className="relative flex justify-between px-1 py-0.5"
             >
               <div
-                className="absolute inset-y-0 right-0 bg-success/10"
+                className="absolute inset-y-0 right-0 bg-success/5"
                 style={{ width: `${pct}%` }}
               />
               <span className="relative text-success">

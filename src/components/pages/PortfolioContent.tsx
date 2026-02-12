@@ -20,8 +20,8 @@ export default function PortfolioContent() {
   if (!isAuthenticated) {
     return (
       <div className="flex min-h-[60vh] flex-col items-center justify-center text-center">
-        <h1 className="text-2xl font-bold">Portfolio</h1>
-        <p className="mt-2 text-muted-foreground">
+        <h1 className="font-mono text-2xl font-bold">Portfolio</h1>
+        <p className="mt-2 font-mono text-muted-foreground">
           Connect your wallet to view your portfolio.
         </p>
       </div>
@@ -30,9 +30,9 @@ export default function PortfolioContent() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-bold">Portfolio</h1>
+      <h1 className="font-mono text-2xl font-bold">Portfolio</h1>
       <PnLSummary positions={positions} />
-      <Card>
+      <Card terminalPath="~/portfolio/positions">
         <CardHeader>
           <CardTitle className="text-base">Open Positions</CardTitle>
         </CardHeader>
@@ -40,7 +40,7 @@ export default function PortfolioContent() {
           {posLoading ? (
             <div className="space-y-2">
               {Array.from({ length: 3 }).map((_, i) => (
-                <div key={i} className="h-10 animate-pulse rounded bg-muted" />
+                <div key={i} className="h-10 animate-pulse rounded bg-secondary" />
               ))}
             </div>
           ) : (
@@ -49,7 +49,7 @@ export default function PortfolioContent() {
         </CardContent>
       </Card>
       <div className="grid gap-4 lg:grid-cols-[1fr_300px]">
-        <Card>
+        <Card terminalPath="~/portfolio/orders">
           <CardHeader>
             <CardTitle className="text-base">Open Orders</CardTitle>
           </CardHeader>
@@ -57,7 +57,7 @@ export default function PortfolioContent() {
             {ordLoading ? (
               <div className="space-y-2">
                 {Array.from({ length: 2 }).map((_, i) => (
-                  <div key={i} className="h-10 animate-pulse rounded bg-muted" />
+                  <div key={i} className="h-10 animate-pulse rounded bg-secondary" />
                 ))}
               </div>
             ) : (
@@ -73,7 +73,7 @@ export default function PortfolioContent() {
           ) : (
             <CollateralCard collaterals={collaterals} />
           )}
-          <Card>
+          <Card terminalPath="~/portfolio/expiries">
             <CardContent className="pt-4">
               <ExpiryTimeline positions={positions} />
             </CardContent>

@@ -47,7 +47,7 @@ export function ExpiryTimeline({ positions }: ExpiryTimelineProps) {
 
   if (buckets.length === 0) {
     return (
-      <div className="py-4 text-center text-sm text-muted-foreground">
+      <div className="py-4 text-center font-mono text-sm text-muted-foreground">
         No upcoming expiries
       </div>
     );
@@ -55,7 +55,7 @@ export function ExpiryTimeline({ positions }: ExpiryTimelineProps) {
 
   return (
     <div className="space-y-3">
-      <h4 className="text-sm font-semibold text-muted-foreground">
+      <h4 className="font-mono text-sm font-semibold text-muted-foreground">
         Upcoming Expiries
       </h4>
       <div className="flex items-end gap-2">
@@ -64,26 +64,26 @@ export function ExpiryTimeline({ positions }: ExpiryTimelineProps) {
           const isSoon = bucket.daysUntil <= 3;
           return (
             <div key={bucket.expiry} className="flex flex-col items-center gap-1">
-              <span className="text-xs font-mono text-muted-foreground">
+              <span className="font-mono text-xs text-muted-foreground">
                 {bucket.count}
               </span>
               <div
                 className={cn(
-                  "w-10 rounded-t",
+                  "w-10 rounded-t border-2",
                   isUrgent
-                    ? "bg-destructive"
+                    ? "border-destructive bg-destructive/10"
                     : isSoon
-                    ? "bg-warning"
-                    : "bg-primary"
+                    ? "border-warning bg-warning/10"
+                    : "border-foreground bg-foreground/10"
                 )}
                 style={{ height: `${Math.max(20, bucket.count * 20)}px` }}
               />
-              <span className="text-[10px] text-muted-foreground">
+              <span className="font-mono text-[10px] text-muted-foreground">
                 {formatExpiryTimestamp(bucket.timestamp)}
               </span>
               <span
                 className={cn(
-                  "text-[10px] font-medium",
+                  "font-mono text-[10px] font-medium",
                   isUrgent
                     ? "text-destructive"
                     : isSoon

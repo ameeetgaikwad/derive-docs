@@ -20,12 +20,12 @@ export function Tooltip({ content, children, side = "top" }: TooltipProps) {
             side={side}
             sideOffset={4}
             className={cn(
-              "z-50 max-w-xs rounded-md bg-foreground px-3 py-1.5 text-xs text-background shadow-md",
+              "z-50 max-w-xs rounded-md border-2 border-border bg-card px-3 py-1.5 text-xs font-mono text-foreground shadow-md",
               "animate-in fade-in-0 zoom-in-95"
             )}
           >
             {content}
-            <TooltipPrimitive.Arrow className="fill-foreground" />
+            <TooltipPrimitive.Arrow className="fill-border" />
           </TooltipPrimitive.Content>
         </TooltipPrimitive.Portal>
       </TooltipPrimitive.Root>

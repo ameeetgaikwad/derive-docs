@@ -12,9 +12,9 @@ export function StrategyPreviewPanel({ preview }: StrategyPreviewPanelProps) {
   return (
     <div className="space-y-4">
       {/* Instrument */}
-      <div className="rounded-md bg-secondary p-3">
-        <p className="text-xs text-muted-foreground">Selected Instrument</p>
-        <p className="mt-0.5 text-sm font-medium">
+      <div className="rounded-md border-2 border-border/30 bg-secondary p-3">
+        <p className="font-mono text-xs text-muted-foreground">Selected Instrument</p>
+        <p className="mt-0.5 font-mono text-sm font-medium">
           {formatInstrumentName(preview.instrument.instrument_name)}
         </p>
       </div>
@@ -28,36 +28,36 @@ export function StrategyPreviewPanel({ preview }: StrategyPreviewPanelProps) {
       />
 
       {/* Details */}
-      <div className="space-y-2 text-sm">
+      <div className="space-y-2 font-mono text-sm">
         <div className="flex justify-between">
           <span className="text-muted-foreground">Spot Price</span>
-          <span className="font-mono">{formatUsd(preview.spotPrice)}</span>
+          <span>{formatUsd(preview.spotPrice)}</span>
         </div>
         <div className="flex justify-between">
           <span className="text-muted-foreground">Strike Price</span>
-          <span className="font-mono">{formatUsd(preview.strikePrice)}</span>
+          <span>{formatUsd(preview.strikePrice)}</span>
         </div>
         <div className="flex justify-between">
           <span className="text-muted-foreground">
             {preview.strategy.direction === "buy" ? "Premium (Cost)" : "Premium (Income)"}
           </span>
-          <span className="font-mono">{formatUsd(preview.estimatedCost)}</span>
+          <span>{formatUsd(preview.estimatedCost)}</span>
         </div>
-        <div className="flex justify-between border-t border-border pt-2">
+        <div className="flex justify-between border-t-2 border-border pt-2">
           <span className="text-muted-foreground">Breakeven</span>
-          <span className="font-mono font-medium">
+          <span className="font-medium">
             {formatUsd(preview.breakeven)}
           </span>
         </div>
         <div className="flex justify-between">
           <span className="text-muted-foreground">Max Loss</span>
-          <span className="font-mono text-destructive">
+          <span className="text-destructive">
             {preview.maxLoss < 0 ? "Unlimited" : formatUsd(preview.maxLoss)}
           </span>
         </div>
         <div className="flex justify-between">
           <span className="text-muted-foreground">Max Gain</span>
-          <span className="font-mono text-success">
+          <span className="text-success">
             {preview.maxGain === null
               ? "Unlimited"
               : formatUsd(preview.maxGain)}

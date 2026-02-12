@@ -15,7 +15,7 @@ export function OpenOrdersTable({ orders }: OpenOrdersTableProps) {
 
   if (orders.length === 0) {
     return (
-      <div className="py-8 text-center text-sm text-muted-foreground">
+      <div className="py-8 text-center font-mono text-sm text-muted-foreground">
         No open orders
       </div>
     );
@@ -23,9 +23,9 @@ export function OpenOrdersTable({ orders }: OpenOrdersTableProps) {
 
   return (
     <div className="overflow-x-auto">
-      <table className="w-full text-sm">
+      <table className="w-full font-mono text-sm">
         <thead>
-          <tr className="border-b border-border text-xs text-muted-foreground">
+          <tr className="border-b-2 border-border text-xs text-muted-foreground">
             <th className="pb-2 text-left font-medium">Instrument</th>
             <th className="pb-2 text-left font-medium">Side</th>
             <th className="pb-2 text-right font-medium">Size</th>
@@ -41,7 +41,7 @@ export function OpenOrdersTable({ orders }: OpenOrdersTableProps) {
             return (
               <tr
                 key={order.order_id}
-                className="border-b border-border/50 transition-colors hover:bg-secondary/50"
+                className="border-b border-border/30 transition-colors hover:bg-secondary/50"
               >
                 <td className="py-3 font-medium">
                   {formatInstrumentName(order.instrument_name)}
@@ -49,26 +49,26 @@ export function OpenOrdersTable({ orders }: OpenOrdersTableProps) {
                 <td className="py-3">
                   <span
                     className={cn(
-                      "rounded px-1.5 py-0.5 text-xs font-medium",
+                      "rounded border px-1.5 py-0.5 text-xs font-medium",
                       isBuy
-                        ? "bg-success/10 text-success"
-                        : "bg-destructive/10 text-destructive"
+                        ? "border-success/30 bg-success/5 text-success"
+                        : "border-destructive/30 bg-destructive/5 text-destructive"
                     )}
                   >
                     {isBuy ? "BUY" : "SELL"}
                   </span>
                 </td>
-                <td className="py-3 text-right font-mono">
+                <td className="py-3 text-right">
                   {formatAmount(order.amount)}
                 </td>
-                <td className="py-3 text-right font-mono text-muted-foreground">
+                <td className="py-3 text-right text-muted-foreground">
                   {formatAmount(order.filled_amount)}
                 </td>
-                <td className="py-3 text-right font-mono">
+                <td className="py-3 text-right">
                   {formatUsd(order.limit_price)}
                 </td>
                 <td className="py-3 text-right">
-                  <span className="rounded bg-warning/10 px-1.5 py-0.5 text-xs text-warning">
+                  <span className="rounded border border-warning/30 bg-warning/5 px-1.5 py-0.5 text-xs text-warning">
                     {order.status}
                   </span>
                 </td>

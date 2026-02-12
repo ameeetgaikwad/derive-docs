@@ -16,9 +16,9 @@ interface StrategyCardProps {
 }
 
 const RISK_COLORS = {
-  low: "bg-success/10 text-success",
-  medium: "bg-warning/10 text-warning",
-  high: "bg-destructive/10 text-destructive",
+  low: "border-success/50 bg-success/5 text-success",
+  medium: "border-warning/50 bg-warning/5 text-warning",
+  high: "border-destructive/50 bg-destructive/5 text-destructive",
 };
 
 export function StrategyCard({ strategy }: StrategyCardProps) {
@@ -34,22 +34,22 @@ export function StrategyCard({ strategy }: StrategyCardProps) {
   };
 
   return (
-    <Card className="overflow-hidden">
+    <Card terminalPath={`~/strategies/${strategy.id}`} className="overflow-hidden">
       {/* Header */}
       <button
-        className="w-full text-left p-6 transition-colors hover:bg-secondary/30"
+        className="w-full text-left transition-colors hover:bg-secondary/30"
         onClick={() => setExpanded(!expanded)}
       >
         <div className="flex items-start justify-between">
           <div>
-            <h3 className="text-lg font-semibold">{strategy.name}</h3>
-            <p className="mt-1 text-sm text-muted-foreground">
+            <h3 className="font-mono text-lg font-semibold">{strategy.name}</h3>
+            <p className="mt-1 font-mono text-sm text-muted-foreground">
               {strategy.shortDescription}
             </p>
           </div>
           <span
             className={cn(
-              "rounded-full px-2.5 py-0.5 text-xs font-medium",
+              "rounded-md border px-2.5 py-0.5 font-mono text-xs font-medium",
               RISK_COLORS[strategy.riskLevel]
             )}
           >
@@ -57,11 +57,11 @@ export function StrategyCard({ strategy }: StrategyCardProps) {
           </span>
         </div>
 
-        <p className="mt-3 text-xs text-muted-foreground">
+        <p className="mt-3 font-mono text-xs text-muted-foreground">
           {strategy.description}
         </p>
 
-        <div className="mt-3 flex items-center gap-4 text-xs text-muted-foreground">
+        <div className="mt-3 flex items-center gap-4 font-mono text-xs text-muted-foreground">
           <span>
             Max Loss: <span className="text-destructive">{strategy.maxLoss}</span>
           </span>
@@ -73,19 +73,19 @@ export function StrategyCard({ strategy }: StrategyCardProps) {
 
       {/* Expanded preview + execution */}
       {expanded && (
-        <div className="border-t border-border p-6 space-y-4">
+        <div className="border-t-2 border-border space-y-4 p-6 pt-4">
           {isLoading ? (
             <div className="space-y-2">
-              <div className="h-4 w-32 animate-pulse rounded bg-muted" />
-              <div className="h-24 animate-pulse rounded bg-muted" />
-              <div className="h-4 w-48 animate-pulse rounded bg-muted" />
+              <div className="h-4 w-32 animate-pulse rounded bg-secondary" />
+              <div className="h-24 animate-pulse rounded bg-secondary" />
+              <div className="h-4 w-48 animate-pulse rounded bg-secondary" />
             </div>
           ) : preview ? (
             <>
               <StrategyPreviewPanel preview={preview} />
 
               <div>
-                <label className="mb-1 block text-xs text-muted-foreground">
+                <label className="mb-1 block font-mono text-xs text-muted-foreground">
                   Amount (contracts)
                 </label>
                 <Input
@@ -111,7 +111,7 @@ export function StrategyCard({ strategy }: StrategyCardProps) {
               </Button>
             </>
           ) : (
-            <p className="text-sm text-muted-foreground">
+            <p className="font-mono text-sm text-muted-foreground">
               No suitable instrument found for this strategy right now.
             </p>
           )}

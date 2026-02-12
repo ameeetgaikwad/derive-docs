@@ -26,13 +26,14 @@ export function ClientShell({ children }: { children: ReactNode }) {
       <Header />
       <main className="mx-auto max-w-7xl px-4 py-6">{children}</main>
       <Toaster
-        theme="dark"
+        theme="light"
         position="bottom-right"
         toastOptions={{
           style: {
             background: "var(--card)",
-            border: "1px solid var(--border)",
+            border: "2px solid var(--border)",
             color: "var(--foreground)",
+            fontFamily: "var(--font-mono), monospace",
           },
         }}
       />

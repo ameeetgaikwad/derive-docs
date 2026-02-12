@@ -63,7 +63,7 @@ export function OptionChain({ onSelectInstrument }: OptionChainProps) {
     return (
       <div className="space-y-2">
         {Array.from({ length: 8 }).map((_, i) => (
-          <div key={i} className="h-10 animate-pulse rounded bg-muted" />
+          <div key={i} className="h-10 animate-pulse rounded bg-secondary" />
         ))}
       </div>
     );
@@ -71,7 +71,7 @@ export function OptionChain({ onSelectInstrument }: OptionChainProps) {
 
   if (expiryGroups.length === 0) {
     return (
-      <div className="py-8 text-center text-muted-foreground">
+      <div className="py-8 text-center font-mono text-muted-foreground">
         No active ETH options found.
       </div>
     );
@@ -90,9 +90,9 @@ export function OptionChain({ onSelectInstrument }: OptionChainProps) {
               key={group.expiry}
               value={String(group.expiry)}
               className={cn(
-                "shrink-0 rounded-md px-3 py-1.5 text-xs font-medium transition-colors",
-                "data-[state=active]:bg-primary data-[state=active]:text-primary-foreground",
-                "data-[state=inactive]:text-muted-foreground data-[state=inactive]:hover:bg-secondary"
+                "shrink-0 rounded-md border-2 px-3 py-1.5 font-mono text-xs font-medium transition-colors",
+                "data-[state=active]:border-border data-[state=active]:bg-foreground data-[state=active]:text-primary-foreground",
+                "data-[state=inactive]:border-transparent data-[state=inactive]:text-muted-foreground data-[state=inactive]:hover:bg-secondary"
               )}
             >
               {formatExpiryTimestamp(group.expiry)}
@@ -106,9 +106,9 @@ export function OptionChain({ onSelectInstrument }: OptionChainProps) {
 
       {/* Option Chain Table */}
       <div className="overflow-x-auto">
-        <table className="w-full text-sm">
+        <table className="w-full font-mono text-sm">
           <thead>
-            <tr className="border-b border-border text-xs text-muted-foreground">
+            <tr className="border-b-2 border-border text-xs text-muted-foreground">
               <th className="pb-2 text-right font-medium">Bid</th>
               <th className="pb-2 text-right font-medium">Ask</th>
               <th className="pb-2 text-right font-medium">Mark</th>
@@ -140,8 +140,8 @@ export function OptionChain({ onSelectInstrument }: OptionChainProps) {
                 <tr
                   key={row.strike}
                   className={cn(
-                    "border-b border-border/50 transition-colors hover:bg-secondary/50",
-                    isAtm && "bg-primary/5"
+                    "border-b border-border/30 transition-colors hover:bg-secondary/50",
+                    isAtm && "bg-accent/5"
                   )}
                 >
                   {/* Call side */}
@@ -181,8 +181,8 @@ export function OptionChain({ onSelectInstrument }: OptionChainProps) {
                   {/* Strike */}
                   <td
                     className={cn(
-                      "py-2 text-center font-mono font-bold",
-                      isAtm && "text-primary"
+                      "py-2 text-center font-bold",
+                      isAtm && "text-accent"
                     )}
                   >
                     {row.strike.toLocaleString()}

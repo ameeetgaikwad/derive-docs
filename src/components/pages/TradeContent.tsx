@@ -37,9 +37,9 @@ function TradeInner() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold">Trade</h1>
+        <h1 className="font-mono text-2xl font-bold">Trade</h1>
         {spotPrice && (
-          <div className="text-right">
+          <div className="text-right font-mono">
             <span className="text-sm text-muted-foreground">ETH </span>
             <span className="text-lg font-bold">{formatUsd(spotPrice)}</span>
           </div>
@@ -47,10 +47,10 @@ function TradeInner() {
       </div>
 
       <div className="grid gap-4 lg:grid-cols-[1fr_280px_300px]">
-        <div className="min-w-0 overflow-hidden rounded-lg border border-border bg-card p-4">
+        <div className="min-w-0 overflow-hidden rounded-md border-2 border-border bg-card p-4">
           <OptionChain onSelectInstrument={handleSelectInstrument} />
         </div>
-        <div className="rounded-lg border border-border bg-card p-4">
+        <div className="rounded-md border-2 border-border bg-card p-4">
           <OrderbookDisplay instrumentName={selectedInstrument} />
         </div>
         <div>
@@ -66,8 +66,8 @@ export default function TradeContent() {
     <Suspense
       fallback={
         <div className="space-y-4">
-          <h1 className="text-2xl font-bold">Trade</h1>
-          <div className="h-96 animate-pulse rounded-lg bg-muted" />
+          <h1 className="font-mono text-2xl font-bold">Trade</h1>
+          <div className="h-96 animate-pulse rounded-md bg-secondary" />
         </div>
       }
     >
