@@ -104,14 +104,21 @@ export function daysUntilExpiry(expiryTimestamp: number): number {
 
 /**
  * Format a USD price string for display.
+ * Auto-selects decimal precision based on magnitude:
+ *   >= $1      → 2 decimals  ($12.50)
+ *   >= $0.01   → 4 decimals  ($0.1500)
+ *   < $0.01    → 6 decimals  ($0.004500)
+ * Pass explicit `decimals` to override.
  */
-export function formatUsd(value: string | number, decimals = 2): string {
+export function formatUsd(value: string | number, decimals?: number): string {
   const num = typeof value === "string" ? parseFloat(value) : value;
+  const abs = Math.abs(num);
+  const d = decimals ?? (abs >= 1 ? 2 : abs >= 0.01 ? 4 : 6);
   return num.toLocaleString("en-US", {
     style: "currency",
     currency: "USD",
-    minimumFractionDigits: decimals,
-    maximumFractionDigits: decimals,
+    minimumFractionDigits: d,
+    maximumFractionDigits: d,
   });
 }
 

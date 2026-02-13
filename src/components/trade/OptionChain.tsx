@@ -2,7 +2,7 @@
 
 import { useMemo } from "react";
 import { useInstruments } from "@/hooks/market/useInstruments";
-import { useTickers } from "@/hooks/market/useTickers";
+import { useLiveTickers } from "@/hooks/market/useLiveTickers";
 import { useSpotPrice } from "@/hooks/market/useSpotPrice";
 import { useMarketsStore } from "@/stores/markets";
 import {
@@ -40,19 +40,12 @@ export function OptionChain({ onSelectInstrument }: OptionChainProps) {
     [instruments, activeExpiry]
   );
 
-  // Get ticker data for the expiry's instruments
+  // Get ticker data for the expiry's instruments (REST + WS live overlay)
   const instrumentNames = useMemo(
     () => expiryInstruments.map((i) => i.instrument_name),
     [expiryInstruments]
   );
-  const tickerQueries = useTickers(instrumentNames);
-  const tickerMap = useMemo(() => {
-    const map = new Map<string, (typeof tickerQueries)[0]["data"]>();
-    tickerQueries.forEach((q, idx) => {
-      if (q.data) map.set(instrumentNames[idx], q.data);
-    });
-    return map;
-  }, [tickerQueries, instrumentNames]);
+  const { tickerMap } = useLiveTickers(instrumentNames);
 
   const optionChain = useMemo(
     () => buildOptionChain(expiryInstruments, tickerMap as never),
