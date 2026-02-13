@@ -1,7 +1,12 @@
 "use client";
 
 import { useState } from "react";
-import { useDeposit, useWithdraw } from "@/hooks/mutations/useDeposit";
+import {
+  useDeposit,
+  useWithdraw,
+  type DepositStep,
+  type WithdrawStep,
+} from "@/hooks/mutations/useDeposit";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
@@ -9,6 +14,22 @@ import { formatUsd } from "@/lib/derive/utils";
 import type { Collateral } from "@/lib/derive/types";
 
 type Tab = "deposit" | "withdraw";
+
+const DEPOSIT_STEP_LABELS: Record<DepositStep, string> = {
+  idle: "",
+  transferring: "Transferring USDC to wallet...",
+  signing: "Signing deposit...",
+  confirming: "Confirming deposit...",
+  done: "Done!",
+};
+
+const WITHDRAW_STEP_LABELS: Record<WithdrawStep, string> = {
+  idle: "",
+  signing: "Signing withdrawal...",
+  confirming: "Confirming withdrawal...",
+  transferring: "Transferring USDC to your wallet...",
+  done: "Done!",
+};
 
 interface FundsModalProps {
   open: boolean;
@@ -27,20 +48,23 @@ export function FundsModal({ open, onClose, collaterals }: FundsModalProps) {
   const usdcCollateral = collaterals.find((c) => c.asset_name === "USDC");
   const usdcBalance = usdcCollateral ? parseFloat(usdcCollateral.amount) : 0;
 
-  const mutation = tab === "deposit" ? deposit : withdraw;
-  const isSubmitting = mutation.isPending;
+  const isDeposit = tab === "deposit";
+  const isSubmitting = isDeposit ? deposit.isPending : withdraw.isPending;
 
   const handleSubmit = () => {
     const val = parseFloat(amount);
     if (!val || val <= 0) return;
-    mutation.mutate(
-      { amount },
-      {
-        onSuccess: () => {
-          setAmount("");
-        },
-      }
-    );
+    if (isDeposit) {
+      deposit.mutate(
+        { amount },
+        { onSuccess: () => setAmount("") }
+      );
+    } else {
+      withdraw.mutate(
+        { amount },
+        { onSuccess: () => setAmount("") }
+      );
+    }
   };
 
   const handleMaxClick = () => {
@@ -48,6 +72,21 @@ export function FundsModal({ open, onClose, collaterals }: FundsModalProps) {
       setAmount(usdcBalance.toString());
     }
   };
+
+  const buttonLabel = () => {
+    if (isDeposit && deposit.isPending) {
+      return DEPOSIT_STEP_LABELS[deposit.depositStep] || "Processing...";
+    }
+    if (!isDeposit && withdraw.isPending) {
+      return WITHDRAW_STEP_LABELS[withdraw.withdrawStep] || "Processing...";
+    }
+    return isDeposit
+      ? `Deposit ${amount ? formatUsd(amount) : "USDC"}`
+      : `Withdraw ${amount ? formatUsd(amount) : "USDC"}`;
+  };
+
+  const error = isDeposit ? deposit.error : withdraw.error;
+  const isError = isDeposit ? deposit.isError : withdraw.isError;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
@@ -133,6 +172,20 @@ export function FundsModal({ open, onClose, collaterals }: FundsModalProps) {
             </div>
           </div>
 
+          {/* Step indicator */}
+          {isDeposit && deposit.isPending && (
+            <div className="flex items-center gap-2 font-mono text-xs text-muted-foreground">
+              <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-success" />
+              {DEPOSIT_STEP_LABELS[deposit.depositStep]}
+            </div>
+          )}
+          {!isDeposit && withdraw.isPending && (
+            <div className="flex items-center gap-2 font-mono text-xs text-muted-foreground">
+              <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-destructive" />
+              {WITHDRAW_STEP_LABELS[withdraw.withdrawStep]}
+            </div>
+          )}
+
           {/* Submit button */}
           <Button
             onClick={handleSubmit}
@@ -140,17 +193,13 @@ export function FundsModal({ open, onClose, collaterals }: FundsModalProps) {
             variant={tab === "deposit" ? "success" : "destructive"}
             className="w-full"
           >
-            {isSubmitting
-              ? "Signing..."
-              : tab === "deposit"
-              ? `Deposit ${amount ? formatUsd(amount) : "USDC"}`
-              : `Withdraw ${amount ? formatUsd(amount) : "USDC"}`}
+            {buttonLabel()}
           </Button>
 
           {/* Error display */}
-          {mutation.isError && (
+          {isError && error && (
             <p className="font-mono text-xs text-destructive">
-              {mutation.error.message}
+              {error.message}
             </p>
           )}
         </div>

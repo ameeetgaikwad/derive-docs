@@ -3,41 +3,94 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useDerive } from "@/providers/DeriveProvider";
 import { useAccountStore } from "@/stores/account";
-import { useAccount, useWalletClient } from "wagmi";
+import { useAccount, useWalletClient, useSwitchChain } from "wagmi";
 import {
   encodeDepositData,
   encodeWithdrawData,
   toTokenAmount,
   signAction,
   signActionWithWallet,
-  getActionHash,
-  toTypedDataHash,
-  getDomainSeparator,
   generateNonce,
   getSignatureExpiry,
 } from "@/lib/derive/signing";
 import { getConfig, USDC_DECIMALS } from "@/lib/derive/constants";
-import { keccak256 } from "viem";
-import type { Hex } from "viem";
+import type { Hex, WalletClient } from "viem";
+import { erc20Abi, encodeFunctionData } from "viem";
+import { waitForTransactionReceipt } from "wagmi/actions";
+import { useConfig as useWagmiConfig } from "wagmi";
+import type { Config } from "wagmi";
 import { toast } from "sonner";
+import { useState } from "react";
 
 /** Strip 0x prefix from signature — Derive API expects raw hex (130 chars, no prefix). */
 function stripSigPrefix(sig: string): string {
   return sig.startsWith("0x") ? sig.slice(2) : sig;
 }
 
+/** Deposit step tracking for UI feedback */
+export type DepositStep = "idle" | "transferring" | "signing" | "confirming" | "done";
+
+/** Withdraw step tracking for UI feedback */
+export type WithdrawStep = "idle" | "signing" | "confirming" | "transferring" | "done";
+
 interface DepositParams {
   amount: string; // USDC amount (human readable, e.g. "100")
 }
 
 /**
+ * Transfer USDC from EOA to SCW on Derive Chain via ERC-20 transfer.
+ * Returns the transaction hash once confirmed.
+ */
+async function transferUsdcToScw({
+  walletClient,
+  wagmiConfig,
+  switchChainAsync,
+  deriveWallet,
+  amount,
+}: {
+  walletClient: WalletClient;
+  wagmiConfig: Config;
+  switchChainAsync: ReturnType<typeof useSwitchChain>["switchChainAsync"];
+  deriveWallet: `0x${string}`;
+  amount: string;
+}): Promise<Hex> {
+  const config = getConfig();
+  const scaledAmount = toTokenAmount(amount, USDC_DECIMALS);
+
+  // Ensure we're on Derive Chain
+  if (walletClient.chain?.id !== config.chainId) {
+    await switchChainAsync({ chainId: config.chainId });
+  }
+
+  const [account] = await walletClient.getAddresses();
+
+  // ERC-20 transfer: EOA → SCW
+  const txHash = await walletClient.writeContract({
+    address: config.usdcAddress,
+    abi: erc20Abi,
+    functionName: "transfer",
+    args: [deriveWallet, scaledAmount],
+    account,
+    chain: { id: config.chainId } as any,
+  });
+
+  // Wait for on-chain confirmation
+  await waitForTransactionReceipt(wagmiConfig, { hash: txHash });
+
+  return txHash;
+}
+
+/**
  * Create a new subaccount with initial deposit.
  * Uses EOA wallet signing (signTypedData) since no session key exists yet.
+ * Transfers USDC from EOA → SCW first.
  */
 export function useCreateSubaccount() {
   const { restClient, deriveWallet } = useDerive();
   const { address } = useAccount();
   const { data: walletClient } = useWalletClient();
+  const { switchChainAsync } = useSwitchChain();
+  const wagmiConfig = useWagmiConfig();
   const store = useAccountStore();
 
   return useMutation({
@@ -46,21 +99,28 @@ export function useCreateSubaccount() {
         throw new Error("Wallet not connected or Derive wallet not resolved");
       }
 
+      // Step 1: Transfer USDC from EOA → SCW
+      await transferUsdcToScw({
+        walletClient,
+        wagmiConfig,
+        switchChainAsync,
+        deriveWallet,
+        amount,
+      });
+
+      // Step 2: Sign deposit action with wallet
       const config = getConfig();
       const nonce = generateNonce();
       const signatureExpiry = getSignatureExpiry();
 
-      // Deposit module uses CashAsset wrapper address, NOT raw USDC ERC-20
       const depositData = encodeDepositData({
         amount: toTokenAmount(amount, USDC_DECIMALS),
         asset: config.usdcCashAsset,
         managerForNewAccount: config.standardManager,
       });
 
-      // Sign with wallet (EOA) via EIP-712 signTypedData
-      // No session key exists yet, so EOA must sign directly
       const signature = await signActionWithWallet({
-        subaccountId: 0n, // 0 for new account creation
+        subaccountId: 0n,
         nonce: BigInt(nonce),
         module: config.depositModule,
         data: depositData,
@@ -71,6 +131,7 @@ export function useCreateSubaccount() {
           walletClient.signTypedData(args) as Promise<Hex>,
       });
 
+      // Step 3: Submit to Derive API
       const result = await restClient.createSubaccount({
         wallet: deriveWallet,
         amount,
@@ -96,78 +157,46 @@ export function useCreateSubaccount() {
 
 /**
  * Deposit to an existing subaccount.
- * Uses session key signing (same as order submission).
+ * Transfers USDC from EOA → SCW first, then signs internal deposit.
  */
 export function useDeposit() {
   const { restClient, subaccountId, deriveWallet } = useDerive();
   const { sessionKey } = useAccountStore();
+  const { data: walletClient } = useWalletClient();
+  const { switchChainAsync } = useSwitchChain();
+  const wagmiConfig = useWagmiConfig();
   const queryClient = useQueryClient();
+  const [depositStep, setDepositStep] = useState<DepositStep>("idle");
 
-  return useMutation({
+  const mutation = useMutation({
     mutationFn: async ({ amount }: DepositParams) => {
-      if (!subaccountId || !sessionKey || !deriveWallet) {
-        throw new Error("Not authenticated");
+      if (!subaccountId || !sessionKey || !deriveWallet || !walletClient) {
+        throw new Error("Not authenticated or wallet not connected");
       }
 
+      // Step 1: Transfer USDC from EOA → SCW on Derive Chain
+      setDepositStep("transferring");
+      await transferUsdcToScw({
+        walletClient,
+        wagmiConfig,
+        switchChainAsync,
+        deriveWallet,
+        amount,
+      });
+
+      // Step 2: Sign internal deposit (SCW → subaccount)
+      setDepositStep("signing");
       const config = getConfig();
       const nonce = generateNonce();
       const signatureExpiry = getSignatureExpiry();
 
       const scaledAmount = toTokenAmount(amount, USDC_DECIMALS);
-      // Deposit module also uses CashAsset wrapper address, NOT raw USDC ERC-20
       const depositData = encodeDepositData({
         amount: scaledAmount,
         asset: config.usdcCashAsset,
         managerForNewAccount: config.standardManager,
       });
 
-      // === DEBUG: Log intermediate values ===
-      const { privateKeyToAccount } = await import("viem/accounts");
-      const signerAccount = privateKeyToAccount(sessionKey.private_key);
-      const dataHash = keccak256(depositData);
-      const actionHash = getActionHash({
-        subaccountId: BigInt(subaccountId),
-        nonce: BigInt(nonce),
-        module: config.depositModule,
-        data: depositData,
-        expiry: BigInt(signatureExpiry),
-        owner: deriveWallet,
-        signer: signerAccount.address,
-      });
-      const domainSep = getDomainSeparator();
-      const typedDataHash = toTypedDataHash(domainSep, actionHash);
-      console.log("[Deposit DEBUG] === Our Values ===");
-      console.log("[Deposit DEBUG] amount (scaled):", scaledAmount.toString());
-      console.log("[Deposit DEBUG] asset:", config.usdcAddress);
-      console.log("[Deposit DEBUG] manager:", config.standardManager);
-      console.log("[Deposit DEBUG] depositModule:", config.depositModule);
-      console.log("[Deposit DEBUG] encodedData:", depositData);
-      console.log("[Deposit DEBUG] dataHash:", dataHash);
-      console.log("[Deposit DEBUG] actionHash:", actionHash);
-      console.log("[Deposit DEBUG] typedDataHash:", typedDataHash);
-
-      try {
-        const debugResult = await restClient.depositDebug({
-          subaccount_id: subaccountId,
-          amount,
-          asset_name: "USDC",
-          nonce,
-          signature_expiry_sec: signatureExpiry,
-          signer: sessionKey.public_key,
-        });
-        console.log("[Deposit DEBUG] === Server Values ===");
-        console.log("[Deposit DEBUG] server encoded_data:", debugResult.encoded_data);
-        console.log("[Deposit DEBUG] server encoded_data_hashed:", debugResult.encoded_data_hashed);
-        console.log("[Deposit DEBUG] server action_hash:", debugResult.action_hash);
-        console.log("[Deposit DEBUG] server typed_data_hash:", debugResult.typed_data_hash);
-        console.log("[Deposit DEBUG] data match:", debugResult.encoded_data_hashed === dataHash);
-        console.log("[Deposit DEBUG] action match:", debugResult.action_hash === actionHash);
-        console.log("[Deposit DEBUG] typed_data match:", debugResult.typed_data_hash === typedDataHash);
-      } catch (debugErr) {
-        console.warn("[Deposit DEBUG] deposit_debug failed:", (debugErr as Error).message);
-      }
-
-      // Sign with session key (raw ECDSA) — same as order signing
       const signature = await signAction({
         subaccountId: BigInt(subaccountId),
         nonce: BigInt(nonce),
@@ -178,6 +207,8 @@ export function useDeposit() {
         sessionPrivateKey: sessionKey.private_key,
       });
 
+      // Step 3: Submit deposit to Derive API
+      setDepositStep("confirming");
       const result = await restClient.deposit({
         subaccount_id: subaccountId,
         amount,
@@ -188,105 +219,127 @@ export function useDeposit() {
         signature: stripSigPrefix(signature),
       });
 
+      setDepositStep("done");
       return result;
     },
     onSuccess: () => {
       toast.success("Deposit successful!");
       queryClient.invalidateQueries({ queryKey: ["collaterals"] });
+      setDepositStep("idle");
     },
     onError: (error) => {
       toast.error(`Deposit failed: ${error.message}`);
+      setDepositStep("idle");
     },
   });
+
+  return { ...mutation, depositStep };
 }
 
 interface WithdrawParams {
   amount: string; // USDC amount (human readable, e.g. "100")
 }
 
+const LIGHT_ACCOUNT_EXECUTE_ABI = [{
+  name: "execute",
+  type: "function",
+  stateMutability: "nonpayable",
+  inputs: [
+    { name: "dest", type: "address" },
+    { name: "value", type: "uint256" },
+    { name: "func", type: "bytes" },
+  ],
+  outputs: [],
+}] as const;
+
+/**
+ * Transfer USDC from SCW → EOA via SCW.execute(usdc, 0, transfer(eoa, amount)).
+ * EOA calls SCW.execute so msg.sender = EOA (the owner), which LightAccount allows.
+ */
+async function transferUsdcFromScw({
+  walletClient,
+  wagmiConfig,
+  switchChainAsync,
+  deriveWallet,
+  eoaAddress,
+  amount,
+}: {
+  walletClient: WalletClient;
+  wagmiConfig: Config;
+  switchChainAsync: ReturnType<typeof useSwitchChain>["switchChainAsync"];
+  deriveWallet: `0x${string}`;
+  eoaAddress: `0x${string}`;
+  amount: string;
+}): Promise<Hex> {
+  const config = getConfig();
+  const scaledAmount = toTokenAmount(amount, USDC_DECIMALS);
+
+  // Ensure we're on Derive Chain
+  if (walletClient.chain?.id !== config.chainId) {
+    await switchChainAsync({ chainId: config.chainId });
+  }
+
+  // Inner call: ERC-20 transfer(eoa, amount)
+  const transferCalldata = encodeFunctionData({
+    abi: erc20Abi,
+    functionName: "transfer",
+    args: [eoaAddress, scaledAmount],
+  });
+
+  // Outer call: SCW.execute(usdcAddress, 0, transferCalldata)
+  const executeCalldata = encodeFunctionData({
+    abi: LIGHT_ACCOUNT_EXECUTE_ABI,
+    functionName: "execute",
+    args: [config.usdcAddress, 0n, transferCalldata],
+  });
+
+  const [account] = await walletClient.getAddresses();
+
+  const txHash = await walletClient.sendTransaction({
+    to: deriveWallet,
+    data: executeCalldata,
+    value: 0n,
+    account,
+    chain: { id: config.chainId } as any,
+  });
+
+  await waitForTransactionReceipt(wagmiConfig, { hash: txHash });
+
+  return txHash;
+}
+
 /**
  * Withdraw from an existing subaccount.
- * Uses session key signing (same as order submission).
+ * Signs internal withdraw (subaccount → SCW), then transfers USDC from SCW → EOA on-chain.
  */
 export function useWithdraw() {
   const { restClient, subaccountId, deriveWallet } = useDerive();
+  const { address } = useAccount();
+  const { data: walletClient } = useWalletClient();
+  const { switchChainAsync } = useSwitchChain();
+  const wagmiConfig = useWagmiConfig();
   const { sessionKey } = useAccountStore();
   const queryClient = useQueryClient();
+  const [withdrawStep, setWithdrawStep] = useState<WithdrawStep>("idle");
 
-  return useMutation({
+  const mutation = useMutation({
     mutationFn: async ({ amount }: WithdrawParams) => {
-      if (!subaccountId || !sessionKey || !deriveWallet) {
-        throw new Error("Not authenticated");
+      if (!subaccountId || !sessionKey || !deriveWallet || !walletClient || !address) {
+        throw new Error("Not authenticated or wallet not connected");
       }
 
+      // Step 1: Sign internal withdraw (subaccount → SCW on Derive ledger)
+      setWithdrawStep("signing");
       const config = getConfig();
       const nonce = generateNonce();
       const signatureExpiry = getSignatureExpiry();
       const scaledAmount = toTokenAmount(amount, USDC_DECIMALS);
 
-      // Withdrawal uses CashAsset wrapper address, NOT the raw USDC ERC-20 address
       const withdrawData = encodeWithdrawData({
         amount: scaledAmount,
         asset: config.usdcCashAsset,
       });
 
-      // === DEBUG: Log all intermediate values ===
-      const { privateKeyToAccount } = await import("viem/accounts");
-      const signerAccount = privateKeyToAccount(sessionKey.private_key);
-      const dataHash = keccak256(withdrawData);
-      const actionHash = getActionHash({
-        subaccountId: BigInt(subaccountId),
-        nonce: BigInt(nonce),
-        module: config.withdrawalModule,
-        data: withdrawData,
-        expiry: BigInt(signatureExpiry),
-        owner: deriveWallet,
-        signer: signerAccount.address,
-      });
-      const domainSep = getDomainSeparator();
-      const typedDataHash = toTypedDataHash(domainSep, actionHash);
-      console.log("[Withdraw DEBUG] === Intermediate Hash Values ===");
-      console.log("[Withdraw DEBUG] amount (human):", amount);
-      console.log("[Withdraw DEBUG] amount (scaled):", scaledAmount.toString());
-      console.log("[Withdraw DEBUG] USDC address:", config.usdcAddress);
-      console.log("[Withdraw DEBUG] withdrawalModule:", config.withdrawalModule);
-      console.log("[Withdraw DEBUG] subaccountId:", subaccountId);
-      console.log("[Withdraw DEBUG] nonce:", nonce);
-      console.log("[Withdraw DEBUG] signatureExpiry:", signatureExpiry);
-      console.log("[Withdraw DEBUG] owner (deriveWallet):", deriveWallet);
-      console.log("[Withdraw DEBUG] signer (from privkey):", signerAccount.address);
-      console.log("[Withdraw DEBUG] signer (stored pubkey):", sessionKey.public_key);
-      console.log("[Withdraw DEBUG] signer match:", signerAccount.address === sessionKey.public_key);
-      console.log("[Withdraw DEBUG] encodedData:", withdrawData);
-      console.log("[Withdraw DEBUG] dataHash:", dataHash);
-      console.log("[Withdraw DEBUG] actionHash:", actionHash);
-      console.log("[Withdraw DEBUG] domainSeparator:", domainSep);
-      console.log("[Withdraw DEBUG] typedDataHash:", typedDataHash);
-
-      // === Try calling withdraw_debug endpoint ===
-      try {
-        const debugResult = await restClient.withdrawDebug({
-          subaccount_id: subaccountId,
-          amount,
-          asset_name: "USDC",
-          nonce,
-          signature_expiry_sec: signatureExpiry,
-          signer: sessionKey.public_key,
-        });
-        console.log("[Withdraw DEBUG] === Server Debug Values ===");
-        console.log("[Withdraw DEBUG] server encoded_data:", debugResult.encoded_data);
-        console.log("[Withdraw DEBUG] server encoded_data_hashed:", debugResult.encoded_data_hashed);
-        console.log("[Withdraw DEBUG] server action_hash:", debugResult.action_hash);
-        console.log("[Withdraw DEBUG] server typed_data_hash:", debugResult.typed_data_hash);
-        console.log("[Withdraw DEBUG] === Comparison ===");
-        console.log("[Withdraw DEBUG] data match:", debugResult.encoded_data_hashed === dataHash);
-        console.log("[Withdraw DEBUG] action match:", debugResult.action_hash === actionHash);
-        console.log("[Withdraw DEBUG] typed_data match:", debugResult.typed_data_hash === typedDataHash);
-      } catch (debugErr) {
-        console.warn("[Withdraw DEBUG] withdraw_debug failed:", (debugErr as Error).message);
-      }
-
-      // Sign with session key (raw ECDSA) — same as order signing
       const signature = await signAction({
         subaccountId: BigInt(subaccountId),
         nonce: BigInt(nonce),
@@ -297,10 +350,8 @@ export function useWithdraw() {
         sessionPrivateKey: sessionKey.private_key,
       });
 
-      console.log("[Withdraw DEBUG] signature (raw):", signature);
-      console.log("[Withdraw DEBUG] signature (stripped):", stripSigPrefix(signature));
-      console.log("[Withdraw DEBUG] signature length:", stripSigPrefix(signature).length);
-
+      // Step 2: Submit withdraw to Derive API
+      setWithdrawStep("confirming");
       const result = await restClient.withdraw({
         subaccount_id: subaccountId,
         amount,
@@ -311,14 +362,30 @@ export function useWithdraw() {
         signature: stripSigPrefix(signature),
       });
 
+      // Step 3: Transfer USDC from SCW → EOA on-chain
+      setWithdrawStep("transferring");
+      await transferUsdcFromScw({
+        walletClient,
+        wagmiConfig,
+        switchChainAsync,
+        deriveWallet,
+        eoaAddress: address,
+        amount,
+      });
+
+      setWithdrawStep("done");
       return result;
     },
     onSuccess: () => {
       toast.success("Withdrawal successful!");
       queryClient.invalidateQueries({ queryKey: ["collaterals"] });
+      setWithdrawStep("idle");
     },
     onError: (error) => {
       toast.error(`Withdrawal failed: ${error.message}`);
+      setWithdrawStep("idle");
     },
   });
+
+  return { ...mutation, withdrawStep };
 }
