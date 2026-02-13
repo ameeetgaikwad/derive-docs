@@ -11,6 +11,7 @@ interface DeriveConfig {
   depositModule: `0x${string}`;
   withdrawalModule: `0x${string}`;
   usdcAddress: `0x${string}`;
+  usdcCashAsset: `0x${string}`;
   matching: `0x${string}`;
   subaccount: `0x${string}`;
   domainSeparator: `0x${string}`;
@@ -29,6 +30,7 @@ export const DERIVE_CONFIG: Record<DeriveEnv, DeriveConfig> = {
     depositModule: "0x43223Db33AdA0575D2E100829543f8B04A37a1ec",
     withdrawalModule: "0xe850641C5207dc5E9423fB15f89ae6031A05fd92",
     usdcAddress: "0xe80F2a02398BBf1ab2C9cc52caD1978159c215BD",
+    usdcCashAsset: "0x6caf294DaC985ff653d5aE75b4FF8E0A66025928",
     matching: "0x3cc154e220c2197c5337b7Bd13363DD127Bc0C6E",
     subaccount: "0xb9ed1cc0c50bca7a391a6819e9cAb466f5501d73",
     domainSeparator: "0x9bcf4dc06df5d8bf23af818d5716491b995020f377d3b7b64c29ed14e3dd1105",
@@ -45,6 +47,7 @@ export const DERIVE_CONFIG: Record<DeriveEnv, DeriveConfig> = {
     depositModule: "0x9B3FE5E5a3bcEa5df4E08c41Ce89C4e3Ff01Ace3",
     withdrawalModule: "0x9d0E8f5b25384C7310CB8C6aE32C8fbeb645d083",
     usdcAddress: "0x6879287835A86F50f784313dBEd5E5cCC5bb8481",
+    usdcCashAsset: "0x57B03E14d409ADC7fAb6CFc44b5886CAD2D5f02b",
     matching: "0xeB8d770ec18DB98Db922E9D83260A585b9F0DeAD",
     subaccount: "0xE7603DF191D699d8BD9891b821347dbAb889E5a5",
     domainSeparator: "0xd96e5f90797da7ec8dc4e276260c7f3f87fedf68775fbe1ef116e996fc60441b",
@@ -67,6 +70,9 @@ export const MAX_UINT256 = BigInt("0xfffffffffffffffffffffffffffffffffffffffffff
 
 // 18-decimal scale factor
 export const UNIT = BigInt("1000000000000000000"); // 10^18
+
+// USDC uses 6 decimals on Derive chain (standard ERC-20 USDC decimals)
+export const USDC_DECIMALS = 6;
 
 export function getConfig(env?: DeriveEnv): DeriveConfig {
   const e = env ?? ((process.env.NEXT_PUBLIC_DERIVE_ENV as DeriveEnv) || "mainnet");

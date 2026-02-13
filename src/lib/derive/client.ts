@@ -341,6 +341,42 @@ export class DeriveRestClient {
   }) {
     return this.rpc<{ status: string }>("private/deposit", params);
   }
+
+  /**
+   * Debug endpoint for withdraw signature verification.
+   * Returns the expected hashes so we can compare with our local computation.
+   */
+  async withdrawDebug(params: {
+    subaccount_id: number;
+    amount: string;
+    asset_name: string;
+    nonce: number;
+    signature_expiry_sec: number;
+    signer: string;
+  }) {
+    return this.rpc<{
+      encoded_data: string;
+      encoded_data_hashed: string;
+      action_hash: string;
+      typed_data_hash: string;
+    }>("public/withdraw_debug", params);
+  }
+
+  /**
+   * Withdraw from an existing subaccount.
+   * Requires EIP-712 signature from the wallet owner.
+   */
+  async withdraw(params: {
+    subaccount_id: number;
+    amount: string;
+    asset_name: string;
+    nonce: number;
+    signature_expiry_sec: number;
+    signer: string;
+    signature: string;
+  }) {
+    return this.rpc<{ status: string }>("private/withdraw", params);
+  }
 }
 
 export class DeriveApiError extends Error {

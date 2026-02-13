@@ -48,17 +48,43 @@ export function encodeTradeData(params: {
 }
 
 /**
+ * Scale a human-readable amount to token decimals.
+ * e.g., toTokenAmount("100", 6) → 100000000n (USDC has 6 decimals)
+ */
+export function toTokenAmount(value: string, decimals: number): bigint {
+  const [intPart, decPart = ""] = value.split(".");
+  const paddedDec = decPart.padEnd(decimals, "0").slice(0, decimals);
+  return BigInt(intPart) * BigInt(10 ** decimals) + BigInt(paddedDec);
+}
+
+/**
  * Encode deposit data for the deposit module.
  * ABI encode: (uint256 amount, address asset, address managerForNewAccount)
+ * Amount must be scaled to the token's native decimals (6 for USDC).
  */
 export function encodeDepositData(params: {
-  amount: bigint; // 18 decimals for USDC
+  amount: bigint; // Token-native decimals (6 for USDC)
   asset: Hex; // USDC contract address on Derive chain
   managerForNewAccount: Hex; // StandardManager address (for new accounts)
 }): Hex {
   return encodeAbiParameters(
     parseAbiParameters("uint256, address, address"),
     [params.amount, params.asset, params.managerForNewAccount]
+  );
+}
+
+/**
+ * Encode withdraw data for the withdrawal module.
+ * ABI encode: (address asset, uint256 amount) — address FIRST per Derive SDK.
+ * Amount must be scaled to the token's native decimals (6 for USDC).
+ */
+export function encodeWithdrawData(params: {
+  amount: bigint; // Token-native decimals (6 for USDC)
+  asset: Hex; // USDC contract address on Derive chain
+}): Hex {
+  return encodeAbiParameters(
+    parseAbiParameters("address, uint256"),
+    [params.asset, params.amount]
   );
 }
 
@@ -142,7 +168,35 @@ export async function signAction(params: {
 }
 
 /**
+ * Get the EIP-712 domain for the Matching contract.
+ * Domain: name="Matching", version="1.0", chainId, verifyingContract=matching address.
+ */
+export function getEip712Domain(env?: DeriveEnv) {
+  const config = getConfig(env);
+  return {
+    name: "Matching" as const,
+    version: "1.0" as const,
+    chainId: config.chainId,
+    verifyingContract: config.matching,
+  };
+}
+
+/** EIP-712 type definition for the Action struct. */
+const ACTION_TYPES = {
+  Action: [
+    { name: "subaccountId", type: "uint256" },
+    { name: "nonce", type: "uint256" },
+    { name: "module", type: "address" },
+    { name: "data", type: "bytes" },
+    { name: "expiry", type: "uint256" },
+    { name: "owner", type: "address" },
+    { name: "signer", type: "address" },
+  ],
+} as const;
+
+/**
  * Sign an action using an external wallet signer (e.g. MetaMask via walletClient).
+ * Uses EIP-712 signTypedData (eth_signTypedData_v4) — NOT signMessage which adds EIP-191 prefix.
  * Used for deposits/withdrawals where the EOA signs directly.
  */
 export async function signActionWithWallet(params: {
@@ -153,24 +207,43 @@ export async function signActionWithWallet(params: {
   expiry: bigint;
   owner: Hex;
   signer: Hex;
-  signMessage: (message: { raw: Hex }) => Promise<Hex>;
+  signTypedData: (args: {
+    domain: {
+      name: string;
+      version: string;
+      chainId: number;
+      verifyingContract: Hex;
+    };
+    types: typeof ACTION_TYPES;
+    primaryType: "Action";
+    message: {
+      subaccountId: bigint;
+      nonce: bigint;
+      module: Hex;
+      data: Hex;
+      expiry: bigint;
+      owner: Hex;
+      signer: Hex;
+    };
+  }) => Promise<Hex>;
   env?: DeriveEnv;
 }): Promise<Hex> {
-  const domainSeparator = getDomainSeparator(params.env);
+  const domain = getEip712Domain(params.env);
 
-  const actionHash = getActionHash({
-    subaccountId: params.subaccountId,
-    nonce: params.nonce,
-    module: params.module,
-    data: params.data,
-    expiry: params.expiry,
-    owner: params.owner,
-    signer: params.signer,
+  return params.signTypedData({
+    domain,
+    types: ACTION_TYPES,
+    primaryType: "Action",
+    message: {
+      subaccountId: params.subaccountId,
+      nonce: params.nonce,
+      module: params.module,
+      data: params.data,
+      expiry: params.expiry,
+      owner: params.owner,
+      signer: params.signer,
+    },
   });
-
-  const typedDataHash = toTypedDataHash(domainSeparator, actionHash);
-
-  return params.signMessage({ raw: typedDataHash });
 }
 
 /**

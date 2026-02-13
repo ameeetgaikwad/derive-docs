@@ -17,6 +17,11 @@ import type { OrderResult, OrderDirection } from "@/lib/derive/types";
 import type { Hex } from "viem";
 import { toast } from "sonner";
 
+/** Strip 0x prefix from signature — Derive API expects raw hex (130 chars, no prefix). */
+function stripSigPrefix(sig: string): string {
+  return sig.startsWith("0x") ? sig.slice(2) : sig;
+}
+
 interface SubmitOrderParams {
   instrumentName: string;
   direction: OrderDirection;
@@ -85,7 +90,7 @@ export function useSubmitOrder() {
         nonce,
         signature_expiry_sec: signatureExpiry,
         signer: sessionKey.public_key,
-        signature,
+        signature: stripSigPrefix(signature),
         max_fee: "100",
       });
 
