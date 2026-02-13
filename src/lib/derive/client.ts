@@ -343,6 +343,25 @@ export class DeriveRestClient {
   }
 
   /**
+   * Debug endpoint for deposit signature verification.
+   */
+  async depositDebug(params: {
+    subaccount_id: number;
+    amount: string;
+    asset_name: string;
+    nonce: number;
+    signature_expiry_sec: number;
+    signer: string;
+  }) {
+    return this.rpc<{
+      encoded_data: string;
+      encoded_data_hashed: string;
+      action_hash: string;
+      typed_data_hash: string;
+    }>("public/deposit_debug", params);
+  }
+
+  /**
    * Debug endpoint for withdraw signature verification.
    * Returns the expected hashes so we can compare with our local computation.
    */

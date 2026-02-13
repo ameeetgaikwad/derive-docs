@@ -50,9 +50,10 @@ export function useCreateSubaccount() {
       const nonce = generateNonce();
       const signatureExpiry = getSignatureExpiry();
 
+      // Deposit module uses CashAsset wrapper address, NOT raw USDC ERC-20
       const depositData = encodeDepositData({
         amount: toTokenAmount(amount, USDC_DECIMALS),
-        asset: config.usdcAddress,
+        asset: config.usdcCashAsset,
         managerForNewAccount: config.standardManager,
       });
 
@@ -112,11 +113,59 @@ export function useDeposit() {
       const nonce = generateNonce();
       const signatureExpiry = getSignatureExpiry();
 
+      const scaledAmount = toTokenAmount(amount, USDC_DECIMALS);
+      // Deposit module also uses CashAsset wrapper address, NOT raw USDC ERC-20
       const depositData = encodeDepositData({
-        amount: toTokenAmount(amount, USDC_DECIMALS),
-        asset: config.usdcAddress,
+        amount: scaledAmount,
+        asset: config.usdcCashAsset,
         managerForNewAccount: config.standardManager,
       });
+
+      // === DEBUG: Log intermediate values ===
+      const { privateKeyToAccount } = await import("viem/accounts");
+      const signerAccount = privateKeyToAccount(sessionKey.private_key);
+      const dataHash = keccak256(depositData);
+      const actionHash = getActionHash({
+        subaccountId: BigInt(subaccountId),
+        nonce: BigInt(nonce),
+        module: config.depositModule,
+        data: depositData,
+        expiry: BigInt(signatureExpiry),
+        owner: deriveWallet,
+        signer: signerAccount.address,
+      });
+      const domainSep = getDomainSeparator();
+      const typedDataHash = toTypedDataHash(domainSep, actionHash);
+      console.log("[Deposit DEBUG] === Our Values ===");
+      console.log("[Deposit DEBUG] amount (scaled):", scaledAmount.toString());
+      console.log("[Deposit DEBUG] asset:", config.usdcAddress);
+      console.log("[Deposit DEBUG] manager:", config.standardManager);
+      console.log("[Deposit DEBUG] depositModule:", config.depositModule);
+      console.log("[Deposit DEBUG] encodedData:", depositData);
+      console.log("[Deposit DEBUG] dataHash:", dataHash);
+      console.log("[Deposit DEBUG] actionHash:", actionHash);
+      console.log("[Deposit DEBUG] typedDataHash:", typedDataHash);
+
+      try {
+        const debugResult = await restClient.depositDebug({
+          subaccount_id: subaccountId,
+          amount,
+          asset_name: "USDC",
+          nonce,
+          signature_expiry_sec: signatureExpiry,
+          signer: sessionKey.public_key,
+        });
+        console.log("[Deposit DEBUG] === Server Values ===");
+        console.log("[Deposit DEBUG] server encoded_data:", debugResult.encoded_data);
+        console.log("[Deposit DEBUG] server encoded_data_hashed:", debugResult.encoded_data_hashed);
+        console.log("[Deposit DEBUG] server action_hash:", debugResult.action_hash);
+        console.log("[Deposit DEBUG] server typed_data_hash:", debugResult.typed_data_hash);
+        console.log("[Deposit DEBUG] data match:", debugResult.encoded_data_hashed === dataHash);
+        console.log("[Deposit DEBUG] action match:", debugResult.action_hash === actionHash);
+        console.log("[Deposit DEBUG] typed_data match:", debugResult.typed_data_hash === typedDataHash);
+      } catch (debugErr) {
+        console.warn("[Deposit DEBUG] deposit_debug failed:", (debugErr as Error).message);
+      }
 
       // Sign with session key (raw ECDSA) — same as order signing
       const signature = await signAction({
