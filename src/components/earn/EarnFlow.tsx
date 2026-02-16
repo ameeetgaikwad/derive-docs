@@ -5,7 +5,8 @@ import { useAccount } from "wagmi";
 import { useInstruments } from "@/hooks/market/useInstruments";
 import { useTicker } from "@/hooks/market/useTicker";
 import { useDerive } from "@/providers/DeriveProvider";
-import { useSubmitOrder } from "@/hooks/mutations/useSubmitOrder";
+import { useWalletSubmitOrder } from "@/hooks/mutations/useWalletSubmitOrder";
+import { useWalletAuth } from "@/hooks/account/useWalletAuth";
 import { useAccountStore } from "@/stores/account";
 import { calculateAPR, daysToExpiry, calculateOutcome } from "@/lib/derive/apr";
 import type { StrategyType } from "@/lib/derive/apr";
@@ -28,8 +29,9 @@ interface StrikeOption {
 
 export function EarnFlow() {
   const { isConnected } = useAccount();
-  const { isReady, isAuthenticated, authenticate, subaccountId } = useDerive();
-  const submitOrder = useSubmitOrder();
+  const { isReady, isAuthenticated, subaccountId } = useDerive();
+  const { authenticate } = useWalletAuth();
+  const submitOrder = useWalletSubmitOrder();
   const { status: authStatus } = useAccountStore();
 
   const [asset, setAsset] = useState<Currency>("ETH");
