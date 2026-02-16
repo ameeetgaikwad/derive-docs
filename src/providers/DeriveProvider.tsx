@@ -3,7 +3,6 @@
 import { createContext, useContext, useEffect, type ReactNode } from "react";
 import { useDeriveAccount } from "@/hooks/account/useDeriveAccount";
 import { useDeriveAuth } from "@/hooks/account/useDeriveAuth";
-import { useWalletAuth } from "@/hooks/account/useWalletAuth";
 import { useAccountStore } from "@/stores/account";
 import { getWsLoginParams } from "@/lib/derive/auth";
 import type { DeriveRestClient } from "@/lib/derive/client";
@@ -23,8 +22,6 @@ interface DeriveContextValue {
   wsClient: DeriveWebSocket;
   isAuthenticated: boolean;
   authenticate: () => Promise<void>;
-  walletAuthenticate: () => Promise<void>;
-  walletSubaccountId: number | null;
 }
 
 const DeriveContext = createContext<DeriveContextValue | null>(null);
@@ -32,7 +29,6 @@ const DeriveContext = createContext<DeriveContextValue | null>(null);
 export function DeriveProvider({ children }: { children: ReactNode }) {
   const account = useDeriveAccount();
   const auth = useDeriveAuth();
-  const walletAuth = useWalletAuth();
   const { sessionKey, deriveWallet } = useAccountStore();
 
   // Always connect WebSocket for public channels (orderbook, tickers)
@@ -74,8 +70,6 @@ export function DeriveProvider({ children }: { children: ReactNode }) {
     wsClient: auth.wsClient,
     isAuthenticated: auth.isAuthenticated,
     authenticate: account.authenticate,
-    walletAuthenticate: walletAuth.authenticate,
-    walletSubaccountId: walletAuth.walletSubaccountId,
   };
 
   return (
