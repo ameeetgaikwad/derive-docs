@@ -4,13 +4,11 @@ import { useState, useEffect, useMemo, useCallback } from "react";
 import { useAccount } from "wagmi";
 import { useInstruments } from "@/hooks/market/useInstruments";
 import { useTicker } from "@/hooks/market/useTicker";
-import { useDerive } from "@/providers/DeriveProvider";
 import { useWalletSubmitOrder } from "@/hooks/mutations/useWalletSubmitOrder";
 import { useWalletAuth } from "@/hooks/account/useWalletAuth";
-import { useAccountStore } from "@/stores/account";
 import { calculateAPR, daysToExpiry, calculateOutcome } from "@/lib/derive/apr";
 import type { StrategyType } from "@/lib/derive/apr";
-import type { Currency, Instrument, Ticker } from "@/lib/derive/types";
+import type { Currency, Ticker } from "@/lib/derive/types";
 import { getSharedRestClient } from "@/hooks/account/useDeriveAuth";
 import { StrikeSelector } from "./StrikeSelector";
 import { AmountInput } from "./AmountInput";
@@ -28,11 +26,13 @@ interface StrikeOption {
 }
 
 export function EarnFlow() {
-  const { isConnected } = useAccount();
-  const { isReady, isAuthenticated, subaccountId } = useDerive();
-  const { authenticate } = useWalletAuth();
+  const { isConnected, address } = useAccount();
+  const { authenticate, walletSubaccountId, isWalletAuthed, deriveWallet, isAuthenticating } = useWalletAuth();
   const submitOrder = useWalletSubmitOrder();
-  const { status: authStatus } = useAccountStore();
+
+  // The earn flow uses wallet auth (no session keys)
+  const isAuthenticated = isWalletAuthed;
+  const subaccountId = walletSubaccountId;
 
   const [asset, setAsset] = useState<Currency>("ETH");
   const [strategyType, setStrategyType] = useState<StrategyType>("covered_call");
@@ -150,14 +150,14 @@ export function EarnFlow() {
 
   // Fetch balance
   useEffect(() => {
-    if (!isReady || !subaccountId) { setBalance(0); return; }
+    if (!isAuthenticated || !subaccountId) { setBalance(0); return; }
     const client = getSharedRestClient();
     client.getCollaterals(subaccountId).then((collaterals) => {
       const key = strategyType === "covered_call" ? asset : "USDC";
       const col = collaterals.find((c) => c.asset_name === key);
       setBalance(parseFloat(col?.amount || "0"));
     }).catch(() => setBalance(0));
-  }, [isReady, subaccountId, asset, strategyType]);
+  }, [isAuthenticated, subaccountId, asset, strategyType]);
 
   const amountNum = parseFloat(amount) || 0;
   const collateralLabel = strategyType === "covered_call" ? asset : "USDC";
@@ -184,6 +184,7 @@ export function EarnFlow() {
     }
     if (!selectedStrikeData || !outcome || amountNum <= 0) return;
 
+    if (!subaccountId || !deriveWallet) return;
     submitOrder.mutate({
       instrumentName: selectedStrikeData.instrumentName,
       direction: "sell",
@@ -191,6 +192,8 @@ export function EarnFlow() {
       limitPrice: selectedStrikeData.bidPrice.toString(),
       baseAssetAddress: selectedStrikeData.baseAssetAddress,
       baseAssetSubId: selectedStrikeData.baseAssetSubId,
+      subaccountId,
+      deriveWallet,
     });
   }, [isConnected, isAuthenticated, authenticate, selectedStrikeData, outcome, amountNum, submitOrder]);
 
@@ -314,6 +317,8 @@ export function EarnFlow() {
               ? "Submitting..."
               : !isConnected
               ? "Connect Wallet"
+              : isAuthenticating
+              ? "Resolving account..."
               : !isAuthenticated
               ? "Sign in to Derive"
               : "Earn upfront premium now"}

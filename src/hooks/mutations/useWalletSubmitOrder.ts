@@ -2,9 +2,7 @@
 
 import { useMutation } from "@tanstack/react-query";
 import { useWalletClient } from "wagmi";
-import { useDerive } from "@/providers/DeriveProvider";
 import { useTradeStore } from "@/stores/trade";
-import { useAccountStore } from "@/stores/account";
 import {
   encodeTradeData,
   signActionWithWallet,
@@ -12,6 +10,7 @@ import {
   getSignatureExpiry,
 } from "@/lib/derive/signing";
 import { getConfig } from "@/lib/derive/constants";
+import { getSharedRestClient } from "@/hooks/account/useDeriveAuth";
 import { toBN } from "@/lib/derive/utils";
 import type { OrderResult, OrderDirection } from "@/lib/derive/types";
 import type { Hex } from "viem";
@@ -29,6 +28,8 @@ interface SubmitOrderParams {
   limitPrice: string;
   baseAssetAddress: string;
   baseAssetSubId: string;
+  subaccountId: number;
+  deriveWallet: `0x${string}`;
 }
 
 /**
@@ -36,12 +37,13 @@ interface SubmitOrderParams {
  * No session key needed — the EOA signs the EIP-712 action directly.
  */
 export function useWalletSubmitOrder() {
-  const { restClient, subaccountId, deriveWallet } = useDerive();
   const { data: walletClient } = useWalletClient();
   const tradeStore = useTradeStore();
+  const restClient = getSharedRestClient();
 
   return useMutation<OrderResult, Error, SubmitOrderParams>({
     mutationFn: async (params) => {
+      const { subaccountId, deriveWallet } = params;
       if (!subaccountId || !walletClient || !deriveWallet) {
         throw new Error("Not authenticated");
       }
