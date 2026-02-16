@@ -22,7 +22,8 @@ export type StrategyType = "covered_call" | "cash_secured_put";
 
 export interface OutcomeResult {
   contracts: number;
-  totalPremium: number;
+  totalPremium: number; // in asset units for covered calls, USD for puts
+  totalPremiumUsd?: number; // always in USD
   ifBelow: { label: string; value: number };
   ifAbove: { label: string; value: number };
 }
@@ -32,25 +33,32 @@ export function calculateOutcome(params: {
   strikePrice: number;
   spotPrice: number;
   amount: number;
-  premium: number;
+  premium: number; // USD premium per contract from ticker best_bid_price
 }): OutcomeResult {
-  const { type, strikePrice, amount, premium } = params;
+  const { type, strikePrice, spotPrice, amount, premium } = params;
 
   if (type === "cash_secured_put") {
+    // amount is in USD (e.g. 1000 USDC)
     const contracts = amount / strikePrice;
-    const totalPremium = premium * contracts;
+    // premium is USD per contract
+    const totalPremiumUsd = premium * contracts;
     return {
       contracts,
-      totalPremium,
+      totalPremium: totalPremiumUsd,
       ifBelow: { label: "Receive asset", value: contracts },
       ifAbove: { label: "Get collateral back", value: amount },
     };
   } else {
+    // Covered call: amount is in asset units (e.g. 0.01 ETH)
     const contracts = amount;
-    const totalPremium = premium * contracts;
+    // premium is USD per contract from the ticker
+    const totalPremiumUsd = premium * contracts;
+    // Convert to asset units for display
+    const totalPremiumAsset = spotPrice > 0 ? totalPremiumUsd / spotPrice : 0;
     return {
       contracts,
-      totalPremium,
+      totalPremium: totalPremiumAsset, // in asset units (ETH/BTC)
+      totalPremiumUsd,
       ifAbove: { label: "Asset sold at strike", value: amount * strikePrice },
       ifBelow: { label: "Keep asset + premium", value: amount },
     };

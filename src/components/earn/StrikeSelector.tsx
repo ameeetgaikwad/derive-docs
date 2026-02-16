@@ -22,7 +22,7 @@ export function StrikeSelector({ strikes, selectedStrike, onSelect }: StrikeSele
   }
 
   return (
-    <div className="flex gap-2 overflow-x-auto pb-2 pt-3">
+    <div className="flex gap-2 overflow-x-auto pb-2 pt-3 scrollbar-thin" style={{ scrollbarWidth: "thin", WebkitOverflowScrolling: "touch" }}>
       {strikes.map((s) => {
         const selected = s.strike === selectedStrike;
         const aprClamped = Math.min(Math.max(s.apr, 0), 100);
@@ -32,8 +32,8 @@ export function StrikeSelector({ strikes, selectedStrike, onSelect }: StrikeSele
           <button
             key={s.strike}
             onClick={() => onSelect(s.strike)}
-            className="relative flex flex-col items-center pt-5 pb-3 transition-all"
-            style={{ minWidth: 90 }}
+            className="relative flex flex-shrink-0 flex-col items-center pt-5 pb-3 transition-all"
+            style={{ minWidth: 100 }}
           >
             {/* APR badge */}
             <div

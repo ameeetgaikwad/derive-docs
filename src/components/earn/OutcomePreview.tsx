@@ -35,6 +35,9 @@ export function OutcomePreview({
           Upfront premium:{" "}
           <span className="font-medium" style={{ color: "#1a1a1a" }}>
             {outcome.totalPremium.toFixed(4)} {collateralLabel}
+            {outcome.totalPremiumUsd != null && (
+              <span style={{ color: "#9b9590" }}> (${outcome.totalPremiumUsd.toFixed(2)})</span>
+            )}
           </span>
         </div>
       </div>

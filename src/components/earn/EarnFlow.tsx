@@ -132,7 +132,8 @@ export function EarnFlow() {
       });
     }
     opts.sort((a, b) => a.strike - b.strike);
-    return opts;
+    // Filter out strikes with no bids (no liquidity)
+    return opts.filter((o) => o.bidPrice > 0);
   }, [expiryInstruments, tickers, selectedExpiry, spotPrice, strategyType]);
 
   // Auto-select closest ATM strike
