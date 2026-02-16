@@ -17,7 +17,7 @@ interface WalletAuthState {
   deriveWallet: `0x${string}` | null;
   error: string | null;
   isAuthenticating: boolean;
-  authedAddress: string | null; // track which address is authed
+  authedAddress: string | null;
 }
 
 let state: WalletAuthState = {
@@ -43,8 +43,49 @@ function setState(partial: Partial<WalletAuthState>) {
 }
 
 /**
+ * Try to fetch subaccounts from Derive API using pre-signed auth headers.
+ * Uses the Next.js API proxy to avoid CORS.
+ */
+async function tryGetSubaccounts(
+  wallet: string,
+  timestamp: string,
+  signature: string
+): Promise<{ ok: boolean; ids: number[] }> {
+  try {
+    // Strip 0x prefix from signature — Derive expects raw hex
+    const sigNoPrefix = signature.startsWith("0x") ? signature.slice(2) : signature;
+
+    const res = await fetch("/api/derive/private/get_subaccounts", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-LyraWallet": wallet,
+        "X-LyraTimestamp": timestamp,
+        "X-LyraSignature": sigNoPrefix,
+      },
+      body: JSON.stringify({ wallet }),
+    });
+    const data = await res.json();
+    console.log("[WalletAuth] get_subaccounts response for", wallet, ":", JSON.stringify(data).slice(0, 200));
+
+    if (data.error) return { ok: false, ids: [] };
+
+    // Response can be { result: { subaccount_ids: [...] } } or { result: [...] }
+    const ids: number[] = data.result?.subaccount_ids ?? data.result ?? [];
+    if (Array.isArray(ids) && ids.length > 0) {
+      return { ok: true, ids };
+    }
+    return { ok: false, ids: [] };
+  } catch (err) {
+    console.warn("[WalletAuth] tryGetSubaccounts error:", err);
+    return { ok: false, ids: [] };
+  }
+}
+
+/**
  * Simplified wallet auth — no session keys, no on-chain tx.
- * Shared state: all components calling useWalletAuth() see the same state.
+ * Signs ONE message (timestamp), then reuses the signature for API calls.
+ * Tries: EOA as wallet → SCW as wallet → saved Derive wallet.
  */
 export function useWalletAuth() {
   const { address, isConnected } = useAccount();
@@ -64,7 +105,6 @@ export function useWalletAuth() {
       });
       authInProgress = false;
     } else if (address !== current.authedAddress && current.isWalletAuthed) {
-      // Address changed — reset
       setState({
         isWalletAuthed: false,
         walletSubaccountId: null,
@@ -81,62 +121,96 @@ export function useWalletAuth() {
       return;
     }
 
-    // Already authed for this address
     if (state.isWalletAuthed && state.authedAddress === address) return;
     if (authInProgress) return;
     authInProgress = true;
     setState({ isAuthenticating: true, error: null });
 
     try {
-      // Step 1: Resolve Derive SCW (no popup, deterministic)
+      // Step 1: Sign timestamp ONCE (one MetaMask popup)
+      const timestamp = Date.now().toString();
+      const signature = await walletClient.signMessage({
+        message: timestamp,
+        account: walletClient.account,
+      });
+      console.log("[WalletAuth] Signed timestamp. EOA:", address);
+
+      // Step 2: Try EOA as wallet (some accounts are under EOA directly)
+      console.log("[WalletAuth] Trying EOA as wallet...");
+      const eoaResult = await tryGetSubaccounts(address, timestamp, signature);
+      if (eoaResult.ok) {
+        console.log("[WalletAuth] EOA account found! subaccounts:", eoaResult.ids);
+        const walletAddr = getAddress(address);
+        // Set REST client auth with cached signature for future calls
+        client.setAuth(walletAddr, async (msg) => {
+          // For subsequent calls, re-sign with wallet
+          return walletClient.signMessage({ message: msg });
+        });
+        setState({
+          deriveWallet: walletAddr,
+          walletSubaccountId: eoaResult.ids[0],
+          isWalletAuthed: true,
+          authedAddress: address,
+        });
+        return;
+      }
+
+      // Step 3: Try SCW as wallet
+      console.log("[WalletAuth] Trying SCW as wallet...");
       let scw: `0x${string}`;
       const cached = loadDeriveWallet(address);
       if (cached) {
         scw = cached;
       } else {
-        scw = await resolveDeriveSCW(address);
-        scw = getAddress(scw);
+        scw = getAddress(await resolveDeriveSCW(address));
         saveDeriveWallet(address, scw);
       }
-      setState({ deriveWallet: scw });
+      console.log("[WalletAuth] Resolved SCW:", scw);
 
-      // Step 2: Set REST client auth using EOA wallet signing
-      client.setAuth(scw, async (message: string) => {
-        return walletClient.signMessage({ message });
-      });
-
-      // Step 3: Fetch subaccounts (public-ish — uses auth headers but no popup)
-      let subId: number | null = null;
-
-      try {
-        const account = await client.getAccount(scw);
-        if (account.subaccount_ids?.length) {
-          subId = account.subaccount_ids[0];
-        }
-      } catch {
-        try {
-          const subs = await client.getSubaccounts(scw);
-          if (subs.length > 0) {
-            subId = subs[0].subaccount_id;
-          }
-        } catch (err) {
-          console.warn("[WalletAuth] No subaccounts:", err);
-        }
-      }
-
-      if (subId) {
+      const scwResult = await tryGetSubaccounts(scw, timestamp, signature);
+      if (scwResult.ok) {
+        console.log("[WalletAuth] SCW account found! subaccounts:", scwResult.ids);
+        client.setAuth(scw, async (msg) => {
+          return walletClient.signMessage({ message: msg });
+        });
         setState({
-          walletSubaccountId: subId,
+          deriveWallet: scw,
+          walletSubaccountId: scwResult.ids[0],
           isWalletAuthed: true,
           authedAddress: address,
         });
-        console.log("[WalletAuth] Done! SCW:", scw, "subaccount:", subId);
-      } else {
-        setState({ error: "No Derive subaccount found. Create one on app.derive.xyz first." });
+        return;
       }
+
+      // Step 4: Check localStorage for previously saved Derive wallet
+      const savedWallet = localStorage.getItem(`derive_wallet_${address}`);
+      if (savedWallet && savedWallet !== address && savedWallet !== scw) {
+        console.log("[WalletAuth] Trying saved Derive wallet:", savedWallet);
+        const savedResult = await tryGetSubaccounts(savedWallet, timestamp, signature);
+        if (savedResult.ok) {
+          console.log("[WalletAuth] Saved wallet account found! subaccounts:", savedResult.ids);
+          client.setAuth(savedWallet as `0x${string}`, async (msg) => {
+            return walletClient.signMessage({ message: msg });
+          });
+          setState({
+            deriveWallet: savedWallet as `0x${string}`,
+            walletSubaccountId: savedResult.ids[0],
+            isWalletAuthed: true,
+            authedAddress: address,
+          });
+          return;
+        }
+      }
+
+      // All methods failed
+      console.warn("[WalletAuth] No account found. EOA:", address, "SCW:", scw);
+      setState({
+        deriveWallet: scw,
+        error: "No Derive account found. Please create one on app.derive.xyz first, then try again.",
+      });
     } catch (err) {
       console.error("[WalletAuth] Error:", err);
-      setState({ error: `Wallet auth failed: ${(err as Error).message}` });
+      setState({ error: `Auth failed: ${(err as Error).message}` });
     } finally {
       authInProgress = false;
       setState({ isAuthenticating: false });
