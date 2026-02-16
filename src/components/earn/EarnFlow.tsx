@@ -34,6 +34,9 @@ export function EarnFlow() {
   const isAuthenticated = isWalletAuthed;
   const subaccountId = walletSubaccountId;
 
+  // NOTE: No auto-auth — authenticate() requires a wallet signMessage popup.
+  // User clicks "Sign in to Derive" to trigger it once.
+
   const [asset, setAsset] = useState<Currency>("ETH");
   const [strategyType, setStrategyType] = useState<StrategyType>("covered_call");
   const [selectedExpiry, setSelectedExpiry] = useState<number | null>(null);

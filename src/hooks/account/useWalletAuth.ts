@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useState, useEffect } from "react";
+import { useCallback, useEffect, useSyncExternalStore } from "react";
 import { useAccount, useWalletClient } from "wagmi";
 import { getAddress } from "viem";
 import { resolveDeriveSCW } from "@/lib/derive/utils";
@@ -9,44 +9,83 @@ import { saveDeriveWallet, loadDeriveWallet } from "@/lib/derive/session";
 
 const client = getSharedRestClient();
 
+// ─── Shared module-level state (singleton across all components) ───
+
+interface WalletAuthState {
+  isWalletAuthed: boolean;
+  walletSubaccountId: number | null;
+  deriveWallet: `0x${string}` | null;
+  error: string | null;
+  isAuthenticating: boolean;
+  authedAddress: string | null; // track which address is authed
+}
+
+let state: WalletAuthState = {
+  isWalletAuthed: false,
+  walletSubaccountId: null,
+  deriveWallet: null,
+  error: null,
+  isAuthenticating: false,
+  authedAddress: null,
+};
+
+let authInProgress = false;
+const listeners = new Set<() => void>();
+
+function getState() { return state; }
+function subscribe(cb: () => void) {
+  listeners.add(cb);
+  return () => { listeners.delete(cb); };
+}
+function setState(partial: Partial<WalletAuthState>) {
+  state = { ...state, ...partial };
+  listeners.forEach((cb) => cb());
+}
+
 /**
  * Simplified wallet auth — no session keys, no on-chain tx.
- * Uses the EOA wallet directly to sign REST API auth headers.
- * Manages its OWN state (not the shared account store) to avoid
- * conflicts with useDeriveAccount's session key flow.
+ * Shared state: all components calling useWalletAuth() see the same state.
  */
 export function useWalletAuth() {
   const { address, isConnected } = useAccount();
   const { data: walletClient } = useWalletClient();
-  const authInProgress = useRef(false);
+  const current = useSyncExternalStore(subscribe, getState, getState);
 
-  // Own state — independent from the account store
-  const [isWalletAuthed, setIsWalletAuthed] = useState(false);
-  const [walletSubaccountId, setWalletSubaccountId] = useState<number | null>(null);
-  const [deriveWallet, setDeriveWallet] = useState<`0x${string}` | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [isAuthenticating, setIsAuthenticating] = useState(false);
-
-  // Reset on disconnect
+  // Reset on disconnect or address change
   useEffect(() => {
     if (!isConnected || !address) {
-      setIsWalletAuthed(false);
-      setWalletSubaccountId(null);
-      setDeriveWallet(null);
-      setError(null);
+      setState({
+        isWalletAuthed: false,
+        walletSubaccountId: null,
+        deriveWallet: null,
+        error: null,
+        isAuthenticating: false,
+        authedAddress: null,
+      });
+      authInProgress = false;
+    } else if (address !== current.authedAddress && current.isWalletAuthed) {
+      // Address changed — reset
+      setState({
+        isWalletAuthed: false,
+        walletSubaccountId: null,
+        deriveWallet: null,
+        error: null,
+        authedAddress: null,
+      });
     }
   }, [isConnected, address]);
 
   const authenticate = useCallback(async () => {
     if (!address || !walletClient) {
-      setError("Wallet not connected");
+      setState({ error: "Wallet not connected" });
       return;
     }
 
-    if (authInProgress.current) return;
-    authInProgress.current = true;
-    setIsAuthenticating(true);
-    setError(null);
+    // Already authed for this address
+    if (state.isWalletAuthed && state.authedAddress === address) return;
+    if (authInProgress) return;
+    authInProgress = true;
+    setState({ isAuthenticating: true, error: null });
 
     try {
       // Step 1: Resolve Derive SCW (no popup, deterministic)
@@ -59,14 +98,14 @@ export function useWalletAuth() {
         scw = getAddress(scw);
         saveDeriveWallet(address, scw);
       }
-      setDeriveWallet(scw);
+      setState({ deriveWallet: scw });
 
       // Step 2: Set REST client auth using EOA wallet signing
       client.setAuth(scw, async (message: string) => {
         return walletClient.signMessage({ message });
       });
 
-      // Step 3: Fetch subaccounts
+      // Step 3: Fetch subaccounts (public-ish — uses auth headers but no popup)
       let subId: number | null = null;
 
       try {
@@ -86,27 +125,30 @@ export function useWalletAuth() {
       }
 
       if (subId) {
-        setWalletSubaccountId(subId);
-        setIsWalletAuthed(true);
+        setState({
+          walletSubaccountId: subId,
+          isWalletAuthed: true,
+          authedAddress: address,
+        });
         console.log("[WalletAuth] Done! SCW:", scw, "subaccount:", subId);
       } else {
-        setError("No Derive subaccount found. Please create one on app.derive.xyz first.");
+        setState({ error: "No Derive subaccount found. Create one on app.derive.xyz first." });
       }
     } catch (err) {
       console.error("[WalletAuth] Error:", err);
-      setError(`Wallet auth failed: ${(err as Error).message}`);
+      setState({ error: `Wallet auth failed: ${(err as Error).message}` });
     } finally {
-      authInProgress.current = false;
-      setIsAuthenticating(false);
+      authInProgress = false;
+      setState({ isAuthenticating: false });
     }
   }, [address, walletClient]);
 
   return {
     authenticate,
-    isWalletAuthed,
-    walletSubaccountId,
-    deriveWallet,
-    error,
-    isAuthenticating,
+    isWalletAuthed: current.isWalletAuthed,
+    walletSubaccountId: current.walletSubaccountId,
+    deriveWallet: current.deriveWallet,
+    error: current.error,
+    isAuthenticating: current.isAuthenticating,
   };
 }
