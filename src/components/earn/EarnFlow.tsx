@@ -57,12 +57,13 @@ export function EarnFlow() {
     });
   }, [instruments, optionType]);
 
-  // Extract unique expiries
+  // Extract unique expiries (only future dates with active instruments)
   const expiries = useMemo(() => {
+    const now = Date.now() / 1000;
     const map = new Map<number, { epoch: number; label: string; dateStr: string }>();
     for (const inst of filteredInstruments) {
       const exp = inst.option_details?.expiry;
-      if (!exp) continue;
+      if (!exp || exp <= now) continue; // Skip expired
       if (!map.has(exp)) {
         const d = new Date(exp * 1000);
         map.set(exp, {
