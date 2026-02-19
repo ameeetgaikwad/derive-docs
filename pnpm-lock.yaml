@@ -8,6 +8,12 @@ importers:
 
   .:
     dependencies:
+      '@alchemy/aa-accounts':
+        specifier: ^3.19.0
+        version: 3.19.0(typescript@5.9.3)(viem@2.45.2(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@5.0.10)(zod@4.3.6))
+      '@alchemy/aa-core':
+        specifier: ^3.19.0
+        version: 3.19.0(typescript@5.9.3)(viem@2.45.2(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@5.0.10)(zod@4.3.6))
       '@radix-ui/react-dialog':
         specifier: ^1.1.15
         version: 1.1.15(@types/react-dom@19.2.3(@types/react@19.2.13))(@types/react@19.2.13)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
@@ -92,6 +98,16 @@ packages:
 
   '@adraffy/ens-normalize@1.11.1':
     resolution: {integrity: sha512-nhCBV3quEgesuf7c7KYfperqSS14T8bYuvJ8PcLJp6znkZpFc0AuW4qBtr8eKVyPPe/8RSr7sglCWPU5eaxwKQ==}
+
+  '@alchemy/aa-accounts@3.19.0':
+    resolution: {integrity: sha512-cdR8H9LveeUyBWFkmoqU7hZnFoqmdyPQDYZRtFr9aF+3zWAQYYJ/13Vz7aoVQ4lZ57+JQj7fN5vSVn2gFI47yA==}
+    peerDependencies:
+      viem: 2.8.6
+
+  '@alchemy/aa-core@3.19.0':
+    resolution: {integrity: sha512-gVSesLsXORMuiA3w/w+4eQikzrikpj1XN2Sbrcik0v25AKH5QrHn0HddhyrN1aCFW2NoXjyhwxlySiTDVfTgxQ==}
+    peerDependencies:
+      viem: 2.8.6
 
   '@alloc/quick-lru@5.2.0':
     resolution: {integrity: sha512-UrcABB+4bUrFABwbluTIBErXwvbsU/V7TZWfmbgJfbkwiBuziS9gxdODUyuiecfdGQ85jglMW6juS3+z5TsKLw==}
@@ -1913,6 +1929,15 @@ packages:
 
   '@walletconnect/window-metadata@1.0.1':
     resolution: {integrity: sha512-9koTqyGrM2cqFRW517BPY/iEtUDx2r1+Pwwu5m7sJ7ka79wi3EyqhqcICk/yDmv6jAS1rjKgTKXlEhanYjijcA==}
+
+  abitype@0.8.11:
+    resolution: {integrity: sha512-bM4v2dKvX08sZ9IU38IN5BKmN+ZkOSd2oI4a9f0ejHYZQYV6cDr7j+d95ga0z2XHG36Y4jzoG5Z7qDqxp7fi/A==}
+    peerDependencies:
+      typescript: '>=5.0.4'
+      zod: ^3 >=3.19.1
+    peerDependenciesMeta:
+      zod:
+        optional: true
 
   abitype@1.0.6:
     resolution: {integrity: sha512-MMSqYh4+C/aVqI2RQaWqbvI4Kxo5cQV40WQ4QFtDnNzCkqChm8MuENhElmynZlO0qUy/ObkEUaXtKqYnx1Kp3A==}
@@ -4311,6 +4336,22 @@ packages:
 snapshots:
 
   '@adraffy/ens-normalize@1.11.1': {}
+
+  '@alchemy/aa-accounts@3.19.0(typescript@5.9.3)(viem@2.45.2(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@5.0.10)(zod@4.3.6))':
+    dependencies:
+      '@alchemy/aa-core': 3.19.0(typescript@5.9.3)(viem@2.45.2(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@5.0.10)(zod@4.3.6))
+      viem: 2.45.2(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@5.0.10)(zod@4.3.6)
+    transitivePeerDependencies:
+      - typescript
+
+  '@alchemy/aa-core@3.19.0(typescript@5.9.3)(viem@2.45.2(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@5.0.10)(zod@4.3.6))':
+    dependencies:
+      abitype: 0.8.11(typescript@5.9.3)(zod@3.25.76)
+      eventemitter3: 5.0.4
+      viem: 2.45.2(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@5.0.10)(zod@4.3.6)
+      zod: 3.25.76
+    transitivePeerDependencies:
+      - typescript
 
   '@alloc/quick-lru@5.2.0': {}
 
@@ -7087,6 +7128,12 @@ snapshots:
       '@walletconnect/window-getters': 1.0.1
       tslib: 1.14.1
 
+  abitype@0.8.11(typescript@5.9.3)(zod@3.25.76):
+    dependencies:
+      typescript: 5.9.3
+    optionalDependencies:
+      zod: 3.25.76
+
   abitype@1.0.6(typescript@5.9.3)(zod@3.25.76):
     optionalDependencies:
       typescript: 5.9.3
@@ -8694,7 +8741,7 @@ snapshots:
       '@noble/hashes': 1.7.1
       '@scure/bip32': 1.6.2
       '@scure/bip39': 1.5.4
-      abitype: 1.0.8(typescript@5.9.3)(zod@4.3.6)
+      abitype: 1.2.3(typescript@5.9.3)(zod@4.3.6)
       eventemitter3: 5.0.1
     optionalDependencies:
       typescript: 5.9.3
@@ -8991,7 +9038,7 @@ snapshots:
       '@types/uuid': 8.3.4
       '@types/ws': 8.18.1
       buffer: 6.0.3
-      eventemitter3: 5.0.1
+      eventemitter3: 5.0.4
       uuid: 8.3.2
       ws: 8.19.0(bufferutil@4.1.0)(utf-8-validate@5.0.10)
     optionalDependencies:

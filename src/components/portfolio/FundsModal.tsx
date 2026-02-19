@@ -12,8 +12,9 @@ import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { formatUsd } from "@/lib/derive/utils";
 import type { Collateral } from "@/lib/derive/types";
+import { BridgeForm } from "@/components/account/BridgeModal";
 
-type Tab = "deposit" | "withdraw";
+type Tab = "deposit" | "withdraw" | "bridge";
 
 const DEPOSIT_STEP_LABELS: Record<DepositStep, string> = {
   idle: "",
@@ -136,71 +137,88 @@ export function FundsModal({ open, onClose, collaterals }: FundsModalProps) {
             >
               Withdraw
             </button>
-          </div>
-
-          {/* Balance display */}
-          <div className="rounded-md border-2 border-border/30 bg-secondary p-3 font-mono text-sm">
-            <div className="flex items-center justify-between">
-              <span className="text-muted-foreground">USDC Balance</span>
-              <span className="font-medium">{formatUsd(usdcBalance)}</span>
-            </div>
-          </div>
-
-          {/* Amount input */}
-          <div>
-            <label className="mb-1 block font-mono text-xs text-muted-foreground">
-              Amount (USDC)
-            </label>
-            <div className="relative">
-              <Input
-                type="number"
-                placeholder="0.00"
-                min="0"
-                step="0.01"
-                value={amount}
-                onChange={(e) => setAmount(e.target.value)}
-                disabled={isSubmitting}
-              />
-              {tab === "withdraw" && usdcBalance > 0 && (
-                <button
-                  onClick={handleMaxClick}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 font-mono text-xs text-foreground underline underline-offset-2 hover:text-accent"
-                >
-                  MAX
-                </button>
+            <button
+              onClick={() => setTab("bridge")}
+              className={cn(
+                "flex-1 rounded-md border-2 px-3 py-1.5 font-mono text-sm font-medium transition-colors",
+                tab === "bridge"
+                  ? "border-accent bg-accent text-white"
+                  : "border-border text-muted-foreground hover:text-foreground"
               )}
-            </div>
+            >
+              Bridge
+            </button>
           </div>
 
-          {/* Step indicator */}
-          {isDeposit && deposit.isPending && (
-            <div className="flex items-center gap-2 font-mono text-xs text-muted-foreground">
-              <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-success" />
-              {DEPOSIT_STEP_LABELS[deposit.depositStep]}
-            </div>
-          )}
-          {!isDeposit && withdraw.isPending && (
-            <div className="flex items-center gap-2 font-mono text-xs text-muted-foreground">
-              <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-destructive" />
-              {WITHDRAW_STEP_LABELS[withdraw.withdrawStep]}
-            </div>
-          )}
+          {tab === "bridge" ? (
+            <BridgeForm />
+          ) : (
+            <>
+              {/* Balance display */}
+              <div className="rounded-md border-2 border-border/30 bg-secondary p-3 font-mono text-sm">
+                <div className="flex items-center justify-between">
+                  <span className="text-muted-foreground">USDC Balance</span>
+                  <span className="font-medium">{formatUsd(usdcBalance)}</span>
+                </div>
+              </div>
 
-          {/* Submit button */}
-          <Button
-            onClick={handleSubmit}
-            disabled={isSubmitting || !amount || parseFloat(amount) <= 0}
-            variant={tab === "deposit" ? "success" : "destructive"}
-            className="w-full"
-          >
-            {buttonLabel()}
-          </Button>
+              {/* Amount input */}
+              <div>
+                <label className="mb-1 block font-mono text-xs text-muted-foreground">
+                  Amount (USDC)
+                </label>
+                <div className="relative">
+                  <Input
+                    type="number"
+                    placeholder="0.00"
+                    min="0"
+                    step="0.01"
+                    value={amount}
+                    onChange={(e) => setAmount(e.target.value)}
+                    disabled={isSubmitting}
+                  />
+                  {tab === "withdraw" && usdcBalance > 0 && (
+                    <button
+                      onClick={handleMaxClick}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 font-mono text-xs text-foreground underline underline-offset-2 hover:text-accent"
+                    >
+                      MAX
+                    </button>
+                  )}
+                </div>
+              </div>
 
-          {/* Error display */}
-          {isError && error && (
-            <p className="font-mono text-xs text-destructive">
-              {error.message}
-            </p>
+              {/* Step indicator */}
+              {isDeposit && deposit.isPending && (
+                <div className="flex items-center gap-2 font-mono text-xs text-muted-foreground">
+                  <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-success" />
+                  {DEPOSIT_STEP_LABELS[deposit.depositStep]}
+                </div>
+              )}
+              {!isDeposit && withdraw.isPending && (
+                <div className="flex items-center gap-2 font-mono text-xs text-muted-foreground">
+                  <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-destructive" />
+                  {WITHDRAW_STEP_LABELS[withdraw.withdrawStep]}
+                </div>
+              )}
+
+              {/* Submit button */}
+              <Button
+                onClick={handleSubmit}
+                disabled={isSubmitting || !amount || parseFloat(amount) <= 0}
+                variant={tab === "deposit" ? "success" : "destructive"}
+                className="w-full"
+              >
+                {buttonLabel()}
+              </Button>
+
+              {/* Error display */}
+              {isError && error && (
+                <p className="font-mono text-xs text-destructive">
+                  {error.message}
+                </p>
+              )}
+            </>
           )}
         </div>
       </div>

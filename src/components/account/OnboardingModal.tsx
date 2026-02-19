@@ -6,12 +6,14 @@ import { useCreateSubaccount } from "@/hooks/mutations/useDeposit";
 import * as Dialog from "@radix-ui/react-dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { BridgeModal } from "./BridgeModal";
 
 const statusMessages: Record<string, string> = {
   checking_account: "Checking your Derive account...",
   creating_account: "Creating your Derive account...",
   generating_session_key: "Generating session key...",
-  registering_session_key: "Please confirm the transaction in your wallet to register your session key...",
+  sponsoring_setup: "Please sign to set up your account (gas-free)...",
+  registering_session_key: "Registering session key...",
 };
 
 export function OnboardingModal() {
@@ -19,6 +21,7 @@ export function OnboardingModal() {
   const createSubaccount = useCreateSubaccount();
   const [depositAmount, setDepositAmount] = useState("0");
   const [isCreating, setIsCreating] = useState(false);
+  const [showBridge, setShowBridge] = useState(false);
 
   const isOpen = isOnboarding || status === "error" || needsAccount;
 
@@ -109,7 +112,15 @@ export function OnboardingModal() {
                   >
                     I already have a subaccount — Retry
                   </Button>
+                  <Button
+                    variant="outline"
+                    className="w-full"
+                    onClick={() => setShowBridge(true)}
+                  >
+                    Bridge funds to Derive
+                  </Button>
                 </div>
+                <BridgeModal open={showBridge} onClose={() => setShowBridge(false)} />
 
                 {createSubaccount.error && (
                   <p className="mt-3 font-mono text-xs text-destructive">
@@ -142,7 +153,9 @@ export function OnboardingModal() {
                 <div className="mt-6 flex items-center gap-3">
                   <div className="h-4 w-4 animate-spin rounded-full border-2 border-foreground border-t-transparent" />
                   <p className="font-mono text-sm text-muted-foreground">
-                    {status === "registering_session_key"
+                    {status === "sponsoring_setup"
+                      ? "Confirm the signature in your wallet..."
+                      : status === "registering_session_key"
                       ? "Waiting for wallet confirmation..."
                       : "Please wait..."}
                   </p>

@@ -15,8 +15,9 @@ import {
 } from "@/lib/derive/signing";
 import { getConfig, USDC_DECIMALS } from "@/lib/derive/constants";
 import type { Hex, WalletClient } from "viem";
-import { erc20Abi, encodeFunctionData } from "viem";
+import { createPublicClient, erc20Abi, encodeFunctionData, http } from "viem";
 import { waitForTransactionReceipt } from "wagmi/actions";
+import { getDeriveChain } from "@/lib/chain/derive";
 import { useConfig as useWagmiConfig } from "wagmi";
 import type { Config } from "wagmi";
 import { toast } from "sonner";
@@ -38,10 +39,11 @@ interface DepositParams {
 }
 
 /**
- * Transfer USDC from EOA to SCW on Derive Chain via ERC-20 transfer.
- * Returns the transaction hash once confirmed.
+ * Ensure the SCW has enough USDC on Derive Chain for the deposit.
+ * If the SCW already has sufficient balance (e.g. from bridging), skip the EOA transfer.
+ * Otherwise, transfer USDC from EOA → SCW.
  */
-async function transferUsdcToScw({
+async function ensureScwHasUsdc({
   walletClient,
   wagmiConfig,
   switchChainAsync,
@@ -53,7 +55,7 @@ async function transferUsdcToScw({
   switchChainAsync: ReturnType<typeof useSwitchChain>["switchChainAsync"];
   deriveWallet: `0x${string}`;
   amount: string;
-}): Promise<Hex> {
+}): Promise<void> {
   const config = getConfig();
   const scaledAmount = toTokenAmount(amount, USDC_DECIMALS);
 
@@ -62,22 +64,125 @@ async function transferUsdcToScw({
     await switchChainAsync({ chainId: config.chainId });
   }
 
+  const deriveEnv = (process.env.NEXT_PUBLIC_DERIVE_ENV as "testnet" | "mainnet") || "mainnet";
+  const chain = getDeriveChain(deriveEnv);
+
+  // Check SCW's on-chain USDC balance
+  const publicClient = createPublicClient({
+    chain,
+    transport: http(config.rpcUrl),
+  });
+
+  const scwBalance = await publicClient.readContract({
+    address: config.usdcAddress,
+    abi: erc20Abi,
+    functionName: "balanceOf",
+    args: [deriveWallet],
+  });
+
+  if (scwBalance >= scaledAmount) {
+    console.log("[Deposit] SCW already has sufficient USDC, skipping EOA transfer");
+    return;
+  }
+
+  // SCW needs more USDC — transfer from EOA
+  const deficit = scaledAmount - scwBalance;
   const [account] = await walletClient.getAddresses();
 
-  // ERC-20 transfer: EOA → SCW
+  console.log("[Deposit] Transferring", deficit.toString(), "USDC units from EOA to SCW");
+
   const txHash = await walletClient.writeContract({
     address: config.usdcAddress,
     abi: erc20Abi,
     functionName: "transfer",
-    args: [deriveWallet, scaledAmount],
+    args: [deriveWallet, deficit],
     account,
     chain: { id: config.chainId } as any,
   });
 
-  // Wait for on-chain confirmation
   await waitForTransactionReceipt(wagmiConfig, { hash: txHash });
+}
 
-  return txHash;
+const LIGHT_ACCOUNT_EXECUTE_ABI_INNER = [{
+  name: "execute",
+  type: "function",
+  stateMutability: "nonpayable",
+  inputs: [
+    { name: "dest", type: "address" },
+    { name: "value", type: "uint256" },
+    { name: "func", type: "bytes" },
+  ],
+  outputs: [],
+}] as const;
+
+/**
+ * Ensure the SCW has approved the deposit module (and withdraw wrapper) to spend USDC.
+ * If allowance is insufficient, sends an approval tx via SCW.execute.
+ */
+async function ensureScwApprovals({
+  walletClient,
+  wagmiConfig,
+  switchChainAsync,
+  deriveWallet,
+}: {
+  walletClient: WalletClient;
+  wagmiConfig: Config;
+  switchChainAsync: ReturnType<typeof useSwitchChain>["switchChainAsync"];
+  deriveWallet: `0x${string}`;
+}): Promise<void> {
+  const config = getConfig();
+  const deriveEnv = (process.env.NEXT_PUBLIC_DERIVE_ENV as "testnet" | "mainnet") || "mainnet";
+  const chain = getDeriveChain(deriveEnv);
+  const maxUint256 = BigInt("0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff");
+
+  if (walletClient.chain?.id !== config.chainId) {
+    await switchChainAsync({ chainId: config.chainId });
+  }
+
+  const publicClient = createPublicClient({
+    chain,
+    transport: http(config.rpcUrl),
+  });
+
+  const spenders = [config.depositModule, config.withdrawWrapper];
+
+  for (const spender of spenders) {
+    const allowance = await publicClient.readContract({
+      address: config.usdcAddress,
+      abi: erc20Abi,
+      functionName: "allowance",
+      args: [deriveWallet, spender],
+    });
+
+    if (allowance > 0n) continue;
+
+    console.log("[Deposit] SCW needs approval for", spender, "— sending via SCW.execute");
+
+    const approveCalldata = encodeFunctionData({
+      abi: erc20Abi,
+      functionName: "approve",
+      args: [spender, maxUint256],
+    });
+
+    const executeCalldata = encodeFunctionData({
+      abi: LIGHT_ACCOUNT_EXECUTE_ABI_INNER,
+      functionName: "execute",
+      args: [config.usdcAddress, 0n, approveCalldata],
+    });
+
+    const [account] = await walletClient.getAddresses();
+
+    const txHash = await walletClient.sendTransaction({
+      to: deriveWallet,
+      data: executeCalldata,
+      value: 0n,
+      account,
+      chain: { id: config.chainId } as any,
+    });
+
+    await waitForTransactionReceipt(wagmiConfig, { hash: txHash });
+    console.log("[Deposit] Approval tx confirmed for", spender);
+  }
 }
 
 /**
@@ -100,7 +205,7 @@ export function useCreateSubaccount() {
       }
 
       // Step 1: Transfer USDC from EOA → SCW
-      await transferUsdcToScw({
+      await ensureScwHasUsdc({
         walletClient,
         wagmiConfig,
         switchChainAsync,
@@ -174,14 +279,20 @@ export function useDeposit() {
         throw new Error("Not authenticated or wallet not connected");
       }
 
-      // Step 1: Transfer USDC from EOA → SCW on Derive Chain
+      // Step 1: Ensure SCW has USDC and approvals
       setDepositStep("transferring");
-      await transferUsdcToScw({
+      await ensureScwHasUsdc({
         walletClient,
         wagmiConfig,
         switchChainAsync,
         deriveWallet,
         amount,
+      });
+      await ensureScwApprovals({
+        walletClient,
+        wagmiConfig,
+        switchChainAsync,
+        deriveWallet,
       });
 
       // Step 2: Sign internal deposit (SCW → subaccount)

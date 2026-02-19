@@ -20,8 +20,34 @@ import { getSharedRestClient, getSharedWsClient } from "./useDeriveAuth";
 import { getWsLoginParams } from "@/lib/derive/auth";
 import { resolveDeriveSCW } from "@/lib/derive/utils";
 import { getConfig } from "@/lib/derive/constants";
+import { buildOnboardingActions } from "@/lib/derive/scw-actions";
+import { sendSponsoredUserOp } from "@/lib/derive/paymaster";
 
 const client = getSharedRestClient();
+
+/**
+ * Create a Derive account via the privileged create-account endpoint.
+ * This is proxied through our API route to hide the API key.
+ */
+async function createDeriveAccount(scwAddress: `0x${string}`) {
+  const res = await fetch("/api/create-account", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ address: scwAddress }),
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    // 409/duplicate is fine — account already exists
+    if (res.status === 409 || text.includes("already exists")) {
+      console.log("[Auth] Account already exists, continuing...");
+      return;
+    }
+    throw new Error(`Create account failed (${res.status}): ${text}`);
+  }
+
+  console.log("[Auth] Account created via create-account endpoint");
+}
 
 export function useDeriveAccount() {
   const { address, isConnected } = useAccount();
@@ -52,7 +78,7 @@ export function useDeriveAccount() {
       store.setActiveSubaccountId(existingSession.subaccount_id);
       store.setStatus("ready");
 
-      // Verify in background (uses session key → no popup)
+      // Verify in background (uses session key -> no popup)
       client.getSubaccounts(cachedDeriveWallet).then(
         (subs) => {
           console.log("[Auth] Session key verified, subaccounts:", subs.length);
@@ -99,18 +125,36 @@ export function useDeriveAccount() {
   }
 
   /**
-   * Register session key on-chain via sendTransaction.
-   *
-   * Flow:
-   * 1. build_register_session_key_tx (public, no auth needed)
-   * 2. Switch to Derive Chain
-   * 3. sendTransaction — broadcasts tx on-chain (1 wallet popup)
-   * 4. Poll until Derive backend recognizes the session key
-   *
-   * This is the most reliable browser path since all wallets support sendTransaction.
-   * No REST auth is needed — the tx itself proves ownership on-chain.
+   * Perform onboarding SCW actions via paymaster (gas-sponsored).
+   * Bundles: registerSessionKey + token approvals + createSubaccount
+   * into a single UserOperation that the user signs once.
    */
-  async function registerSessionKeyOnChain(
+  async function performSponsoredOnboarding(
+    deriveWallet: `0x${string}`,
+    eoaAddress: `0x${string}`,
+  ) {
+    if (!walletClient) throw new Error("Wallet client not available");
+    const config = getConfig();
+
+    // Switch to Derive Chain first
+    console.log("[Auth] Switching to Derive Chain (chainId:", config.chainId, ")...");
+    await switchChainAsync({ chainId: config.chainId });
+
+    // Build the bundle of onboarding actions
+    const actions = buildOnboardingActions(eoaAddress);
+    console.log("[Auth] Built", actions.length, "onboarding actions, submitting via paymaster...");
+
+    // Send as a sponsored UserOperation (1 wallet popup for signing)
+    const txHash = await sendSponsoredUserOp(walletClient, actions);
+    console.log("[Auth] Sponsored onboarding tx mined:", txHash);
+    return txHash;
+  }
+
+  /**
+   * Fallback: register session key via direct sendTransaction (user pays gas).
+   * Used when paymaster is unavailable.
+   */
+  async function registerSessionKeyDirect(
     deriveWallet: `0x${string}`,
     sessionKey: SessionKey,
   ) {
@@ -124,19 +168,10 @@ export function useDeriveAccount() {
       expiry_sec: sessionKey.expiry,
     });
     const txParams = buildResult.tx_params;
-    console.log("[Auth] Tx params:", JSON.stringify(txParams));
 
-    // Switch to Derive Chain
-    console.log("[Auth] Switching to Derive Chain (chainId:", config.chainId, ")...");
+    console.log("[Auth] Switching to Derive Chain...");
     await switchChainAsync({ chainId: config.chainId });
 
-    // CRITICAL: The API returns tx params with `to: matching_contract` and `from: SCW`.
-    // But sendTransaction sends from the EOA, so msg.sender = EOA, not SCW.
-    // The matching contract registers the session key for msg.sender.
-    // We must route through the SCW's execute() function so msg.sender = SCW.
-    //
-    // LightAccount.execute(address dest, uint256 value, bytes calldata func)
-    // The EOA is the owner and can call execute() directly.
     const matchingAddress = txParams.to as `0x${string}`;
     const registerCalldata = txParams.data as `0x${string}`;
 
@@ -156,31 +191,26 @@ export function useDeriveAccount() {
       args: [matchingAddress, 0n, registerCalldata],
     });
 
-    console.log("[Auth] Wrapping call through SCW.execute()");
-    console.log("[Auth] SCW:", deriveWallet, "→ matching:", matchingAddress);
-
-    const txRequest = {
-      to: deriveWallet, // Send to SCW, not matching contract
-      data: executeCalldata, // SCW.execute(matching, 0, registerSessionKey_data)
+    const txHash = await walletClient.sendTransaction({
+      to: deriveWallet,
+      data: executeCalldata,
       value: 0n,
       gas: BigInt(txParams.gas || txParams.gasLimit || 1000000),
       maxFeePerGas: txParams.maxFeePerGas ? BigInt(txParams.maxFeePerGas) : undefined,
       maxPriorityFeePerGas: txParams.maxPriorityFeePerGas ? BigInt(txParams.maxPriorityFeePerGas) : undefined,
       account: walletClient.account,
       chain: null,
-    };
+    });
 
-    console.log("[Auth] Sending SCW.execute() tx via sendTransaction... [1 wallet popup]");
-    const txHash = await walletClient.sendTransaction(txRequest);
-    console.log("[Auth] Tx broadcast:", txHash, "— polling for backend recognition...");
+    console.log("[Auth] Direct tx broadcast:", txHash);
 
-    // Set session key auth for polling — once Derive sees the on-chain registration,
-    // private API calls with this session key will start working
+    // Set session key auth for polling
     const sessionAccount = privateKeyToAccount(sessionKey.private_key);
     client.setAuth(deriveWallet, async (msg) => {
       return sessionAccount.signMessage({ message: msg });
     });
 
+    // Poll until backend recognizes the session key
     const pollTimeout = 60_000;
     const pollInterval = 3_000;
     const pollStart = Date.now();
@@ -189,32 +219,27 @@ export function useDeriveAccount() {
       await new Promise((r) => setTimeout(r, pollInterval));
       try {
         await client.getAccount(deriveWallet);
-        console.log("[Auth] Session key recognized after", Math.round((Date.now() - pollStart) / 1000), "s");
+        console.log("[Auth] Session key recognized");
         return;
       } catch (pollErr) {
-        const elapsed = Math.round((Date.now() - pollStart) / 1000);
-        // 403 = signature not yet recognized, 14000 = "Account not found" (auth works!)
         const errMsg = (pollErr as Error).message || "";
         if (errMsg.includes("14000") || errMsg.includes("Account not found")) {
-          console.log("[Auth] Session key auth works! (account not found yet — that's OK)", elapsed, "s");
+          console.log("[Auth] Session key auth works (account not found — OK)");
           return;
         }
-        console.log("[Auth] Not yet recognized...", elapsed, "s —", errMsg.slice(0, 80));
       }
     }
-
-    // Even if polling timed out, the tx was broadcast — continue anyway
-    console.warn("[Auth] Polling timed out, continuing anyway (tx:", txHash, ")");
+    console.warn("[Auth] Polling timed out, continuing anyway");
   }
 
   /**
-   * Authenticate with Derive.
+   * Full authentication flow:
    *
-   * Registration strategy:
-   * 1. On-chain registration (public endpoint — works for bootstrapping first session key)
-   * 2. Scoped registration (private endpoint — works if EOA auth is accepted)
-   *
-   * Wallet popups: 1 popup total (signTransaction or sendTransaction)
+   * 1. Resolve SCW address (deterministic, no tx)
+   * 2. Create account via privileged endpoint
+   * 3. Paymaster-sponsored onboarding (registerSessionKey + approvals + createSubaccount)
+   * 4. Register local session key for REST/WS auth
+   * 5. Fetch subaccounts -> ready
    */
   const authenticate = useCallback(async () => {
     if (!address || !walletClient) {
@@ -229,7 +254,7 @@ export function useDeriveAccount() {
       store.setStatus("checking_account");
       store.setError(null);
 
-      // === Step 1: Resolve Derive SCW (no popup) ===
+      // === Step 1: Resolve Derive SCW ===
       let deriveWallet: `0x${string}`;
       try {
         deriveWallet = await resolveDeriveWallet(address);
@@ -241,7 +266,7 @@ export function useDeriveAccount() {
       }
       store.setDeriveWallet(deriveWallet);
       saveDeriveWallet(address, deriveWallet);
-      console.log("[Auth] EOA:", address, "→ Derive SCW:", deriveWallet);
+      console.log("[Auth] EOA:", address, "-> Derive SCW:", deriveWallet);
 
       // === Step 2: Check for existing valid session key ===
       let sessionKey = loadSessionKey();
@@ -266,34 +291,51 @@ export function useDeriveAccount() {
         sessionKey = null;
       }
 
-      // === Step 3: Register new session key if needed ===
+      // === Step 3: New onboarding flow if no valid session key ===
       if (!sessionKey) {
+        // 3a. Generate session key
         store.setStatus("generating_session_key");
         sessionKey = generateSessionKey(0);
         console.log("[Auth] Generated session key:", sessionKey.public_key);
 
-        store.setStatus("registering_session_key");
-
-        // On-chain registration via sendTransaction — the only reliable browser path.
-        // This uses public endpoints only (no REST auth needed) and broadcasts the
-        // registration tx on-chain. The user gets 1 wallet popup for the tx.
+        // 3b. Create account via privileged endpoint (idempotent)
+        store.setStatus("creating_account");
         try {
-          console.log("[Auth] === On-chain session key registration ===");
-          await registerSessionKeyOnChain(deriveWallet, sessionKey);
-          console.log("[Auth] On-chain registration succeeded!");
-        } catch (onChainErr) {
-          const msg = (onChainErr as Error).message;
-          console.error("[Auth] On-chain registration failed:", msg);
-          store.setError(`Session key registration failed: ${msg}`);
-          return;
+          await createDeriveAccount(deriveWallet);
+        } catch (err) {
+          console.warn("[Auth] create-account failed (may already exist):", err);
         }
 
-        // registerSessionKeyOnChain already set session key auth + polled for recognition
-        console.log("[Auth] Session key auth is active");
+        // 3c. Sponsored onboarding: registerSessionKey + approvals + createSubaccount
+        // in a single gas-free UserOperation via Derive's paymaster.
+        store.setStatus("sponsoring_setup");
+        try {
+          await performSponsoredOnboarding(deriveWallet, sessionKey.public_key);
+          console.log("[Auth] Sponsored onboarding complete");
+
+          // Set up REST client auth with the new session key
+          const sessionAccount = privateKeyToAccount(sessionKey.private_key);
+          client.setAuth(deriveWallet, async (msg) => {
+            return sessionAccount.signMessage({ message: msg });
+          });
+        } catch (sponsoredErr) {
+          console.warn("[Auth] Sponsored onboarding failed, trying direct:", sponsoredErr);
+          // Fallback: user pays gas (requires ETH on Derive chain)
+          store.setStatus("registering_session_key");
+          try {
+            await registerSessionKeyDirect(deriveWallet, sessionKey);
+          } catch (regErr) {
+            const msg = (regErr as Error).message;
+            console.error("[Auth] Session key registration failed:", msg);
+            store.setError(`Session key registration failed: ${msg}. You may need to bridge ETH to Derive chain first.`);
+            return;
+          }
+        }
+
         saveSessionKey(sessionKey);
       }
 
-      // === Step 4: Fetch subaccounts (session key auth — no popup) ===
+      // === Step 4: Fetch subaccounts ===
       store.setStatus("checking_account");
       let subaccounts: Subaccount[] = [];
 
@@ -357,7 +399,8 @@ export function useDeriveAccount() {
       store.status === "checking_account" ||
       store.status === "creating_account" ||
       store.status === "generating_session_key" ||
-      store.status === "registering_session_key",
+      store.status === "registering_session_key" ||
+      store.status === "sponsoring_setup",
     needsAccount: store.status === "no_account",
     needsAuth: isConnected && store.status === "disconnected" && !store.sessionKey,
   };

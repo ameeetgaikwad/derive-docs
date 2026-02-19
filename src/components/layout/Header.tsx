@@ -28,6 +28,11 @@ export function Header() {
               strikely
             </span>
           </Link>
+          {process.env.NEXT_PUBLIC_DERIVE_ENV === "testnet" && (
+            <span className="rounded border border-warning/50 bg-warning/10 px-1.5 py-0.5 font-mono text-[10px] font-bold uppercase text-warning">
+              testnet
+            </span>
+          )}
 
           <div className="hidden h-4 w-px bg-border md:block" />
 

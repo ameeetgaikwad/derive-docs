@@ -5,17 +5,22 @@ interface DeriveConfig {
   restUrl: string;
   wsUrl: string;
   rpcUrl: string;
+  bundlerUrl: string;
   tradeModule: `0x${string}`;
   standardManager: `0x${string}`;
   srmSubaccountCreator: `0x${string}`;
+  subaccountCreator: `0x${string}`;
   depositModule: `0x${string}`;
   withdrawalModule: `0x${string}`;
+  withdrawWrapper: `0x${string}`;
   usdcAddress: `0x${string}`;
   usdcCashAsset: `0x${string}`;
   matching: `0x${string}`;
   subaccount: `0x${string}`;
   domainSeparator: `0x${string}`;
   lightAccountFactory: `0x${string}`;
+  entrypoint: `0x${string}`;
+  paymaster: `0x${string}`;
 }
 
 export const DERIVE_CONFIG: Record<DeriveEnv, DeriveConfig> = {
@@ -24,34 +29,44 @@ export const DERIVE_CONFIG: Record<DeriveEnv, DeriveConfig> = {
     restUrl: "https://api-demo.lyra.finance",
     wsUrl: "wss://api-demo.lyra.finance/ws",
     rpcUrl: "https://rpc-prod-testnet-0eakp60405.t.conduit.xyz",
+    bundlerUrl: "https://bundler-prod-testnet-0eakp60405.t.conduit.xyz",
     tradeModule: "0x87F2863866D85E3192a35A73b388BD625D83f2be",
     standardManager: "0x28bE681F7bEa6f465cbcA1D25A2125fe7533391C",
     srmSubaccountCreator: "0xEFC0F82f49FaaDDC8838c4640850b8dEe3b961b7",
+    subaccountCreator: "0xaA52B531BBB5e9d444Dcb304a442ABDFED27475a",
     depositModule: "0x43223Db33AdA0575D2E100829543f8B04A37a1ec",
     withdrawalModule: "0xe850641C5207dc5E9423fB15f89ae6031A05fd92",
+    withdrawWrapper: "0x2805b908a0f9ca58a2b3b7900341b4ebd0b994e9",
     usdcAddress: "0xe80F2a02398BBf1ab2C9cc52caD1978159c215BD",
     usdcCashAsset: "0x6caf294DaC985ff653d5aE75b4FF8E0A66025928",
-    matching: "0x3cc154e220c2197c5337b7Bd13363DD127Bc0C6E",
+    matching: "0xeB8d770ec18DB98Db922E9D83260A585b9F0DeAD",
     subaccount: "0xb9ed1cc0c50bca7a391a6819e9cAb466f5501d73",
     domainSeparator: "0x9bcf4dc06df5d8bf23af818d5716491b995020f377d3b7b64c29ed14e3dd1105",
     lightAccountFactory: "0x000000893a26168158fbeadd9335be5bc96592e2",
+    entrypoint: "0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789",
+    paymaster: "0x5a6499b442711feeA0Aa73C6574042EC5E2e5945",
   },
   mainnet: {
     chainId: 957,
     restUrl: "https://api.lyra.finance",
     wsUrl: "wss://api.lyra.finance/ws",
     rpcUrl: "https://rpc.derive.xyz",
+    bundlerUrl: "https://bundler-lyra-mainnet-0.t.conduit.xyz",
     tradeModule: "0xB8D20c2B7a1Ad2EE33Bc50eF10876eD3035b5e7b",
     standardManager: "0x28c9ddF9A3B29c2E6a561c1BC520954e5A33de5D",
     srmSubaccountCreator: "0x6AeeF401e07F8a1b2949fe7620Af219b9258d149",
+    subaccountCreator: "0xa44e56A6F53b2E27278B468783fe9de6b037e147",
     depositModule: "0x9B3FE5E5a3bcEa5df4E08c41Ce89C4e3Ff01Ace3",
     withdrawalModule: "0x9d0E8f5b25384C7310CB8C6aE32C8fbeb645d083",
+    withdrawWrapper: "0xea8E683D8C46ff05B871822a00461995F93df800",
     usdcAddress: "0x6879287835A86F50f784313dBEd5E5cCC5bb8481",
     usdcCashAsset: "0x57B03E14d409ADC7fAb6CFc44b5886CAD2D5f02b",
     matching: "0xeB8d770ec18DB98Db922E9D83260A585b9F0DeAD",
     subaccount: "0xE7603DF191D699d8BD9891b821347dbAb889E5a5",
     domainSeparator: "0xd96e5f90797da7ec8dc4e276260c7f3f87fedf68775fbe1ef116e996fc60441b",
     lightAccountFactory: "0x000000893a26168158fbeadd9335be5bc96592e2",
+    entrypoint: "0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789",
+    paymaster: "0xa179c3b32d3eE58353d3F277b32D1e03DD33fFCA",
   },
 };
 

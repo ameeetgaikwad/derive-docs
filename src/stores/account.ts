@@ -8,6 +8,7 @@ export type OnboardingStatus =
   | "creating_account"
   | "generating_session_key"
   | "registering_session_key"
+  | "sponsoring_setup"
   | "no_account"
   | "ready"
   | "error";
