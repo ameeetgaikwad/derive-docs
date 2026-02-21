@@ -308,6 +308,8 @@ export function useDeriveAccount() {
 
         // 3c. Sponsored onboarding: registerSessionKey + approvals + createSubaccount
         // in a single gas-free UserOperation via Derive's paymaster.
+        // Sponsored onboarding: registerSessionKey + approvals + createSubaccount
+        // in a single gas-free UserOperation via Derive's paymaster.
         store.setStatus("sponsoring_setup");
         try {
           await performSponsoredOnboarding(deriveWallet, sessionKey.public_key);
@@ -319,17 +321,12 @@ export function useDeriveAccount() {
             return sessionAccount.signMessage({ message: msg });
           });
         } catch (sponsoredErr) {
-          console.warn("[Auth] Sponsored onboarding failed, trying direct:", sponsoredErr);
-          // Fallback: user pays gas (requires ETH on Derive chain)
-          store.setStatus("registering_session_key");
-          try {
-            await registerSessionKeyDirect(deriveWallet, sessionKey);
-          } catch (regErr) {
-            const msg = (regErr as Error).message;
-            console.error("[Auth] Session key registration failed:", msg);
-            store.setError(`Session key registration failed: ${msg}. You may need to bridge ETH to Derive chain first.`);
-            return;
-          }
+          console.error("[Auth] ❌ Sponsored onboarding failed:", sponsoredErr);
+          console.error("[Auth] ❌ Error details:", (sponsoredErr as Error).message);
+          console.error("[Auth] ❌ Full error:", JSON.stringify(sponsoredErr, Object.getOwnPropertyNames(sponsoredErr as Error)));
+          // Surface the actual paymaster error instead of silently falling back
+          store.setError(`Paymaster sponsorship failed: ${(sponsoredErr as Error).message}`);
+          return;
         }
 
         saveSessionKey(sessionKey);
