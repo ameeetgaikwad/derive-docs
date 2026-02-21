@@ -153,9 +153,14 @@ export async function sendSponsoredUserOp(
     ]) as `0x${string}`;
   };
 
-  // Paymaster middleware: calls our proxy which hides the secret
+  // Paymaster middleware: calls Derive paymaster directly (bypasses Vercel proxy blocking)
+  const paymasterSecret = process.env.NEXT_PUBLIC_DERIVE_PAYMASTER_SECRET;
+  if (!paymasterSecret) {
+    throw new Error("NEXT_PUBLIC_DERIVE_PAYMASTER_SECRET is not set");
+  }
+
   const paymasterMiddleware: ClientMiddlewareFn = async (uo) => {
-    const res = await fetch("/api/paymaster", {
+    const res = await fetch(config.paymasterUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -173,6 +178,7 @@ export async function sendSponsoredUserOp(
             "paymasterAndData" in uo ? await uo.paymasterAndData : undefined,
           signature: await uo.signature,
         },
+        secret: paymasterSecret,
       }),
     });
 
