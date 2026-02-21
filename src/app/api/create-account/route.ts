@@ -4,7 +4,7 @@ const DERIVE_API_KEY = process.env.DERIVE_API_KEY;
 
 const CREATE_ACCOUNT_URLS: Record<string, string> = {
   testnet: "https://testnet.derive.xyz/api/public/create-account",
-  mainnet: "https://app.derive.xyz/api/public/create-account",
+  mainnet: "https://pro.derive.xyz/api/public/create-account",
 };
 
 export async function POST(req: Request) {

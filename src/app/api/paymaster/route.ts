@@ -1,17 +1,17 @@
 // Edge runtime avoids Vercel serverless IP blocking issues
 export const runtime = "edge";
 
-const DERIVE_PAYMASTER_SECRET = process.env.DERIVE_PAYMASTER_SECRET;
+const DERIVE_API_KEY = process.env.DERIVE_API_KEY;
 
 const PAYMASTER_URLS: Record<string, string> = {
-  testnet: "https://testnet.derive.xyz/api/paymaster",
-  mainnet: "https://app.derive.xyz/api/paymaster",
+  testnet: "https://testnet.derive.xyz/api/public/paymaster",
+  mainnet: "https://pro.derive.xyz/api/public/paymaster",
 };
 
 export async function POST(req: Request) {
-  if (!DERIVE_PAYMASTER_SECRET) {
+  if (!DERIVE_API_KEY) {
     return Response.json(
-      { error: "Paymaster not configured" },
+      { error: "Paymaster not configured — DERIVE_API_KEY missing" },
       { status: 503 },
     );
   }
@@ -27,11 +27,9 @@ export async function POST(req: Request) {
       headers: {
         "Content-Type": "application/json",
         "Accept": "application/json",
+        "Authorization": `Bearer ${DERIVE_API_KEY}`,
       },
-      body: JSON.stringify({
-        ...body,
-        secret: DERIVE_PAYMASTER_SECRET,
-      }),
+      body: JSON.stringify(body),
     });
 
     const text = await res.text();
