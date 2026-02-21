@@ -1,16 +1,16 @@
-import { NextRequest, NextResponse } from "next/server";
+// Edge runtime avoids Vercel serverless IP blocking issues
+export const runtime = "edge";
 
 const DERIVE_PAYMASTER_SECRET = process.env.DERIVE_PAYMASTER_SECRET;
 
-// Paymaster endpoints per environment
 const PAYMASTER_URLS: Record<string, string> = {
   testnet: "https://testnet.derive.xyz/api/paymaster",
   mainnet: "https://app.derive.xyz/api/paymaster",
 };
 
-export async function POST(req: NextRequest) {
+export async function POST(req: Request) {
   if (!DERIVE_PAYMASTER_SECRET) {
-    return NextResponse.json(
+    return Response.json(
       { error: "Paymaster not configured" },
       { status: 503 },
     );
@@ -24,26 +24,33 @@ export async function POST(req: NextRequest) {
 
     const res = await fetch(paymasterUrl, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+      },
       body: JSON.stringify({
         ...body,
         secret: DERIVE_PAYMASTER_SECRET,
       }),
-      cache: "no-store",
     });
 
+    const text = await res.text();
+
     if (!res.ok) {
-      const text = await res.text();
-      return NextResponse.json(
-        { error: `Paymaster error: ${text}` },
+      console.error("[Paymaster] Derive returned error:", res.status, text);
+      return Response.json(
+        { error: `Paymaster error (${res.status}): ${text}` },
         { status: res.status },
       );
     }
 
-    const data = await res.json();
-    return NextResponse.json(data);
+    return new Response(text, {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
   } catch (err) {
-    return NextResponse.json(
+    console.error("[Paymaster] Proxy error:", err);
+    return Response.json(
       { error: `Paymaster proxy error: ${(err as Error).message}` },
       { status: 500 },
     );
