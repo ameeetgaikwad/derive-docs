@@ -1,4 +1,3 @@
-// Edge runtime avoids Vercel serverless IP blocking issues
 export const runtime = "edge";
 
 const DERIVE_API_KEY = process.env.DERIVE_API_KEY;
@@ -22,6 +21,7 @@ export async function POST(req: Request) {
   try {
     const body = await req.json();
 
+    console.log(`[Paymaster] POST ${paymasterUrl}`);
     const res = await fetch(paymasterUrl, {
       method: "POST",
       headers: {
@@ -33,9 +33,9 @@ export async function POST(req: Request) {
     });
 
     const text = await res.text();
+    console.log(`[Paymaster] ${paymasterUrl} → ${res.status} body=${text.slice(0, 300)}`);
 
     if (!res.ok) {
-      console.error("[Paymaster] Derive returned error:", res.status, text);
       return Response.json(
         { error: `Paymaster error (${res.status}): ${text}` },
         { status: res.status },

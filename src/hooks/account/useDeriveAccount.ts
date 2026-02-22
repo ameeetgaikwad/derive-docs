@@ -29,7 +29,15 @@ const client = getSharedRestClient();
  * Create a Derive account via our Vercel API proxy.
  * Browser can't call Derive directly due to CORS.
  */
+const createdAccounts = new Set<string>();
+
 async function createDeriveAccount(scwAddress: `0x${string}`) {
+  // Skip if we already created this account in this session
+  if (createdAccounts.has(scwAddress)) {
+    console.log("[Auth] Account already created this session, skipping...");
+    return;
+  }
+
   const res = await fetch("/api/create-account", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -38,14 +46,17 @@ async function createDeriveAccount(scwAddress: `0x${string}`) {
 
   if (!res.ok) {
     const text = await res.text();
-    // 409/duplicate is fine — account already exists
-    if (res.status === 409 || text.includes("already exists")) {
+    console.warn("[Auth] create-account response:", res.status, text);
+    // 409/duplicate/429 rate-limit are fine — account already exists
+    if (res.status === 409 || res.status === 429 || text.includes("already exists")) {
       console.log("[Auth] Account already exists, continuing...");
+      createdAccounts.add(scwAddress);
       return;
     }
     throw new Error(`Create account failed (${res.status}): ${text}`);
   }
 
+  createdAccounts.add(scwAddress);
   console.log("[Auth] Account created via create-account endpoint");
 }
 
@@ -151,88 +162,6 @@ export function useDeriveAccount() {
   }
 
   /**
-   * Fallback: register session key via direct sendTransaction (user pays gas).
-   * Used when paymaster is unavailable.
-   */
-  async function registerSessionKeyDirect(
-    deriveWallet: `0x${string}`,
-    sessionKey: SessionKey,
-  ) {
-    if (!walletClient) throw new Error("Wallet client not available");
-    const config = getConfig();
-
-    console.log("[Auth] Building register session key tx...");
-    const buildResult = await client.buildRegisterSessionKeyTx({
-      wallet: deriveWallet,
-      public_session_key: sessionKey.public_key,
-      expiry_sec: sessionKey.expiry,
-    });
-    const txParams = buildResult.tx_params;
-
-    console.log("[Auth] Switching to Derive Chain...");
-    await switchChainAsync({ chainId: config.chainId });
-
-    const matchingAddress = txParams.to as `0x${string}`;
-    const registerCalldata = txParams.data as `0x${string}`;
-
-    const executeCalldata = encodeFunctionData({
-      abi: [{
-        name: "execute",
-        type: "function",
-        stateMutability: "nonpayable",
-        inputs: [
-          { name: "dest", type: "address" },
-          { name: "value", type: "uint256" },
-          { name: "func", type: "bytes" },
-        ],
-        outputs: [],
-      }],
-      functionName: "execute",
-      args: [matchingAddress, 0n, registerCalldata],
-    });
-
-    const txHash = await walletClient.sendTransaction({
-      to: deriveWallet,
-      data: executeCalldata,
-      value: 0n,
-      gas: BigInt(txParams.gas || txParams.gasLimit || 1000000),
-      maxFeePerGas: txParams.maxFeePerGas ? BigInt(txParams.maxFeePerGas) : undefined,
-      maxPriorityFeePerGas: txParams.maxPriorityFeePerGas ? BigInt(txParams.maxPriorityFeePerGas) : undefined,
-      account: walletClient.account,
-      chain: null,
-    });
-
-    console.log("[Auth] Direct tx broadcast:", txHash);
-
-    // Set session key auth for polling
-    const sessionAccount = privateKeyToAccount(sessionKey.private_key);
-    client.setAuth(deriveWallet, async (msg) => {
-      return sessionAccount.signMessage({ message: msg });
-    });
-
-    // Poll until backend recognizes the session key
-    const pollTimeout = 60_000;
-    const pollInterval = 3_000;
-    const pollStart = Date.now();
-
-    while (Date.now() - pollStart < pollTimeout) {
-      await new Promise((r) => setTimeout(r, pollInterval));
-      try {
-        await client.getAccount(deriveWallet);
-        console.log("[Auth] Session key recognized");
-        return;
-      } catch (pollErr) {
-        const errMsg = (pollErr as Error).message || "";
-        if (errMsg.includes("14000") || errMsg.includes("Account not found")) {
-          console.log("[Auth] Session key auth works (account not found — OK)");
-          return;
-        }
-      }
-    }
-    console.warn("[Auth] Polling timed out, continuing anyway");
-  }
-
-  /**
    * Full authentication flow:
    *
    * 1. Resolve SCW address (deterministic, no tx)
@@ -303,12 +232,10 @@ export function useDeriveAccount() {
         try {
           await createDeriveAccount(deriveWallet);
         } catch (err) {
-          console.warn("[Auth] create-account failed (may already exist):", err);
+          console.error("[Auth] create-account failed:", (err as Error).message, err);
         }
 
         // 3c. Sponsored onboarding: registerSessionKey + approvals + createSubaccount
-        // in a single gas-free UserOperation via Derive's paymaster.
-        // Sponsored onboarding: registerSessionKey + approvals + createSubaccount
         // in a single gas-free UserOperation via Derive's paymaster.
         store.setStatus("sponsoring_setup");
         try {
@@ -321,10 +248,8 @@ export function useDeriveAccount() {
             return sessionAccount.signMessage({ message: msg });
           });
         } catch (sponsoredErr) {
-          console.error("[Auth] ❌ Sponsored onboarding failed:", sponsoredErr);
-          console.error("[Auth] ❌ Error details:", (sponsoredErr as Error).message);
-          console.error("[Auth] ❌ Full error:", JSON.stringify(sponsoredErr, Object.getOwnPropertyNames(sponsoredErr as Error)));
-          // Surface the actual paymaster error instead of silently falling back
+          console.error("[Auth] Sponsored onboarding failed:", sponsoredErr);
+          console.error("[Auth] Error details:", (sponsoredErr as Error).message);
           store.setError(`Paymaster sponsorship failed: ${(sponsoredErr as Error).message}`);
           return;
         }

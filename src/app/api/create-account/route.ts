@@ -28,6 +28,7 @@ export async function POST(req: Request) {
     const env = process.env.NEXT_PUBLIC_DERIVE_ENV || "mainnet";
     const createAccountUrl = CREATE_ACCOUNT_URLS[env] ?? CREATE_ACCOUNT_URLS.mainnet;
 
+    console.log(`[CreateAccount] POST ${createAccountUrl} for ${address}`);
     const res = await fetch(createAccountUrl, {
       method: "POST",
       headers: {
@@ -38,15 +39,17 @@ export async function POST(req: Request) {
       body: JSON.stringify({ address }),
     });
 
+    const text = await res.text();
+    console.log(`[CreateAccount] ${createAccountUrl} → ${res.status} body=${text.slice(0, 500)}`);
+
     if (!res.ok) {
-      const text = await res.text();
       return Response.json(
         { error: `Create account failed: ${text}` },
         { status: res.status },
       );
     }
 
-    const data = await res.json();
+    const data = JSON.parse(text);
     return Response.json(data);
   } catch (err) {
     return Response.json(

@@ -153,35 +153,47 @@ export async function sendSponsoredUserOp(
     ]) as `0x${string}`;
   };
 
-  // Paymaster middleware: proxied through Vercel API route
+  // Paymaster middleware: proxied through our API route (adds secret server-side)
   const paymasterMiddleware: ClientMiddlewareFn = async (uo) => {
+    const payload = JSON.stringify({
+      userOp: {
+        callData: await uo.callData,
+        sender: await uo.sender,
+        nonce: toHex((await uo.nonce) as bigint),
+        initCode: "initCode" in uo ? await uo.initCode : undefined,
+        callGasLimit: toHexOrString(uo.callGasLimit),
+        verificationGasLimit: toHexOrString(uo.verificationGasLimit),
+        preVerificationGas: toHexOrString(uo.preVerificationGas),
+        maxFeePerGas: toHexOrString(uo.maxFeePerGas),
+        maxPriorityFeePerGas: toHexOrString(uo.maxPriorityFeePerGas),
+        paymasterAndData:
+          "paymasterAndData" in uo ? await uo.paymasterAndData : undefined,
+        signature: await uo.signature,
+      },
+    });
+
+    console.log("[Paymaster] Calling /api/paymaster");
     const res = await fetch("/api/paymaster", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        userOp: {
-          callData: await uo.callData,
-          sender: await uo.sender,
-          nonce: toHex((await uo.nonce) as bigint),
-          initCode: "initCode" in uo ? await uo.initCode : undefined,
-          callGasLimit: toHexOrString(uo.callGasLimit),
-          verificationGasLimit: toHexOrString(uo.verificationGasLimit),
-          preVerificationGas: toHexOrString(uo.preVerificationGas),
-          maxFeePerGas: toHexOrString(uo.maxFeePerGas),
-          maxPriorityFeePerGas: toHexOrString(uo.maxPriorityFeePerGas),
-          paymasterAndData:
-            "paymasterAndData" in uo ? await uo.paymasterAndData : undefined,
-          signature: await uo.signature,
-        },
-      }),
+      body: payload,
+      cache: "no-store",
     });
 
     if (!res.ok) {
-      throw new Error("Paymaster request failed: " + (await res.text()));
+      let errorDetail: string;
+      try {
+        const json = await res.json();
+        errorDetail = JSON.stringify(json, null, 2);
+      } catch {
+        errorDetail = await res.text();
+      }
+      console.error("[Paymaster] ERROR", res.status, errorDetail);
+      throw new Error(`Paymaster failed (${res.status}): ${errorDetail}`);
     }
 
-    const { paymasterAndData }: { paymasterAndData: `0x${string}` } =
-      await res.json();
+    const { paymasterAndData }: { paymasterAndData: `0x${string}` } = await res.json();
+    console.log("[Paymaster] Success, paymasterAndData length:", paymasterAndData.length);
     return { ...uo, paymasterAndData };
   };
 

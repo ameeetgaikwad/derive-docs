@@ -2,10 +2,8 @@
 
 import { useState } from "react";
 import { useDerive } from "@/providers/DeriveProvider";
-import { useCreateSubaccount } from "@/hooks/mutations/useDeposit";
 import * as Dialog from "@radix-ui/react-dialog";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { BridgeModal } from "./BridgeModal";
 
 const statusMessages: Record<string, string> = {
@@ -18,8 +16,6 @@ const statusMessages: Record<string, string> = {
 
 export function OnboardingModal() {
   const { status, error, isOnboarding, needsAccount, authenticate } = useDerive();
-  const createSubaccount = useCreateSubaccount();
-  const [depositAmount, setDepositAmount] = useState("0");
   const [isCreating, setIsCreating] = useState(false);
   const [showBridge, setShowBridge] = useState(false);
 
@@ -28,10 +24,11 @@ export function OnboardingModal() {
   const handleCreateAccount = async () => {
     setIsCreating(true);
     try {
-      await createSubaccount.mutateAsync({ amount: depositAmount });
+      // authenticate() handles everything via paymaster:
+      // create account → register session key → approvals → create subaccount
       await authenticate();
     } catch {
-      // Error handled by mutation
+      // Error handled by store
     } finally {
       setIsCreating(false);
     }
@@ -65,45 +62,24 @@ export function OnboardingModal() {
                   or deposit USDC first if you haven&apos;t already.
                 </Dialog.Description>
 
-                <div className="mt-4 space-y-3">
-                  <div>
-                    <label htmlFor="deposit-amount" className="font-mono text-xs font-medium text-muted-foreground">
-                      Initial USDC Deposit (optional)
-                    </label>
-                    <div className="mt-1 flex items-center gap-2">
-                      <Input
-                        id="deposit-amount"
-                        type="number"
-                        min="0"
-                        step="1"
-                        value={depositAmount}
-                        onChange={(e) => setDepositAmount(e.target.value)}
-                        placeholder="0"
-                      />
-                      <span className="font-mono text-sm font-medium text-muted-foreground">USDC</span>
-                    </div>
-                    <p className="mt-1 font-mono text-xs text-muted-foreground">
-                      Set to 0 to create an empty account. You can deposit later.
-                    </p>
-                  </div>
-
-                  <div className="space-y-2 rounded-md border-2 border-border/30 bg-secondary p-3 font-mono text-xs text-muted-foreground">
-                    <p className="font-medium text-foreground">What happens:</p>
-                    <ol className="list-inside list-decimal space-y-1">
-                      <li>Your wallet is registered with Derive</li>
-                      <li>A subaccount is created (you&apos;ll sign an EIP-712 message)</li>
-                      <li>A session key is registered for seamless trading</li>
-                    </ol>
-                  </div>
+                <div className="mt-4 space-y-2 rounded-md border-2 border-border/30 bg-secondary p-3 font-mono text-xs text-muted-foreground">
+                  <p className="font-medium text-foreground">What happens (gas-free):</p>
+                  <ol className="list-inside list-decimal space-y-1">
+                    <li>Your wallet is registered with Derive</li>
+                    <li>A subaccount is created</li>
+                    <li>A session key is registered for seamless trading</li>
+                    <li>Token approvals are set up</li>
+                  </ol>
+                  <p className="mt-1">You&apos;ll sign once — no ETH needed.</p>
                 </div>
 
                 <div className="mt-6 space-y-3">
                   <Button
                     className="w-full"
                     onClick={handleCreateAccount}
-                    disabled={isCreating || createSubaccount.isPending}
+                    disabled={isCreating}
                   >
-                    {isCreating ? "Creating..." : "Create Subaccount & Sign In"}
+                    {isCreating ? "Setting up..." : "Create Account & Sign In"}
                   </Button>
                   <Button
                     variant="outline"
@@ -122,9 +98,9 @@ export function OnboardingModal() {
                 </div>
                 <BridgeModal open={showBridge} onClose={() => setShowBridge(false)} />
 
-                {createSubaccount.error && (
+                {error && (
                   <p className="mt-3 font-mono text-xs text-destructive">
-                    {createSubaccount.error.message}
+                    {error}
                   </p>
                 )}
               </>
