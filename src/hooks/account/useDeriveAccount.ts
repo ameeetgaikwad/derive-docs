@@ -32,7 +32,7 @@ const client = getSharedRestClient();
  */
 async function createDeriveAccount(scwAddress: `0x${string}`) {
   const deriveApiKey = process.env.NEXT_PUBLIC_DERIVE_API_KEY || "";
-  const res = await fetch("https://app.derive.xyz/api/public/create-account", {
+  const res = await fetch("https://api.lyra.finance/api/public/create-account", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
