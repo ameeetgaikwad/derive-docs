@@ -29,8 +29,10 @@ const client = getSharedRestClient();
  * Create a Derive account via our Vercel API proxy.
  * Browser can't call Derive directly due to CORS.
  */
+const DERIVE_PROXY = process.env.NEXT_PUBLIC_DERIVE_PROXY || "";
+
 async function createDeriveAccount(scwAddress: `0x${string}`) {
-  const res = await fetch("/api/create-account", {
+  const res = await fetch(`${DERIVE_PROXY}/api/public/create-account`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ address: scwAddress }),
