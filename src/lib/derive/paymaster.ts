@@ -153,10 +153,9 @@ export async function sendSponsoredUserOp(
     ]) as `0x${string}`;
   };
 
-  // Paymaster middleware: proxied through local tunnel
-  const deriveProxy = process.env.NEXT_PUBLIC_DERIVE_PROXY || "";
+  // Paymaster middleware: proxied through Vercel API route
   const paymasterMiddleware: ClientMiddlewareFn = async (uo) => {
-    const res = await fetch(`${deriveProxy}/api/public/paymaster`, {
+    const res = await fetch("/api/paymaster", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
