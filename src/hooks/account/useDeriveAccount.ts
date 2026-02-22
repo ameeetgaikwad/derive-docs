@@ -26,18 +26,13 @@ import { sendSponsoredUserOp } from "@/lib/derive/paymaster";
 const client = getSharedRestClient();
 
 /**
- * Create a Derive account via the privileged create-account endpoint.
- * Called directly from browser (Vercel serverless/edge IPs blocked by Derive's Cloudflare).
- * The API key only authorizes account creation + gas sponsorship, not fund access.
+ * Create a Derive account via our Vercel API proxy.
+ * Browser can't call Derive directly due to CORS.
  */
 async function createDeriveAccount(scwAddress: `0x${string}`) {
-  const deriveApiKey = process.env.NEXT_PUBLIC_DERIVE_API_KEY || "";
-  const res = await fetch("https://app.derive.xyz/api/public/create-account", {
+  const res = await fetch("/api/create-account", {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Authorization": `Bearer ${deriveApiKey}`,
-    },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ address: scwAddress }),
   });
 

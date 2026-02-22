@@ -5,7 +5,7 @@ const DERIVE_API_KEY = process.env.DERIVE_API_KEY;
 
 const PAYMASTER_URLS: Record<string, string> = {
   testnet: "https://testnet.derive.xyz/api/public/paymaster",
-  mainnet: "https://pro.derive.xyz/api/public/paymaster",
+  mainnet: "https://app.derive.xyz/api/public/paymaster",
 };
 
 export async function POST(req: Request) {
