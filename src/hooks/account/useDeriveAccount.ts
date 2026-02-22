@@ -27,12 +27,17 @@ const client = getSharedRestClient();
 
 /**
  * Create a Derive account via the privileged create-account endpoint.
- * This is proxied through our API route to hide the API key.
+ * Called directly from browser (Vercel serverless/edge IPs blocked by Derive's Cloudflare).
+ * The API key only authorizes account creation + gas sponsorship, not fund access.
  */
 async function createDeriveAccount(scwAddress: `0x${string}`) {
-  const res = await fetch("/api/create-account", {
+  const deriveApiKey = process.env.NEXT_PUBLIC_DERIVE_API_KEY || "";
+  const res = await fetch("https://pro.derive.xyz/api/public/create-account", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${deriveApiKey}`,
+    },
     body: JSON.stringify({ address: scwAddress }),
   });
 

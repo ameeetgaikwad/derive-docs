@@ -153,11 +153,23 @@ export async function sendSponsoredUserOp(
     ]) as `0x${string}`;
   };
 
-  // Paymaster middleware: calls our /api/paymaster proxy (keeps secret server-side)
+  // Paymaster middleware: calls Derive paymaster directly from browser
+  // (Vercel edge/serverless IPs get blocked by Derive's Cloudflare,
+  //  so we call directly. The API key only authorizes gas sponsorship.)
+  const PAYMASTER_URLS: Record<number, string> = {
+    901: "https://testnet.derive.xyz/api/public/paymaster",
+    957: "https://pro.derive.xyz/api/public/paymaster",
+  };
+  const paymasterUrl = PAYMASTER_URLS[config.chainId] ?? PAYMASTER_URLS[957];
+  const deriveApiKey = process.env.NEXT_PUBLIC_DERIVE_API_KEY || "";
+
   const paymasterMiddleware: ClientMiddlewareFn = async (uo) => {
-    const res = await fetch("/api/paymaster", {
+    const res = await fetch(paymasterUrl, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${deriveApiKey}`,
+      },
       body: JSON.stringify({
         userOp: {
           callData: await uo.callData,
