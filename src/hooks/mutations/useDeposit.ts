@@ -13,7 +13,7 @@ import {
   generateNonce,
   getSignatureExpiry,
 } from "@/lib/derive/signing";
-import { getConfig, USDC_DECIMALS } from "@/lib/derive/constants";
+import { getConfig, USDC_DECIMALS, getAssetConfig, type SupportedAsset, type MarginType } from "@/lib/derive/constants";
 import type { Hex, WalletClient } from "viem";
 import { createPublicClient, erc20Abi, encodeFunctionData, http } from "viem";
 import { waitForTransactionReceipt } from "wagmi/actions";
@@ -35,29 +35,34 @@ export type DepositStep = "idle" | "transferring" | "signing" | "confirming" | "
 export type WithdrawStep = "idle" | "signing" | "confirming" | "transferring" | "done";
 
 interface DepositParams {
-  amount: string; // USDC amount (human readable, e.g. "100")
+  amount: string; // Token amount (human readable, e.g. "100")
+  assetName?: SupportedAsset; // default "USDC"
 }
 
 /**
- * Ensure the SCW has enough USDC on Derive Chain for the deposit.
+ * Ensure the SCW has enough of a given token on Derive Chain for the deposit.
  * If the SCW already has sufficient balance (e.g. from bridging), skip the EOA transfer.
- * Otherwise, transfer USDC from EOA → SCW.
+ * Otherwise, transfer tokens from EOA → SCW.
  */
-async function ensureScwHasUsdc({
+async function ensureScwHasToken({
   walletClient,
   wagmiConfig,
   switchChainAsync,
   deriveWallet,
   amount,
+  tokenAddress,
+  decimals,
 }: {
   walletClient: WalletClient;
   wagmiConfig: Config;
   switchChainAsync: ReturnType<typeof useSwitchChain>["switchChainAsync"];
   deriveWallet: `0x${string}`;
   amount: string;
+  tokenAddress: `0x${string}`;
+  decimals: number;
 }): Promise<void> {
   const config = getConfig();
-  const scaledAmount = toTokenAmount(amount, USDC_DECIMALS);
+  const scaledAmount = toTokenAmount(amount, decimals);
 
   // Ensure we're on Derive Chain
   if (walletClient.chain?.id !== config.chainId) {
@@ -67,32 +72,32 @@ async function ensureScwHasUsdc({
   const deriveEnv = (process.env.NEXT_PUBLIC_DERIVE_ENV as "testnet" | "mainnet") || "mainnet";
   const chain = getDeriveChain(deriveEnv);
 
-  // Check SCW's on-chain USDC balance
+  // Check SCW's on-chain token balance
   const publicClient = createPublicClient({
     chain,
     transport: http(config.rpcUrl),
   });
 
   const scwBalance = await publicClient.readContract({
-    address: config.usdcAddress,
+    address: tokenAddress,
     abi: erc20Abi,
     functionName: "balanceOf",
     args: [deriveWallet],
   });
 
   if (scwBalance >= scaledAmount) {
-    console.log("[Deposit] SCW already has sufficient USDC, skipping EOA transfer");
+    console.log("[Deposit] SCW already has sufficient token balance, skipping EOA transfer");
     return;
   }
 
-  // SCW needs more USDC — transfer from EOA
+  // SCW needs more tokens — transfer from EOA
   const deficit = scaledAmount - scwBalance;
   const [account] = await walletClient.getAddresses();
 
-  console.log("[Deposit] Transferring", deficit.toString(), "USDC units from EOA to SCW");
+  console.log("[Deposit] Transferring", deficit.toString(), "token units from EOA to SCW");
 
   const txHash = await walletClient.writeContract({
-    address: config.usdcAddress,
+    address: tokenAddress,
     abi: erc20Abi,
     functionName: "transfer",
     args: [deriveWallet, deficit],
@@ -116,7 +121,7 @@ const LIGHT_ACCOUNT_EXECUTE_ABI_INNER = [{
 }] as const;
 
 /**
- * Ensure the SCW has approved the deposit module (and withdraw wrapper) to spend USDC.
+ * Ensure the SCW has approved the deposit module (and withdraw wrapper) to spend a token.
  * If allowance is insufficient, sends an approval tx via SCW.execute.
  */
 async function ensureScwApprovals({
@@ -124,11 +129,13 @@ async function ensureScwApprovals({
   wagmiConfig,
   switchChainAsync,
   deriveWallet,
+  tokenAddress,
 }: {
   walletClient: WalletClient;
   wagmiConfig: Config;
   switchChainAsync: ReturnType<typeof useSwitchChain>["switchChainAsync"];
   deriveWallet: `0x${string}`;
+  tokenAddress: `0x${string}`;
 }): Promise<void> {
   const config = getConfig();
   const deriveEnv = (process.env.NEXT_PUBLIC_DERIVE_ENV as "testnet" | "mainnet") || "mainnet";
@@ -148,7 +155,7 @@ async function ensureScwApprovals({
 
   for (const spender of spenders) {
     const allowance = await publicClient.readContract({
-      address: config.usdcAddress,
+      address: tokenAddress,
       abi: erc20Abi,
       functionName: "allowance",
       args: [deriveWallet, spender],
@@ -167,7 +174,7 @@ async function ensureScwApprovals({
     const executeCalldata = encodeFunctionData({
       abi: LIGHT_ACCOUNT_EXECUTE_ABI_INNER,
       functionName: "execute",
-      args: [config.usdcAddress, 0n, approveCalldata],
+      args: [tokenAddress, 0n, approveCalldata],
     });
 
     const [account] = await walletClient.getAddresses();
@@ -185,10 +192,14 @@ async function ensureScwApprovals({
   }
 }
 
+interface CreateSubaccountParams extends DepositParams {
+  marginType?: MarginType; // default "SM"
+}
+
 /**
  * Create a new subaccount with initial deposit.
  * Uses EOA wallet signing (signTypedData) since no session key exists yet.
- * Transfers USDC from EOA → SCW first.
+ * Transfers tokens from EOA → SCW first.
  */
 export function useCreateSubaccount() {
   const { restClient, deriveWallet } = useDerive();
@@ -199,29 +210,36 @@ export function useCreateSubaccount() {
   const store = useAccountStore();
 
   return useMutation({
-    mutationFn: async ({ amount }: DepositParams) => {
+    mutationFn: async ({ amount, assetName, marginType }: CreateSubaccountParams) => {
       if (!address || !walletClient || !deriveWallet) {
         throw new Error("Wallet not connected or Derive wallet not resolved");
       }
 
-      // Step 1: Transfer USDC from EOA → SCW
-      await ensureScwHasUsdc({
+      const asset = assetName ?? "USDC";
+      const margin = marginType ?? "SM";
+      const assetConfig = getAssetConfig(asset);
+
+      // Step 1: Transfer tokens from EOA → SCW
+      await ensureScwHasToken({
         walletClient,
         wagmiConfig,
         switchChainAsync,
         deriveWallet,
         amount,
+        tokenAddress: assetConfig.tokenAddress,
+        decimals: assetConfig.decimals,
       });
 
       // Step 2: Sign deposit action with wallet
       const config = getConfig();
       const nonce = generateNonce();
       const signatureExpiry = getSignatureExpiry();
+      const managerForNewAccount = margin === "PM2" ? config.portfolioManager : config.standardManager;
 
       const depositData = encodeDepositData({
-        amount: toTokenAmount(amount, USDC_DECIMALS),
-        asset: config.usdcCashAsset,
-        managerForNewAccount: config.standardManager,
+        amount: toTokenAmount(amount, assetConfig.decimals),
+        asset: assetConfig.cashAsset,
+        managerForNewAccount,
       });
 
       const signature = await signActionWithWallet({
@@ -240,12 +258,12 @@ export function useCreateSubaccount() {
       const result = await restClient.createSubaccount({
         wallet: deriveWallet,
         amount,
-        asset_name: "USDC",
+        asset_name: asset,
         nonce,
         signature_expiry_sec: signatureExpiry,
         signer: address,
         signature: stripSigPrefix(signature),
-        margin_type: "SM",
+        margin_type: margin,
       });
 
       return result;
@@ -262,7 +280,7 @@ export function useCreateSubaccount() {
 
 /**
  * Deposit to an existing subaccount.
- * Transfers USDC from EOA → SCW first, then signs internal deposit.
+ * Transfers tokens from EOA → SCW first, then signs internal deposit.
  */
 export function useDeposit() {
   const { restClient, subaccountId, deriveWallet } = useDerive();
@@ -274,25 +292,31 @@ export function useDeposit() {
   const [depositStep, setDepositStep] = useState<DepositStep>("idle");
 
   const mutation = useMutation({
-    mutationFn: async ({ amount }: DepositParams) => {
+    mutationFn: async ({ amount, assetName }: DepositParams) => {
       if (!subaccountId || !sessionKey || !deriveWallet || !walletClient) {
         throw new Error("Not authenticated or wallet not connected");
       }
 
-      // Step 1: Ensure SCW has USDC and approvals
+      const asset = assetName ?? "USDC";
+      const assetConfig = getAssetConfig(asset);
+
+      // Step 1: Ensure SCW has tokens and approvals
       setDepositStep("transferring");
-      await ensureScwHasUsdc({
+      await ensureScwHasToken({
         walletClient,
         wagmiConfig,
         switchChainAsync,
         deriveWallet,
         amount,
+        tokenAddress: assetConfig.tokenAddress,
+        decimals: assetConfig.decimals,
       });
       await ensureScwApprovals({
         walletClient,
         wagmiConfig,
         switchChainAsync,
         deriveWallet,
+        tokenAddress: assetConfig.tokenAddress,
       });
 
       // Step 2: Sign internal deposit (SCW → subaccount)
@@ -301,10 +325,10 @@ export function useDeposit() {
       const nonce = generateNonce();
       const signatureExpiry = getSignatureExpiry();
 
-      const scaledAmount = toTokenAmount(amount, USDC_DECIMALS);
+      const scaledAmount = toTokenAmount(amount, assetConfig.decimals);
       const depositData = encodeDepositData({
         amount: scaledAmount,
-        asset: config.usdcCashAsset,
+        asset: assetConfig.cashAsset,
         managerForNewAccount: config.standardManager,
       });
 
@@ -323,7 +347,7 @@ export function useDeposit() {
       const result = await restClient.deposit({
         subaccount_id: subaccountId,
         amount,
-        asset_name: "USDC",
+        asset_name: asset,
         nonce,
         signature_expiry_sec: signatureExpiry,
         signer: sessionKey.public_key,
@@ -348,7 +372,8 @@ export function useDeposit() {
 }
 
 interface WithdrawParams {
-  amount: string; // USDC amount (human readable, e.g. "100")
+  amount: string; // Token amount (human readable, e.g. "100")
+  assetName?: SupportedAsset; // default "USDC"
 }
 
 const LIGHT_ACCOUNT_EXECUTE_ABI = [{
@@ -364,16 +389,18 @@ const LIGHT_ACCOUNT_EXECUTE_ABI = [{
 }] as const;
 
 /**
- * Transfer USDC from SCW → EOA via SCW.execute(usdc, 0, transfer(eoa, amount)).
+ * Transfer tokens from SCW → EOA via SCW.execute(token, 0, transfer(eoa, amount)).
  * EOA calls SCW.execute so msg.sender = EOA (the owner), which LightAccount allows.
  */
-async function transferUsdcFromScw({
+async function transferTokenFromScw({
   walletClient,
   wagmiConfig,
   switchChainAsync,
   deriveWallet,
   eoaAddress,
   amount,
+  tokenAddress,
+  decimals,
 }: {
   walletClient: WalletClient;
   wagmiConfig: Config;
@@ -381,9 +408,11 @@ async function transferUsdcFromScw({
   deriveWallet: `0x${string}`;
   eoaAddress: `0x${string}`;
   amount: string;
+  tokenAddress: `0x${string}`;
+  decimals: number;
 }): Promise<Hex> {
   const config = getConfig();
-  const scaledAmount = toTokenAmount(amount, USDC_DECIMALS);
+  const scaledAmount = toTokenAmount(amount, decimals);
 
   // Ensure we're on Derive Chain
   if (walletClient.chain?.id !== config.chainId) {
@@ -397,11 +426,11 @@ async function transferUsdcFromScw({
     args: [eoaAddress, scaledAmount],
   });
 
-  // Outer call: SCW.execute(usdcAddress, 0, transferCalldata)
+  // Outer call: SCW.execute(tokenAddress, 0, transferCalldata)
   const executeCalldata = encodeFunctionData({
     abi: LIGHT_ACCOUNT_EXECUTE_ABI,
     functionName: "execute",
-    args: [config.usdcAddress, 0n, transferCalldata],
+    args: [tokenAddress, 0n, transferCalldata],
   });
 
   const [account] = await walletClient.getAddresses();
@@ -421,7 +450,7 @@ async function transferUsdcFromScw({
 
 /**
  * Withdraw from an existing subaccount.
- * Signs internal withdraw (subaccount → SCW), then transfers USDC from SCW → EOA on-chain.
+ * Signs internal withdraw (subaccount → SCW), then transfers tokens from SCW → EOA on-chain.
  */
 export function useWithdraw() {
   const { restClient, subaccountId, deriveWallet } = useDerive();
@@ -434,21 +463,24 @@ export function useWithdraw() {
   const [withdrawStep, setWithdrawStep] = useState<WithdrawStep>("idle");
 
   const mutation = useMutation({
-    mutationFn: async ({ amount }: WithdrawParams) => {
+    mutationFn: async ({ amount, assetName }: WithdrawParams) => {
       if (!subaccountId || !sessionKey || !deriveWallet || !walletClient || !address) {
         throw new Error("Not authenticated or wallet not connected");
       }
+
+      const asset = assetName ?? "USDC";
+      const assetConfig = getAssetConfig(asset);
 
       // Step 1: Sign internal withdraw (subaccount → SCW on Derive ledger)
       setWithdrawStep("signing");
       const config = getConfig();
       const nonce = generateNonce();
       const signatureExpiry = getSignatureExpiry();
-      const scaledAmount = toTokenAmount(amount, USDC_DECIMALS);
+      const scaledAmount = toTokenAmount(amount, assetConfig.decimals);
 
       const withdrawData = encodeWithdrawData({
         amount: scaledAmount,
-        asset: config.usdcCashAsset,
+        asset: assetConfig.cashAsset,
       });
 
       const signature = await signAction({
@@ -466,22 +498,24 @@ export function useWithdraw() {
       const result = await restClient.withdraw({
         subaccount_id: subaccountId,
         amount,
-        asset_name: "USDC",
+        asset_name: asset,
         nonce,
         signature_expiry_sec: signatureExpiry,
         signer: sessionKey.public_key,
         signature: stripSigPrefix(signature),
       });
 
-      // Step 3: Transfer USDC from SCW → EOA on-chain
+      // Step 3: Transfer tokens from SCW → EOA on-chain
       setWithdrawStep("transferring");
-      await transferUsdcFromScw({
+      await transferTokenFromScw({
         walletClient,
         wagmiConfig,
         switchChainAsync,
         deriveWallet,
         eoaAddress: address,
         amount,
+        tokenAddress: assetConfig.tokenAddress,
+        decimals: assetConfig.decimals,
       });
 
       setWithdrawStep("done");

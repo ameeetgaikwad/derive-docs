@@ -35,7 +35,7 @@ export function encodeRegisterSessionKey(sessionKeyAddress: `0x${string}`) {
 /**
  * Encode ERC-20 approve(address,uint256) calldata for a token.
  */
-function encodeApprove(token: `0x${string}`, spender: `0x${string}`) {
+export function encodeApprove(token: `0x${string}`, spender: `0x${string}`) {
   return {
     target: token,
     value: 0n,
@@ -98,6 +98,32 @@ export function buildOnboardingActions(eoaAddress: `0x${string}`): ScwAction[] {
     encodeRegisterSessionKey(eoaAddress),
     encodeApprove(config.usdcAddress, config.depositModule),
     encodeApprove(config.usdcAddress, config.withdrawWrapper),
+    encodeCreateSubaccount(),
+  ];
+}
+
+/**
+ * Build the full bundle of SCW actions for covered call onboarding:
+ * 1. Register frontend session key
+ * 2. Register backend session key (for settlement auto-sell)
+ * 3. Approve USDC for deposit module
+ * 4. Approve USDC for withdraw wrapper
+ * 5. Approve WBTC for deposit module
+ * 6. Approve WBTC for withdraw wrapper
+ * 7. Create initial subaccount
+ */
+export function buildCoveredCallOnboardingActions(
+  frontendSessionKeyAddress: `0x${string}`,
+  backendSessionKeyAddress: `0x${string}`,
+): ScwAction[] {
+  const config = getConfig();
+  return [
+    encodeRegisterSessionKey(frontendSessionKeyAddress),
+    encodeRegisterSessionKey(backendSessionKeyAddress),
+    encodeApprove(config.usdcAddress, config.depositModule),
+    encodeApprove(config.usdcAddress, config.withdrawWrapper),
+    encodeApprove(config.wbtcAddress, config.depositModule),
+    encodeApprove(config.wbtcAddress, config.withdrawWrapper),
     encodeCreateSubaccount(),
   ];
 }

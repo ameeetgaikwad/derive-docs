@@ -347,3 +347,78 @@ export interface MarginEstimate {
   margin_used: string;
   available_margin: string;
 }
+
+// ===== RFQ Types =====
+
+export interface RFQLeg {
+  instrument_name: string;
+  direction: OrderDirection;
+  amount: string;
+}
+
+export interface RFQRequest {
+  rfq_id: string;
+  subaccount_id: number;
+  legs: RFQLeg[];
+  status: "open" | "filled" | "cancelled" | "expired";
+  created_at: number;
+}
+
+export interface RFQQuote {
+  rfq_id: string;
+  quote_id: string;
+  legs: Array<{
+    instrument_name: string;
+    direction: OrderDirection;
+    amount: string;
+    price: string;
+  }>;
+  legs_hash: string;
+  total_premium: string;
+  created_at: number;
+  valid_until: number;
+}
+
+// ===== Settlement Types =====
+
+export interface SettlementPrice {
+  instrument_name: string;
+  settlement_price: string;
+  expiry: number;
+  currency: Currency;
+}
+
+// ===== Covered Call Position Types =====
+
+export type CoveredCallStatus = "deposited" | "quoted" | "active" | "expiring" | "settled" | "closed";
+
+export interface CoveredCallPosition {
+  subaccountId: number;
+  asset: "WBTC";
+  amount: string;
+  instrumentName: string | null;
+  strike: number | null;
+  expiry: number | null;
+  premiumUsdc: string | null;
+  status: CoveredCallStatus;
+  settlementResult?: {
+    outcome: "otm" | "itm";
+    settlementPrice: number;
+    btcReturned: string;
+    pnl: string;
+  };
+}
+
+// ===== Transfer Types =====
+
+export interface TransferErc20Params {
+  subaccount_id: number;
+  recipient_subaccount_id: number;
+  address: string;
+  amount: string;
+  sub_id: string;
+  nonce: number;
+  signature_expiry_sec: number;
+  signer: string;
+  signature: string;
+}

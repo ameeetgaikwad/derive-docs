@@ -48,6 +48,26 @@ export function encodeTradeData(params: {
 }
 
 /**
+ * Encode RFQ execution data.
+ * For single-leg RFQs (our covered call MVP), this is identical to encodeTradeData.
+ * For multi-leg RFQs, the legs_hash from the quote would be incorporated.
+ *
+ * @see https://docs.derive.xyz/reference/rfq-quoting-and-execution
+ */
+export function encodeRfqExecutionData(params: {
+  assetAddress: Hex;
+  subId: bigint;
+  limitPrice: bigint;
+  amount: bigint;
+  maxFee: bigint;
+  subaccountId: bigint;
+  isBid: boolean;
+}): Hex {
+  // For single-leg RFQ, encoding is identical to regular trade
+  return encodeTradeData(params);
+}
+
+/**
  * Scale a human-readable amount to token decimals.
  * e.g., toTokenAmount("100", 6) → 100000000n (USDC has 6 decimals)
  */
@@ -55,6 +75,14 @@ export function toTokenAmount(value: string, decimals: number): bigint {
   const [intPart, decPart = ""] = value.split(".");
   const paddedDec = decPart.padEnd(decimals, "0").slice(0, decimals);
   return BigInt(intPart) * BigInt(10 ** decimals) + BigInt(paddedDec);
+}
+
+/**
+ * Scale a human-readable price/amount to 18-decimal bigint (Derive's internal representation).
+ * e.g., toUnitAmount("105000") → 105000000000000000000000n
+ */
+export function toUnitAmount(value: string): bigint {
+  return toTokenAmount(value, 18);
 }
 
 /**

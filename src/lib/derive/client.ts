@@ -4,6 +4,7 @@ import type {
   OrderParams,
   OrderResult,
   Order,
+  Trade,
   Position,
   Subaccount,
   Collateral,
@@ -11,6 +12,9 @@ import type {
   Currency,
   InstrumentType,
   RegisterSessionKeyTx,
+  RFQQuote,
+  SettlementPrice,
+  TransferErc20Params,
 } from "./types";
 import { getConfig, type DeriveEnv } from "./constants";
 
@@ -321,7 +325,7 @@ export class DeriveRestClient {
     signature_expiry_sec: number;
     signer: string;
     signature: string;
-    margin_type?: "SM" | "PM";
+    margin_type?: "SM" | "PM" | "PM2";
   }) {
     return this.rpc<{ subaccount_id: number; status: string }>("private/create_subaccount", params);
   }
@@ -395,6 +399,63 @@ export class DeriveRestClient {
     signature: string;
   }) {
     return this.rpc<{ status: string }>("private/withdraw", params);
+  }
+
+  // ===== RFQ Methods =====
+
+  /** Send an RFQ (Request for Quote) to market makers. */
+  async sendRfq(params: {
+    subaccount_id: number;
+    legs: Array<{ instrument_name: string; direction: "buy" | "sell"; amount: string }>;
+  }) {
+    return this.rpc<{ rfq_id: string }>("private/send_rfq", params);
+  }
+
+  /** Poll for quotes received on an RFQ. */
+  async pollRfqs(params: {
+    subaccount_id: number;
+    rfq_id?: string;
+    status?: "open" | "filled" | "cancelled" | "expired";
+  }) {
+    return this.rpc<{ rfqs: RFQQuote[] }>("private/poll_rfqs", params);
+  }
+
+  /** Execute a received quote. Requires EIP-712 signature for the trade. */
+  async executeQuote(params: {
+    subaccount_id: number;
+    rfq_id: string;
+    legs: Array<{
+      instrument_name: string;
+      direction: "buy" | "sell";
+      amount: string;
+      limit_price: string;
+      max_fee: string;
+    }>;
+    nonce: number;
+    signature_expiry_sec: number;
+    signer: string;
+    signature: string;
+  }) {
+    return this.rpc<{ trades: Trade[] }>("private/execute_quote", params);
+  }
+
+  /** Cancel an open RFQ. */
+  async cancelRfq(params: { subaccount_id: number; rfq_id: string }) {
+    return this.rpc<{ status: string }>("private/cancel_rfq", params);
+  }
+
+  // ===== Settlement Methods =====
+
+  /** Get historical option settlement prices for a currency. */
+  async getSettlementPrices(currency: string) {
+    return this.rpc<SettlementPrice[]>("public/get_option_settlement_prices", { currency });
+  }
+
+  // ===== Transfer Methods =====
+
+  /** Transfer ERC-20 tokens between subaccounts. Requires EIP-712 signature. */
+  async transferErc20(params: TransferErc20Params) {
+    return this.rpc<{ status: string }>("private/transfer_erc20", params);
   }
 }
 
