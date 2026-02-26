@@ -9,9 +9,8 @@ export interface StrikeOption {
   instrumentName: string;
   strike: number;
   expiry: number;
-  markPrice?: string;
-  askPrice?: string;
-  bidPrice?: string;
+  /** Best available price estimate in USD (bid or mark), 0 if unavailable */
+  estimatedPrice: number;
   /** Distance from spot as percentage, e.g. 5 = 5% OTM */
   otmPercent?: number;
 }
@@ -149,13 +148,18 @@ export function useAvailableStrikes(selectedExpiry: number | null = null, spotPr
   const strikes = useMemo((): StrikeOption[] => {
     if (suggestedInstruments.length === 0 || spotPrice <= 0) return [];
 
-    const tickerMap = new Map<string, { markPrice: string; askPrice: string; bidPrice: string }>();
+    const tickerMap = new Map<string, { markPrice: number; bidPrice: number }>();
     if (tickerQuery.data) {
       for (const ticker of tickerQuery.data) {
+        // Use best available price: bid > mark > option_pricing.mark
+        const bid = parseFloat(ticker.best_bid_price) || 0;
+        const mark = parseFloat(ticker.mark_price) || 0;
+        const optMark = parseFloat(ticker.option_pricing?.mark_price ?? "0") || 0;
+        const bestMark = mark > 0 ? mark : optMark;
+
         tickerMap.set(ticker.instrument_name, {
-          markPrice: ticker.mark_price,
-          askPrice: ticker.best_ask_price,
-          bidPrice: ticker.best_bid_price,
+          markPrice: bestMark,
+          bidPrice: bid,
         });
       }
     }
@@ -166,13 +170,16 @@ export function useAvailableStrikes(selectedExpiry: number | null = null, spotPr
       const ticker = tickerMap.get(inst.instrument_name);
       const otmPercent = ((strike - spotPrice) / spotPrice) * 100;
 
+      // Best estimate: bid if available, otherwise mark price
+      const bid = ticker?.bidPrice ?? 0;
+      const mark = ticker?.markPrice ?? 0;
+      const estimatedPrice = bid > 0 ? bid : mark;
+
       return {
         instrumentName: inst.instrument_name,
         strike,
         expiry: details.expiry,
-        markPrice: ticker?.markPrice,
-        askPrice: ticker?.askPrice,
-        bidPrice: ticker?.bidPrice,
+        estimatedPrice,
         otmPercent,
       };
     });

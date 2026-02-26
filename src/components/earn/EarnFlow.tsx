@@ -19,6 +19,8 @@ interface StrikeOption {
   strike: number;
   instrumentName: string;
   apr: number;
+  premium: number;
+  otmPercent: number;
   bidPrice: number;
   expiry: number;
   baseAssetAddress: string;
@@ -124,6 +126,8 @@ export function EarnFlow() {
         strike,
         instrumentName: inst.instrument_name,
         apr,
+        premium: bidPrice,
+        otmPercent: ((strike - spotPrice) / spotPrice) * 100,
         bidPrice,
         expiry: selectedExpiry,
         baseAssetAddress: inst.base_asset_address,

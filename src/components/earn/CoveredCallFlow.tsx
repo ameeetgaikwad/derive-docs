@@ -21,8 +21,7 @@ interface StrikeOptionForUI {
   strike: number;
   instrumentName: string;
   apr: number;
-  /** Estimated premium from mark price (for display). Real price comes from RFQ. */
-  estimatedPremium: number;
+  premium: number;
   expiry: number;
   otmPercent: number;
 }
@@ -62,26 +61,23 @@ export function CoveredCallFlow() {
     }
   }, [expiries, selectedExpiry]);
 
-  // Build UI strikes with estimated APR from mark prices
-  // Mark price is the exchange's fair value estimate — actual execution price comes from RFQ
+  // Build UI strikes with APR from live market prices (bid or mark)
   const strikes: StrikeOptionForUI[] = useMemo(() => {
     if (!selectedExpiry || spotPrice <= 0) return [];
 
     const dte = daysToExpiry(selectedExpiry);
     if (dte <= 0) return [];
 
-    return rawStrikes.map((s) => {
-      const premium = parseFloat(s.bidPrice || s.markPrice || "0");
-      const apr = premium > 0 ? calculateAPR(premium, spotPrice, dte) : 0;
-      return {
+    return rawStrikes
+      .filter((s) => s.estimatedPrice > 0)
+      .map((s) => ({
         strike: s.strike,
         instrumentName: s.instrumentName,
-        apr,
-        estimatedPremium: premium,
+        apr: calculateAPR(s.estimatedPrice, spotPrice, dte),
+        premium: s.estimatedPrice,
         expiry: s.expiry,
         otmPercent: s.otmPercent ?? 0,
-      };
-    });
+      }));
   }, [rawStrikes, selectedExpiry, spotPrice]);
 
   // Auto-select the first OTM strike (lowest strike above spot = highest premium)
@@ -102,7 +98,7 @@ export function CoveredCallFlow() {
         strikePrice: selectedStrikeData.strike,
         spotPrice,
         amount: amountNum,
-        premium: selectedStrikeData.estimatedPremium,
+        premium: selectedStrikeData.premium,
       })
     : null;
 
@@ -308,7 +304,7 @@ export function CoveredCallFlow() {
                     <span style={{ color: "#6b7280" }}>(in {dte} days)</span>
                   </div>
                   <div className="mb-4 font-mono text-[10px]" style={{ color: "#6b7280" }}>
-                    APR shown is estimated from mark prices — actual yield determined by RFQ
+                    Prices are live from the Derive exchange orderbook
                   </div>
                   <div className="mb-6">
                     <StrikeSelector

@@ -57,11 +57,26 @@ export function Header() {
 
         <div className="flex items-center gap-2">
           <AccountStatus />
-          <ConnectButton
-            showBalance={false}
-            chainStatus="icon"
-            accountStatus="address"
-          />
+          <ConnectButton.Custom>
+            {({ account, chain, openConnectModal, openAccountModal, mounted }) => {
+              const connected = mounted && account && chain;
+              return (
+                <button
+                  onClick={connected ? openAccountModal : openConnectModal}
+                  className="rounded-lg border px-3 py-1.5 font-mono text-xs font-medium transition-colors"
+                  style={{
+                    borderColor: connected ? "#1e293b" : "#22c55e",
+                    background: connected ? "#0b1018" : "rgba(34, 197, 94, 0.1)",
+                    color: connected ? "#e5e7eb" : "#22c55e",
+                  }}
+                >
+                  {connected
+                    ? `${account.address.slice(0, 6)}...${account.address.slice(-4)}`
+                    : "Connect"}
+                </button>
+              );
+            }}
+          </ConnectButton.Custom>
           <button
             className="md:hidden rounded-md border border-border p-1.5 text-muted-foreground hover:text-foreground"
             onClick={() => setMobileOpen(!mobileOpen)}
