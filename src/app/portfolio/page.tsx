@@ -5,12 +5,11 @@ import dynamic from "next/dynamic";
 const PortfolioContent = dynamic(() => import("@/components/pages/PortfolioContent"), {
   ssr: false,
   loading: () => (
-    <div className="space-y-6">
-      <h1 className="text-2xl font-bold">Portfolio</h1>
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        {Array.from({ length: 4 }).map((_, i) => (
-          <div key={i} className="h-20 animate-pulse rounded-lg border border-border bg-card" />
-        ))}
+    <div className="min-h-screen p-6" style={{ background: "#0b1018" }}>
+      <div className="mx-auto max-w-4xl space-y-6">
+        <div className="h-6 w-24 animate-pulse rounded" style={{ background: "#1e293b" }} />
+        <div className="h-24 animate-pulse rounded-xl border" style={{ borderColor: "#1e293b", background: "#111827" }} />
+        <div className="h-48 animate-pulse rounded-xl border" style={{ borderColor: "#1e293b", background: "#111827" }} />
       </div>
     </div>
   ),
