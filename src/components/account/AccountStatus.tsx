@@ -9,7 +9,7 @@ export function AccountStatus() {
   if (error) {
     return (
       <div className="flex items-center gap-2">
-        <div className="max-w-xs truncate rounded-md border-2 border-destructive bg-card px-2 py-1 font-mono text-xs text-destructive">
+        <div className="max-w-xs truncate rounded-md border border-destructive bg-card px-2 py-1 font-mono text-xs text-destructive">
           {error}
         </div>
         <Button variant="outline" size="sm" className="h-7 text-xs" onClick={authenticate}>
@@ -29,7 +29,7 @@ export function AccountStatus() {
 
   if (needsAccount) {
     return (
-      <div className="rounded-md border-2 border-warning bg-card px-2 py-1 font-mono text-xs text-warning">
+      <div className="rounded-md border border-warning bg-card px-2 py-1 font-mono text-xs text-warning">
         No Derive account
       </div>
     );
@@ -37,7 +37,7 @@ export function AccountStatus() {
 
   if (!isAuthenticated && status !== "disconnected") {
     return (
-      <div className="flex items-center gap-1.5 rounded-md border-2 border-border bg-card px-2 py-1 font-mono text-xs">
+      <div className="flex items-center gap-1.5 rounded-md border border-border bg-card px-2 py-1 font-mono text-xs">
         <div className="h-1.5 w-1.5 animate-pulse rounded-full bg-warning" />
         <span className="text-muted-foreground">{status.replace(/_/g, " ")}</span>
       </div>
@@ -47,7 +47,7 @@ export function AccountStatus() {
   if (!isAuthenticated) return null;
 
   return (
-    <div className="flex items-center gap-1.5 rounded-md border-2 border-border bg-card px-2 py-1 font-mono text-xs">
+    <div className="flex items-center gap-1.5 rounded-md border border-border bg-card px-2 py-1 font-mono text-xs">
       <div className="h-1.5 w-1.5 rounded-full bg-success" />
       <span className="text-muted-foreground">sub#{subaccountId}</span>
     </div>

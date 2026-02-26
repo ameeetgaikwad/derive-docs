@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation";
 import { ConnectButton } from "@rainbow-me/rainbowkit";
 import { cn } from "@/lib/utils";
 import { AccountStatus } from "@/components/account/AccountStatus";
+import { HedgeLogo } from "@/components/ui/HedgeLogo";
 
 const navLinks = [
   { href: "/trade", label: "trade" },
@@ -19,13 +20,13 @@ export function Header() {
   const [mobileOpen, setMobileOpen] = useState(false);
 
   return (
-    <header className="sticky top-0 z-50 border-b-2 border-border bg-card">
+    <header className="sticky top-0 z-50 border-b border-border bg-card">
       <div className="mx-auto flex h-12 max-w-7xl items-center justify-between px-4">
         <div className="flex items-center gap-6">
           <Link href="/" className="flex items-center gap-2">
-            <div className="h-2.5 w-2.5 rounded-full bg-success" />
+            <HedgeLogo size={22} />
             <span className="font-mono text-sm font-bold text-foreground">
-              strikely
+              Hedge
             </span>
           </Link>
           {process.env.NEXT_PUBLIC_DERIVE_ENV === "testnet" && (
@@ -36,16 +37,16 @@ export function Header() {
 
           <div className="hidden h-4 w-px bg-border md:block" />
 
-          <nav className="hidden items-center gap-0 md:flex">
+          <nav className="hidden items-center gap-1 md:flex">
             {navLinks.map((link) => (
               <Link
                 key={link.href}
                 href={link.href}
                 className={cn(
-                  "border-b-2 px-3 py-1 font-mono text-xs transition-colors",
+                  "rounded-md px-3 py-1.5 font-mono text-xs transition-colors",
                   pathname === link.href
-                    ? "border-foreground font-bold text-foreground"
-                    : "border-transparent text-muted-foreground hover:text-foreground"
+                    ? "font-bold text-accent"
+                    : "text-muted-foreground hover:text-foreground"
                 )}
               >
                 {link.label}
@@ -62,7 +63,7 @@ export function Header() {
             accountStatus="address"
           />
           <button
-            className="md:hidden rounded-md border-2 border-border p-1.5 text-muted-foreground hover:text-foreground"
+            className="md:hidden rounded-md border border-border p-1.5 text-muted-foreground hover:text-foreground"
             onClick={() => setMobileOpen(!mobileOpen)}
             aria-label="Toggle menu"
           >
@@ -85,7 +86,7 @@ export function Header() {
         </div>
       </div>
       {mobileOpen && (
-        <nav className="border-t-2 border-border bg-card px-4 py-2 md:hidden">
+        <nav className="border-t border-border bg-card px-4 py-2 md:hidden">
           {navLinks.map((link) => (
             <Link
               key={link.href}
@@ -94,7 +95,7 @@ export function Header() {
               className={cn(
                 "block px-3 py-2 font-mono text-xs transition-colors",
                 pathname === link.href
-                  ? "font-bold text-foreground"
+                  ? "font-bold text-accent"
                   : "text-muted-foreground hover:text-foreground"
               )}
             >

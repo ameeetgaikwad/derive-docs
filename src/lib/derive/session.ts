@@ -2,8 +2,8 @@ import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
 import { getAddress, type Hex } from "viem";
 import type { SessionKey } from "./types";
 
-const STORAGE_KEY = "strikely_session_key";
-const DERIVE_WALLET_KEY = "strikely_derive_wallet";
+const STORAGE_KEY = "hedge_session_key";
+const DERIVE_WALLET_KEY = "hedge_derive_wallet";
 const SESSION_DURATION = 7 * 24 * 60 * 60; // 7 days in seconds
 
 /**

@@ -13,7 +13,7 @@ interface EarnSummaryProps {
 
 export function EarnSummary({ outcome, strike, spotPrice, amount, collateralLabel, apr }: EarnSummaryProps) {
   const rows = [
-    { label: "APR", value: apr > 0 ? `${apr.toFixed(2)}%` : "—" },
+    { label: "APR", value: apr > 0 ? `${apr.toFixed(2)}%` : "—", highlight: apr > 0 },
     { label: "Upfront Premium", value: outcome ? `${outcome.totalPremium.toFixed(4)} ${collateralLabel}` : "—" },
     { label: "Contracts", value: outcome ? outcome.contracts.toFixed(4) : "—" },
     { label: "Strike Price", value: strike ? `$${strike.toLocaleString()}` : "—" },
@@ -22,15 +22,15 @@ export function EarnSummary({ outcome, strike, spotPrice, amount, collateralLabe
   ];
 
   return (
-    <div className="rounded-lg border p-4" style={{ borderColor: "#d4cfc6", background: "#faf8f5" }}>
-      <div className="mb-3 font-mono text-[10px] font-semibold uppercase tracking-wider" style={{ color: "#6b6560" }}>
+    <div className="rounded-lg border p-4" style={{ borderColor: "#1e293b", background: "#111827" }}>
+      <div className="mb-3 font-mono text-[10px] font-semibold uppercase tracking-wider" style={{ color: "#6b7280" }}>
         Order Summary
       </div>
       <div className="space-y-2">
         {rows.map((r) => (
           <div key={r.label} className="flex items-center justify-between font-mono text-xs">
-            <span style={{ color: "#9b9590" }}>{r.label}</span>
-            <span className="font-medium" style={{ color: "#1a1a1a" }}>{r.value}</span>
+            <span style={{ color: "#6b7280" }}>{r.label}</span>
+            <span className="font-medium" style={{ color: r.highlight ? "#22c55e" : "#e5e7eb" }}>{r.value}</span>
           </div>
         ))}
       </div>

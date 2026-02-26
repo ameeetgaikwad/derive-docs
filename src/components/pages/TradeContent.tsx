@@ -1,7 +1,13 @@
 "use client";
 
-import { EarnFlow } from "@/components/earn/EarnFlow";
+import { CoveredCallFlow } from "@/components/earn/CoveredCallFlow";
+import { CoveredCallPositions } from "@/components/earn/CoveredCallPositions";
 
 export default function TradeContent() {
-  return <EarnFlow />;
+  return (
+    <>
+      <CoveredCallFlow />
+      <CoveredCallPositions />
+    </>
+  );
 }

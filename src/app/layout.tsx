@@ -14,8 +14,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Strikely — Crypto Options Trading",
-  description: "Trade crypto options with a clean, strategy-first interface powered by Derive.",
+  title: "Hedge — BTC Covered Calls",
+  description: "Earn yield on your BTC with covered call strategies, powered by Derive.",
 };
 
 export default function RootLayout({

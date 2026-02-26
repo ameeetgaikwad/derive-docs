@@ -11,7 +11,7 @@ const wcRpc = (chainId: number) =>
   http(`https://rpc.walletconnect.org/v1/?chainId=eip155:${chainId}&projectId=${wcProjectId}`);
 
 export const config = getDefaultConfig({
-  appName: "Strikely",
+  appName: "Hedge",
   projectId: wcProjectId,
   chains: [
     deriveEnv === "testnet" ? deriveTestnet : deriveMainnet,
