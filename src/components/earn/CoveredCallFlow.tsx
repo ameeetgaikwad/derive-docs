@@ -21,22 +21,15 @@ interface StrikeOptionForUI {
   strike: number;
   instrumentName: string;
   apr: number;
-  bidPrice: number;
+  /** Estimated premium from mark price (for display). Real price comes from RFQ. */
+  estimatedPremium: number;
   expiry: number;
+  otmPercent: number;
 }
 
 export function CoveredCallFlow() {
   const { isConnected } = useAccount();
   const { isReady, isAuthenticated, authenticate } = useDerive();
-
-  const { strikes: groupedStrikes, isLoading: strikesLoading } = useAvailableStrikes();
-  const createPosition = useCreateCoveredCallPosition();
-  const requestQuote = useRequestQuote();
-  const acceptQuote = useAcceptQuote();
-  const premiumWithdraw = usePremiumWithdraw();
-  const { updatePosition } = useCoveredCallStore();
-  const { data: perpTicker } = useTicker("BTC-PERP");
-  const spotPrice = perpTicker ? parseFloat(perpTicker.index_price) : 0;
 
   const [step, setStep] = useState<FlowStep>("select");
   const [selectedExpiry, setSelectedExpiry] = useState<number | null>(null);
@@ -46,55 +39,57 @@ export function CoveredCallFlow() {
   const [rfqId, setRfqId] = useState<string | null>(null);
   const [earnedPremium, setEarnedPremium] = useState<string | null>(null);
 
+  const { data: perpTicker } = useTicker("BTC-PERP");
+  const spotPrice = perpTicker ? parseFloat(perpTicker.index_price) : 0;
+
+  // Pass selectedExpiry + spotPrice so the hook can select smart OTM strikes
+  const { expiries, strikes: rawStrikes, isLoading: instrumentsLoading, isTickersLoading } = useAvailableStrikes(selectedExpiry, spotPrice);
+  const createPosition = useCreateCoveredCallPosition();
+  const requestQuote = useRequestQuote();
+  const acceptQuote = useAcceptQuote();
+  const premiumWithdraw = usePremiumWithdraw();
+  const { updatePosition } = useCoveredCallStore();
+
   const { data: rfqData } = useQuotes(rfqId, positionSubaccountId);
 
-  const expiries = useMemo(() => {
-    return groupedStrikes.map((g) => ({
-      epoch: g.expiry,
-      label: g.expiryLabel,
-    }));
-  }, [groupedStrikes]);
-
+  // Auto-select a good default expiry (skip < 2 days, prefer ~7-14 day expiries)
   useEffect(() => {
     if (expiries.length > 0 && (selectedExpiry === null || !expiries.find((e) => e.epoch === selectedExpiry))) {
-      setSelectedExpiry(expiries[0].epoch);
+      const now = Date.now() / 1000;
+      // Prefer expiries > 2 days out for better liquidity
+      const viable = expiries.filter((e) => e.epoch - now > 2 * 86400);
+      setSelectedExpiry(viable.length > 0 ? viable[0].epoch : expiries[0].epoch);
     }
   }, [expiries, selectedExpiry]);
 
+  // Build UI strikes with estimated APR from mark prices
+  // Mark price is the exchange's fair value estimate — actual execution price comes from RFQ
   const strikes: StrikeOptionForUI[] = useMemo(() => {
     if (!selectedExpiry || spotPrice <= 0) return [];
-    const group = groupedStrikes.find((g) => g.expiry === selectedExpiry);
-    if (!group) return [];
 
     const dte = daysToExpiry(selectedExpiry);
     if (dte <= 0) return [];
 
-    return group.strikes
-      .filter((s) => {
-        const bid = parseFloat(s.bidPrice || "0");
-        return bid > 0;
-      })
-      .map((s) => {
-        const bid = parseFloat(s.bidPrice || "0");
-        const apr = calculateAPR(bid, spotPrice, dte);
-        return {
-          strike: s.strike,
-          instrumentName: s.instrumentName,
-          apr,
-          bidPrice: bid,
-          expiry: s.expiry,
-        };
-      });
-  }, [groupedStrikes, selectedExpiry, spotPrice]);
+    return rawStrikes.map((s) => {
+      const premium = parseFloat(s.bidPrice || s.markPrice || "0");
+      const apr = premium > 0 ? calculateAPR(premium, spotPrice, dte) : 0;
+      return {
+        strike: s.strike,
+        instrumentName: s.instrumentName,
+        apr,
+        estimatedPremium: premium,
+        expiry: s.expiry,
+        otmPercent: s.otmPercent ?? 0,
+      };
+    });
+  }, [rawStrikes, selectedExpiry, spotPrice]);
 
+  // Auto-select the first OTM strike (lowest strike above spot = highest premium)
   useEffect(() => {
-    if (strikes.length > 0 && spotPrice > 0 && (selectedStrike === null || !strikes.find((s) => s.strike === selectedStrike))) {
-      const closest = strikes.reduce((prev, curr) =>
-        Math.abs(curr.strike - spotPrice) < Math.abs(prev.strike - spotPrice) ? curr : prev
-      );
-      setSelectedStrike(closest.strike);
+    if (strikes.length > 0 && (selectedStrike === null || !strikes.find((s) => s.strike === selectedStrike))) {
+      setSelectedStrike(strikes[0].strike);
     }
-  }, [strikes, spotPrice, selectedStrike]);
+  }, [strikes, selectedStrike]);
 
   const amountNum = parseFloat(amount) || 0;
   const selectedStrikeData = strikes.find((s) => s.strike === selectedStrike);
@@ -107,7 +102,7 @@ export function CoveredCallFlow() {
         strikePrice: selectedStrikeData.strike,
         spotPrice,
         amount: amountNum,
-        premium: selectedStrikeData.bidPrice,
+        premium: selectedStrikeData.estimatedPremium,
       })
     : null;
 
@@ -208,6 +203,7 @@ export function CoveredCallFlow() {
   }, []);
 
   const isPending = createPosition.isPending || requestQuote.isPending || acceptQuote.isPending;
+  const loading = instrumentsLoading || isTickersLoading;
 
   const ctaLabel = (() => {
     if (isPending) return "Processing...";
@@ -301,15 +297,18 @@ export function CoveredCallFlow() {
             </div>
           ) : (
             <>
-              {strikesLoading ? (
+              {loading ? (
                 <div className="py-10 text-center font-mono text-sm" style={{ color: "#6b7280" }}>Loading strikes...</div>
               ) : (
                 <>
-                  <div className="mb-4 font-mono text-sm" style={{ color: "#9ca3af" }}>
+                  <div className="mb-1 font-mono text-sm" style={{ color: "#9ca3af" }}>
                     Choose the price at which you are happy to sell{" "}
                     <span className="font-semibold" style={{ color: "#e5e7eb" }}>BTC</span> on{" "}
                     <span className="font-semibold" style={{ color: "#e5e7eb" }}>{selectedExpiryData?.label}</span>{" "}
                     <span style={{ color: "#6b7280" }}>(in {dte} days)</span>
+                  </div>
+                  <div className="mb-4 font-mono text-[10px]" style={{ color: "#6b7280" }}>
+                    APR shown is estimated from mark prices — actual yield determined by RFQ
                   </div>
                   <div className="mb-6">
                     <StrikeSelector

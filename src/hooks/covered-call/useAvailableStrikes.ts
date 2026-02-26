@@ -5,19 +5,21 @@ import { useDerive } from "@/providers/DeriveProvider";
 import { useMemo } from "react";
 import type { Instrument } from "@/lib/derive/types";
 
-interface StrikeOption {
+export interface StrikeOption {
   instrumentName: string;
   strike: number;
   expiry: number;
-  premium?: string;
+  markPrice?: string;
   askPrice?: string;
   bidPrice?: string;
+  /** Distance from spot as percentage, e.g. 5 = 5% OTM */
+  otmPercent?: number;
 }
 
-interface GroupedStrikes {
-  expiry: number;
-  expiryLabel: string;
-  strikes: StrikeOption[];
+export interface ExpiryInfo {
+  epoch: number;
+  label: string;
+  instrumentCount: number;
 }
 
 function formatExpiryLabel(expiryTimestamp: number): string {
@@ -30,22 +32,68 @@ function formatExpiryLabel(expiryTimestamp: number): string {
 }
 
 /**
- * Fetch available BTC call options for the strike picker.
- * Filters to active, non-expired calls, groups by expiry, and fetches ticker data for premiums.
+ * OTM target percentages above spot for suggested covered call strikes.
+ * Near-ATM through deep OTM, covering typical covered call strategies.
  */
-export function useAvailableStrikes() {
+const OTM_TARGETS = [2, 5, 8, 10, 15, 20, 25, 30, 40, 50];
+
+/**
+ * For a given spot price, find the closest instrument strike to each OTM target.
+ * Returns a deduplicated, sorted list of the best matching strikes.
+ */
+function selectSuggestedStrikes(
+  instruments: Instrument[],
+  spotPrice: number
+): Map<number, Instrument> {
+  const selected = new Map<number, Instrument>();
+
+  for (const targetPct of OTM_TARGETS) {
+    const targetStrike = spotPrice * (1 + targetPct / 100);
+    let bestInst: Instrument | null = null;
+    let bestDist = Infinity;
+
+    for (const inst of instruments) {
+      const strike = parseFloat(inst.option_details!.strike);
+      const dist = Math.abs(strike - targetStrike);
+      // Only consider strikes that are OTM (above spot for calls)
+      if (strike <= spotPrice) continue;
+      if (dist < bestDist) {
+        bestDist = dist;
+        bestInst = inst;
+      }
+    }
+
+    if (bestInst) {
+      const strike = parseFloat(bestInst.option_details!.strike);
+      // Avoid duplicates — same instrument might match multiple targets
+      if (!selected.has(strike)) {
+        selected.set(strike, bestInst);
+      }
+    }
+  }
+
+  return selected;
+}
+
+/**
+ * Fetch available BTC call options for the strike picker.
+ *
+ * Strategy: Instead of showing all 50+ strikes per expiry, we algorithmically
+ * select ~8-10 OTM strikes at meaningful distances from spot (2%, 5%, 10%, etc).
+ * We use mark_price for estimated yield — the real price comes from RFQ.
+ */
+export function useAvailableStrikes(selectedExpiry: number | null = null, spotPrice: number = 0) {
   const { restClient } = useDerive();
 
   const instrumentsQuery = useQuery({
     queryKey: ["btc-call-instruments"],
     queryFn: () => restClient.getInstruments("BTC", "option"),
-    refetchInterval: 30_000,
+    refetchInterval: 60_000,
   });
 
   // Filter to active call options that haven't expired
   const callInstruments = useMemo(() => {
     if (!instrumentsQuery.data) return [];
-
     const now = Math.floor(Date.now() / 1000);
 
     return instrumentsQuery.data.filter((inst: Instrument) => {
@@ -57,22 +105,50 @@ export function useAvailableStrikes() {
     });
   }, [instrumentsQuery.data]);
 
-  // Fetch tickers for all filtered instruments
+  // Extract unique expiries
+  const expiries = useMemo((): ExpiryInfo[] => {
+    const map = new Map<number, number>();
+    for (const inst of callInstruments) {
+      const exp = inst.option_details!.expiry;
+      map.set(exp, (map.get(exp) || 0) + 1);
+    }
+    return Array.from(map.entries())
+      .map(([epoch, count]) => ({ epoch, label: formatExpiryLabel(epoch), instrumentCount: count }))
+      .sort((a, b) => a.epoch - b.epoch);
+  }, [callInstruments]);
+
+  // Instruments for the selected expiry
+  const expiryInstruments = useMemo(() => {
+    if (!selectedExpiry) return [];
+    return callInstruments.filter(
+      (inst) => inst.option_details!.expiry === selectedExpiry
+    );
+  }, [callInstruments, selectedExpiry]);
+
+  // Select suggested strikes algorithmically
+  const suggestedInstruments = useMemo(() => {
+    if (expiryInstruments.length === 0 || spotPrice <= 0) return [];
+    const selected = selectSuggestedStrikes(expiryInstruments, spotPrice);
+    return Array.from(selected.values()).sort(
+      (a, b) => parseFloat(a.option_details!.strike) - parseFloat(b.option_details!.strike)
+    );
+  }, [expiryInstruments, spotPrice]);
+
+  // Fetch tickers only for suggested instruments (small batch, ~8-10 calls)
   const tickerQuery = useQuery({
-    queryKey: ["btc-call-tickers", callInstruments.map((i) => i.instrument_name)],
+    queryKey: ["btc-call-tickers", selectedExpiry, suggestedInstruments.map((i) => i.instrument_name)],
     queryFn: async () => {
-      if (callInstruments.length === 0) return [];
-      return restClient.getTickers(callInstruments.map((i) => i.instrument_name));
+      if (suggestedInstruments.length === 0) return [];
+      return restClient.getTickers(suggestedInstruments.map((i) => i.instrument_name));
     },
-    enabled: callInstruments.length > 0,
-    refetchInterval: 30_000,
+    enabled: suggestedInstruments.length > 0,
+    refetchInterval: 15_000,
   });
 
-  // Build grouped strikes with ticker data
-  const strikes = useMemo((): GroupedStrikes[] => {
-    if (callInstruments.length === 0) return [];
+  // Build strike options with ticker data
+  const strikes = useMemo((): StrikeOption[] => {
+    if (suggestedInstruments.length === 0 || spotPrice <= 0) return [];
 
-    // Build a map of instrument_name -> ticker data
     const tickerMap = new Map<string, { markPrice: string; askPrice: string; bidPrice: string }>();
     if (tickerQuery.data) {
       for (const ticker of tickerQuery.data) {
@@ -84,49 +160,29 @@ export function useAvailableStrikes() {
       }
     }
 
-    // Group by expiry
-    const expiryMap = new Map<number, StrikeOption[]>();
-
-    for (const inst of callInstruments) {
+    return suggestedInstruments.map((inst) => {
       const details = inst.option_details!;
+      const strike = parseFloat(details.strike);
       const ticker = tickerMap.get(inst.instrument_name);
+      const otmPercent = ((strike - spotPrice) / spotPrice) * 100;
 
-      const option: StrikeOption = {
+      return {
         instrumentName: inst.instrument_name,
-        strike: parseFloat(details.strike),
+        strike,
         expiry: details.expiry,
-        premium: ticker?.markPrice,
+        markPrice: ticker?.markPrice,
         askPrice: ticker?.askPrice,
         bidPrice: ticker?.bidPrice,
+        otmPercent,
       };
-
-      const existing = expiryMap.get(details.expiry);
-      if (existing) {
-        existing.push(option);
-      } else {
-        expiryMap.set(details.expiry, [option]);
-      }
-    }
-
-    // Sort each group by strike ascending, then sort groups by expiry ascending
-    const grouped: GroupedStrikes[] = [];
-    for (const [expiry, options] of expiryMap) {
-      options.sort((a, b) => a.strike - b.strike);
-      grouped.push({
-        expiry,
-        expiryLabel: formatExpiryLabel(expiry),
-        strikes: options,
-      });
-    }
-
-    grouped.sort((a, b) => a.expiry - b.expiry);
-
-    return grouped;
-  }, [callInstruments, tickerQuery.data]);
+    });
+  }, [suggestedInstruments, tickerQuery.data, spotPrice]);
 
   return {
+    expiries,
     strikes,
-    isLoading: instrumentsQuery.isLoading || tickerQuery.isLoading,
+    isLoading: instrumentsQuery.isLoading,
+    isTickersLoading: tickerQuery.isLoading && suggestedInstruments.length > 0,
     error: instrumentsQuery.error || tickerQuery.error,
   };
 }
