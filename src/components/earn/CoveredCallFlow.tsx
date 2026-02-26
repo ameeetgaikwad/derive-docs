@@ -8,6 +8,7 @@ import { useCreateCoveredCallPosition } from "@/hooks/covered-call/useCoveredCal
 import { useRequestQuote, useQuotes, useAcceptQuote } from "@/hooks/covered-call/useRFQ";
 import { usePremiumWithdraw } from "@/hooks/covered-call/usePremiumWithdraw";
 import { useCoveredCallStore } from "@/stores/covered-call";
+import { useCollaterals } from "@/hooks/portfolio/useCollaterals";
 import { useTicker } from "@/hooks/market/useTicker";
 import { calculateAPR, daysToExpiry, calculateOutcome } from "@/lib/derive/apr";
 import { StrikeSelector } from "./StrikeSelector";
@@ -50,6 +51,14 @@ export function CoveredCallFlow() {
   const { updatePosition } = useCoveredCallStore();
 
   const { data: rfqData } = useQuotes(rfqId, positionSubaccountId);
+  const { data: collaterals = [] } = useCollaterals();
+
+  // Find BTC-related collateral (WBTC, CBBTC, etc.)
+  const btcCollateral = collaterals.find((c) =>
+    ["WBTC", "CBBTC", "LBTC", "BTC"].includes(c.asset_name)
+  );
+  const btcBalance = btcCollateral ? parseFloat(btcCollateral.amount) : 0;
+  const btcAssetName = btcCollateral?.asset_name ?? "CBBTC";
 
   // Auto-select a good default expiry (skip < 2 days, prefer ~7-14 day expiries)
   useEffect(() => {
@@ -131,7 +140,7 @@ export function CoveredCallFlow() {
 
     if (step === "deposit") {
       createPosition.mutate(
-        { amount: amount },
+        { amount: amount, btcAsset: btcAssetName as "WBTC" | "CBBTC" },
         {
           onSuccess: ({ subaccountId }) => {
             setPositionSubaccountId(subaccountId);
@@ -320,9 +329,9 @@ export function CoveredCallFlow() {
                 <AmountInput
                   amount={amount}
                   onAmountChange={(v) => { if (step === "select") setAmount(v); }}
-                  balance={0}
-                  collateralLabel="WBTC"
-                  insufficientBalance={false}
+                  balance={btcBalance}
+                  collateralLabel={btcAssetName}
+                  insufficientBalance={amountNum > btcBalance && btcBalance > 0}
                   step={0.01}
                 />
               </div>
@@ -336,7 +345,7 @@ export function CoveredCallFlow() {
                     outcome={outcome}
                     expiryLabel={selectedExpiryData?.label || ""}
                     strategyType="covered_call"
-                    collateralLabel="WBTC"
+                    collateralLabel={btcAssetName}
                   />
                 </div>
               )}
@@ -377,7 +386,7 @@ export function CoveredCallFlow() {
             strike={selectedStrike}
             spotPrice={spotPrice}
             amount={amountNum}
-            collateralLabel="WBTC"
+            collateralLabel={btcAssetName}
             apr={selectedStrikeData?.apr ?? 0}
           />
         </div>

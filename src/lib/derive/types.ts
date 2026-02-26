@@ -394,7 +394,7 @@ export type CoveredCallStatus = "deposited" | "quoted" | "active" | "expiring" |
 
 export interface CoveredCallPosition {
   subaccountId: number;
-  asset: "WBTC";
+  asset: string;
   amount: string;
   instrumentName: string | null;
   strike: number | null;

@@ -15,7 +15,7 @@ import {
   generateNonce,
   getSignatureExpiry,
 } from "@/lib/derive/signing";
-import { getConfig } from "@/lib/derive/constants";
+import { getConfig, getAssetConfig, type SupportedAsset } from "@/lib/derive/constants";
 import { toast } from "sonner";
 import { createPublicClient, erc20Abi, encodeFunctionData, http } from "viem";
 import { waitForTransactionReceipt } from "wagmi/actions";
@@ -24,8 +24,8 @@ import type { Hex } from "viem";
 import type { WalletClient } from "viem";
 import type { Config } from "wagmi";
 
-/** WBTC uses 8 decimals on Derive chain */
-const WBTC_DECIMALS = 8;
+/** BTC variants use 8 decimals on Derive chain */
+const BTC_DECIMALS = 8;
 
 /** Strip 0x prefix from signature — Derive API expects raw hex (130 chars, no prefix). */
 function stripSigPrefix(sig: string): string {
@@ -45,25 +45,29 @@ const LIGHT_ACCOUNT_EXECUTE_ABI = [{
 }] as const;
 
 /**
- * Ensure the SCW has enough WBTC on Derive Chain for the deposit.
+ * Ensure the SCW has enough BTC tokens on Derive Chain for the deposit.
  * If the SCW already has sufficient balance, skip the EOA transfer.
- * Otherwise, transfer WBTC from EOA -> SCW.
+ * Otherwise, transfer from EOA -> SCW.
  */
-async function ensureScwHasWbtc({
+async function ensureScwHasBtc({
   walletClient,
   wagmiConfig,
   switchChainAsync,
   deriveWallet,
   amount,
+  tokenAddress,
+  assetName,
 }: {
   walletClient: WalletClient;
   wagmiConfig: Config;
   switchChainAsync: ReturnType<typeof useSwitchChain>["switchChainAsync"];
   deriveWallet: `0x${string}`;
   amount: string;
+  tokenAddress: `0x${string}`;
+  assetName: string;
 }): Promise<void> {
   const config = getConfig();
-  const scaledAmount = toTokenAmount(amount, WBTC_DECIMALS);
+  const scaledAmount = toTokenAmount(amount, BTC_DECIMALS);
 
   if (walletClient.chain?.id !== config.chainId) {
     await switchChainAsync({ chainId: config.chainId });
@@ -78,24 +82,24 @@ async function ensureScwHasWbtc({
   });
 
   const scwBalance = await publicClient.readContract({
-    address: config.wbtcAddress,
+    address: tokenAddress,
     abi: erc20Abi,
     functionName: "balanceOf",
     args: [deriveWallet],
   });
 
   if (scwBalance >= scaledAmount) {
-    console.log("[CoveredCall] SCW already has sufficient WBTC, skipping EOA transfer");
+    console.log(`[CoveredCall] SCW already has sufficient ${assetName}, skipping EOA transfer`);
     return;
   }
 
   const deficit = scaledAmount - scwBalance;
   const [account] = await walletClient.getAddresses();
 
-  console.log("[CoveredCall] Transferring", deficit.toString(), "WBTC units from EOA to SCW");
+  console.log(`[CoveredCall] Transferring ${deficit.toString()} ${assetName} units from EOA to SCW`);
 
   const txHash = await walletClient.writeContract({
-    address: config.wbtcAddress,
+    address: tokenAddress,
     abi: erc20Abi,
     functionName: "transfer",
     args: [deriveWallet, deficit],
@@ -107,18 +111,22 @@ async function ensureScwHasWbtc({
 }
 
 /**
- * Ensure the SCW has approved the deposit module to spend WBTC.
+ * Ensure the SCW has approved the deposit module to spend the BTC token.
  */
-async function ensureScwWbtcApprovals({
+async function ensureScwBtcApprovals({
   walletClient,
   wagmiConfig,
   switchChainAsync,
   deriveWallet,
+  tokenAddress,
+  assetName,
 }: {
   walletClient: WalletClient;
   wagmiConfig: Config;
   switchChainAsync: ReturnType<typeof useSwitchChain>["switchChainAsync"];
   deriveWallet: `0x${string}`;
+  tokenAddress: `0x${string}`;
+  assetName: string;
 }): Promise<void> {
   const config = getConfig();
   const deriveEnv = (process.env.NEXT_PUBLIC_DERIVE_ENV as "testnet" | "mainnet") || "mainnet";
@@ -138,7 +146,7 @@ async function ensureScwWbtcApprovals({
 
   for (const spender of spenders) {
     const allowance = await publicClient.readContract({
-      address: config.wbtcAddress,
+      address: tokenAddress,
       abi: erc20Abi,
       functionName: "allowance",
       args: [deriveWallet, spender],
@@ -146,7 +154,7 @@ async function ensureScwWbtcApprovals({
 
     if (allowance > 0n) continue;
 
-    console.log("[CoveredCall] SCW needs WBTC approval for", spender, "— sending via SCW.execute");
+    console.log(`[CoveredCall] SCW needs ${assetName} approval for`, spender, "— sending via SCW.execute");
 
     const approveCalldata = encodeFunctionData({
       abi: erc20Abi,
@@ -157,7 +165,7 @@ async function ensureScwWbtcApprovals({
     const executeCalldata = encodeFunctionData({
       abi: LIGHT_ACCOUNT_EXECUTE_ABI,
       functionName: "execute",
-      args: [config.wbtcAddress, 0n, approveCalldata],
+      args: [tokenAddress, 0n, approveCalldata],
     });
 
     const [account] = await walletClient.getAddresses();
@@ -171,7 +179,7 @@ async function ensureScwWbtcApprovals({
     });
 
     await waitForTransactionReceipt(wagmiConfig, { hash: txHash });
-    console.log("[CoveredCall] WBTC approval tx confirmed for", spender);
+    console.log(`[CoveredCall] ${assetName} approval tx confirmed for`, spender);
   }
 }
 
@@ -228,7 +236,8 @@ async function transferTokenFromScw({
 }
 
 interface CreateCoveredCallParams {
-  amount: string; // WBTC amount (human readable, e.g. "1.0" for 1 BTC)
+  amount: string; // BTC amount (human readable, e.g. "1.0" for 1 BTC)
+  btcAsset?: SupportedAsset; // Which BTC variant to use (default: "CBBTC")
 }
 
 /**
@@ -250,12 +259,13 @@ export function useCreateCoveredCallPosition() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async ({ amount }: CreateCoveredCallParams) => {
+    mutationFn: async ({ amount, btcAsset = "CBBTC" }: CreateCoveredCallParams) => {
       if (!address || !walletClient || !deriveWallet || !sessionKey) {
         throw new Error("Wallet not connected or not authenticated");
       }
 
       const config = getConfig();
+      const assetConfig = getAssetConfig(btcAsset);
 
       // Step 1: Create PM2 subaccount (EOA signs via signActionWithWallet)
       const createNonce = generateNonce();
@@ -263,7 +273,7 @@ export function useCreateCoveredCallPosition() {
 
       const createDepositData = encodeDepositData({
         amount: 0n,
-        asset: config.wbtcCashAsset,
+        asset: assetConfig.cashAsset,
         managerForNewAccount: config.portfolioManager,
       });
 
@@ -282,7 +292,7 @@ export function useCreateCoveredCallPosition() {
       const createResult = await restClient.createSubaccount({
         wallet: deriveWallet,
         amount: "0",
-        asset_name: "WBTC",
+        asset_name: btcAsset,
         nonce: createNonce,
         signature_expiry_sec: createExpiry,
         signer: address,
@@ -291,33 +301,37 @@ export function useCreateCoveredCallPosition() {
       });
 
       const newSubaccountId = createResult.subaccount_id;
-      console.log("[CoveredCall] Created PM2 subaccount:", newSubaccountId);
+      console.log(`[CoveredCall] Created PM2 subaccount: ${newSubaccountId} (${btcAsset})`);
 
-      // Step 2: Transfer WBTC from EOA -> SCW if needed
-      await ensureScwHasWbtc({
+      // Step 2: Transfer BTC from EOA -> SCW if needed
+      await ensureScwHasBtc({
         walletClient,
         wagmiConfig,
         switchChainAsync,
         deriveWallet,
         amount,
+        tokenAddress: assetConfig.tokenAddress,
+        assetName: btcAsset,
       });
 
-      // Step 3: Approve deposit module for WBTC
-      await ensureScwWbtcApprovals({
+      // Step 3: Approve deposit module for BTC token
+      await ensureScwBtcApprovals({
         walletClient,
         wagmiConfig,
         switchChainAsync,
         deriveWallet,
+        tokenAddress: assetConfig.tokenAddress,
+        assetName: btcAsset,
       });
 
-      // Step 4: Deposit WBTC into the new subaccount (session key signs)
+      // Step 4: Deposit BTC into the new subaccount (session key signs)
       const depositNonce = generateNonce();
       const depositExpiry = getSignatureExpiry();
-      const scaledAmount = toTokenAmount(amount, WBTC_DECIMALS);
+      const scaledAmount = toTokenAmount(amount, BTC_DECIMALS);
 
       const depositData = encodeDepositData({
         amount: scaledAmount,
-        asset: config.wbtcCashAsset,
+        asset: assetConfig.cashAsset,
         managerForNewAccount: config.portfolioManager,
       });
 
@@ -334,19 +348,19 @@ export function useCreateCoveredCallPosition() {
       await restClient.deposit({
         subaccount_id: newSubaccountId,
         amount,
-        asset_name: "WBTC",
+        asset_name: btcAsset,
         nonce: depositNonce,
         signature_expiry_sec: depositExpiry,
         signer: sessionKey.public_key,
         signature: stripSigPrefix(depositSig),
       });
 
-      console.log("[CoveredCall] Deposited", amount, "WBTC into subaccount", newSubaccountId);
+      console.log(`[CoveredCall] Deposited ${amount} ${btcAsset} into subaccount ${newSubaccountId}`);
 
       // Step 5: Add position to store
       addPosition({
         subaccountId: newSubaccountId,
-        asset: "WBTC",
+        asset: btcAsset,
         amount,
         instrumentName: null,
         strike: null,
@@ -374,7 +388,7 @@ interface CloseCoveredCallParams {
 
 /**
  * Close a covered call position:
- * 1. Withdraw remaining WBTC from the subaccount
+ * 1. Withdraw remaining BTC collateral from the subaccount
  * 2. Withdraw remaining USDC from the subaccount
  * 3. Transfer assets from SCW -> EOA on-chain
  * 4. Update position status to "closed"
@@ -404,42 +418,50 @@ export function useCloseCoveredCallPosition() {
         transport: http(config.rpcUrl),
       });
 
-      // Step 1: Withdraw remaining WBTC from subaccount
+      // Step 1: Withdraw remaining BTC collateral from subaccount
       const collaterals = await restClient.getCollaterals(subaccountId);
-      const wbtcCollateral = collaterals.find((c) => c.asset_name === "WBTC");
+      // Find any BTC variant in the subaccount
+      const btcCollateral = collaterals.find((c) =>
+        ["WBTC", "CBBTC", "LBTC", "BTC"].includes(c.asset_name)
+      );
       const usdcCollateral = collaterals.find((c) => c.asset_name === "USDC");
 
-      if (wbtcCollateral && parseFloat(wbtcCollateral.amount) > 0) {
-        const wbtcNonce = generateNonce();
-        const wbtcExpiry = getSignatureExpiry();
-        const wbtcScaled = toTokenAmount(wbtcCollateral.amount, WBTC_DECIMALS);
+      if (btcCollateral && parseFloat(btcCollateral.amount) > 0) {
+        const btcAssetName = btcCollateral.asset_name as SupportedAsset;
+        const btcAssetConfig = (btcAssetName === "CBBTC" || btcAssetName === "WBTC")
+          ? getAssetConfig(btcAssetName)
+          : getAssetConfig("CBBTC"); // fallback
 
-        const wbtcWithdrawData = encodeWithdrawData({
-          amount: wbtcScaled,
-          asset: config.wbtcCashAsset,
+        const btcNonce = generateNonce();
+        const btcExpiry = getSignatureExpiry();
+        const btcScaled = toTokenAmount(btcCollateral.amount, BTC_DECIMALS);
+
+        const btcWithdrawData = encodeWithdrawData({
+          amount: btcScaled,
+          asset: btcAssetConfig.cashAsset,
         });
 
-        const wbtcSig = await signAction({
+        const btcSig = await signAction({
           subaccountId: BigInt(subaccountId),
-          nonce: BigInt(wbtcNonce),
+          nonce: BigInt(btcNonce),
           module: config.withdrawalModule,
-          data: wbtcWithdrawData,
-          expiry: BigInt(wbtcExpiry),
+          data: btcWithdrawData,
+          expiry: BigInt(btcExpiry),
           owner: deriveWallet,
           sessionPrivateKey: sessionKey.private_key,
         });
 
         await restClient.withdraw({
           subaccount_id: subaccountId,
-          amount: wbtcCollateral.amount,
-          asset_name: "WBTC",
-          nonce: wbtcNonce,
-          signature_expiry_sec: wbtcExpiry,
+          amount: btcCollateral.amount,
+          asset_name: btcCollateral.asset_name,
+          nonce: btcNonce,
+          signature_expiry_sec: btcExpiry,
           signer: sessionKey.public_key,
-          signature: stripSigPrefix(wbtcSig),
+          signature: stripSigPrefix(btcSig),
         });
 
-        console.log("[CoveredCall] Withdrew", wbtcCollateral.amount, "WBTC from subaccount", subaccountId);
+        console.log(`[CoveredCall] Withdrew ${btcCollateral.amount} ${btcCollateral.asset_name} from subaccount ${subaccountId}`);
       }
 
       // Step 2: Withdraw remaining USDC from subaccount
@@ -475,29 +497,32 @@ export function useCloseCoveredCallPosition() {
           signature: stripSigPrefix(usdcSig),
         });
 
-        console.log("[CoveredCall] Withdrew", usdcCollateral.amount, "USDC from subaccount", subaccountId);
+        console.log(`[CoveredCall] Withdrew ${usdcCollateral.amount} USDC from subaccount ${subaccountId}`);
       }
 
       // Step 3: Transfer assets from SCW -> EOA on-chain
-      // Check SCW balances and transfer whatever landed
-      const scwWbtcBalance = await publicClient.readContract({
-        address: config.wbtcAddress,
-        abi: erc20Abi,
-        functionName: "balanceOf",
-        args: [deriveWallet],
-      });
-
-      if (scwWbtcBalance > 0n) {
-        await transferTokenFromScw({
-          walletClient,
-          wagmiConfig,
-          switchChainAsync,
-          deriveWallet,
-          eoaAddress: address,
-          tokenAddress: config.wbtcAddress,
-          scaledAmount: scwWbtcBalance,
+      // Check SCW balances for all BTC variants and transfer whatever is there
+      const btcTokenAddresses = [config.cbbtcAddress, config.wbtcAddress];
+      for (const tokenAddr of btcTokenAddresses) {
+        if (tokenAddr === "0x0000000000000000000000000000000000000000") continue;
+        const scwBtcBalance = await publicClient.readContract({
+          address: tokenAddr,
+          abi: erc20Abi,
+          functionName: "balanceOf",
+          args: [deriveWallet],
         });
-        console.log("[CoveredCall] Transferred WBTC from SCW to EOA");
+        if (scwBtcBalance > 0n) {
+          await transferTokenFromScw({
+            walletClient,
+            wagmiConfig,
+            switchChainAsync,
+            deriveWallet,
+            eoaAddress: address,
+            tokenAddress: tokenAddr,
+            scaledAmount: scwBtcBalance,
+          });
+          console.log(`[CoveredCall] Transferred BTC tokens from SCW to EOA (${tokenAddr})`);
+        }
       }
 
       const scwUsdcBalance = await publicClient.readContract({
