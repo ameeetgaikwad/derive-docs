@@ -13,6 +13,10 @@ export interface StrikeOption {
   estimatedPrice: number;
   /** Distance from spot as percentage, e.g. 5 = 5% OTM */
   otmPercent?: number;
+  /** On-chain base asset address for trade encoding */
+  baseAssetAddress: string;
+  /** On-chain base asset sub ID for trade encoding */
+  baseAssetSubId: string;
 }
 
 export interface ExpiryInfo {
@@ -181,6 +185,8 @@ export function useAvailableStrikes(selectedExpiry: number | null = null, spotPr
         expiry: details.expiry,
         estimatedPrice,
         otmPercent,
+        baseAssetAddress: inst.base_asset_address,
+        baseAssetSubId: inst.base_asset_sub_id,
       };
     });
   }, [suggestedInstruments, tickerQuery.data, spotPrice]);

@@ -5,8 +5,7 @@ import { useAccount } from "wagmi";
 import { useConnectModal } from "@rainbow-me/rainbowkit";
 import { useDerive } from "@/providers/DeriveProvider";
 import { useAvailableStrikes } from "@/hooks/covered-call/useAvailableStrikes";
-import { useCreateCoveredCallPosition } from "@/hooks/covered-call/useCoveredCallSubaccount";
-import { useRequestQuote, useQuotes, useAcceptQuote } from "@/hooks/covered-call/useRFQ";
+import { useCreateCoveredCallPosition, useSellCall } from "@/hooks/covered-call/useCoveredCallSubaccount";
 import { useCoveredCallStore } from "@/stores/covered-call";
 import { useCollaterals } from "@/hooks/portfolio/useCollaterals";
 import { useTicker } from "@/hooks/market/useTicker";
@@ -17,7 +16,7 @@ import { OutcomePreview } from "./OutcomePreview";
 import { EarnSummary } from "./EarnSummary";
 import { cn } from "@/lib/utils";
 
-type FlowStep = "select" | "deposit" | "quote" | "accept" | "done";
+type FlowStep = "select" | "deposit" | "selling" | "done";
 
 interface StrikeOptionForUI {
   strike: number;
@@ -26,6 +25,8 @@ interface StrikeOptionForUI {
   premium: number;
   expiry: number;
   otmPercent: number;
+  baseAssetAddress: string;
+  baseAssetSubId: string;
 }
 
 function getDefaultExpiry(expiries: { epoch: number }[]): number | null {
@@ -45,7 +46,6 @@ export function CoveredCallFlow() {
   const [selectedStrike, setSelectedStrike] = useState<number | null>(null);
   const [amount, setAmount] = useState("");
   const [positionSubaccountId, setPositionSubaccountId] = useState<number | null>(null);
-  const [rfqId, setRfqId] = useState<string | null>(null);
   const [earnedPremium, setEarnedPremium] = useState<string | null>(null);
 
   const { data: perpTicker } = useTicker("BTC-PERP");
@@ -53,11 +53,9 @@ export function CoveredCallFlow() {
 
   const { expiries, strikes: rawStrikes, isLoading: instrumentsLoading, isTickersLoading } = useAvailableStrikes(selectedExpiry, spotPrice);
   const createPosition = useCreateCoveredCallPosition();
-  const requestQuote = useRequestQuote();
-  const acceptQuote = useAcceptQuote();
+  const sellCall = useSellCall();
   const { updatePosition } = useCoveredCallStore();
 
-  const { data: rfqData } = useQuotes(rfqId, positionSubaccountId);
   const { data: collaterals = [] } = useCollaterals();
 
   const btcCollateral = collaterals.find((c) =>
@@ -93,6 +91,8 @@ export function CoveredCallFlow() {
         premium: s.estimatedPrice,
         expiry: s.expiry,
         otmPercent: s.otmPercent ?? 0,
+        baseAssetAddress: s.baseAssetAddress,
+        baseAssetSubId: s.baseAssetSubId,
       }));
   }, [rawStrikes, effectiveExpiry, spotPrice]);
 
@@ -123,21 +123,6 @@ export function CoveredCallFlow() {
       })
     : null;
 
-  const bestQuote = useMemo(() => {
-    if (!rfqData || rfqData.length === 0) return null;
-    return rfqData.reduce((best, q) => {
-      const bestPremium = parseFloat(best.total_premium || "0");
-      const qPremium = parseFloat(q.total_premium || "0");
-      return qPremium > bestPremium ? q : best;
-    });
-  }, [rfqData]);
-
-  // Auto-advance from quote to accept when a quote arrives
-  const effectiveStep = step === "quote" && bestQuote ? "accept" : step;
-  if (effectiveStep !== step) {
-    setStep(effectiveStep);
-  }
-
   const handleCTA = useCallback(async () => {
     if (!isConnected) {
       openConnectModal?.();
@@ -156,47 +141,72 @@ export function CoveredCallFlow() {
         {
           onSuccess: ({ subaccountId }) => {
             setPositionSubaccountId(subaccountId);
-            setStep("quote");
+            // After deposit, immediately sell the call into the orderbook
+            setStep("selling");
+            sellCall.mutate(
+              {
+                subaccountId,
+                instrumentName: selectedStrikeData.instrumentName,
+                amount: amountNum.toString(),
+                limitPrice: selectedStrikeData.premium.toString(),
+                baseAssetAddress: selectedStrikeData.baseAssetAddress,
+                baseAssetSubId: selectedStrikeData.baseAssetSubId,
+              },
+              {
+                onSuccess: (result) => {
+                  const fills = result.trades.length;
+                  if (fills > 0) {
+                    const totalPremium = result.trades.reduce(
+                      (sum, t) => sum + parseFloat(t.price) * parseFloat(t.amount),
+                      0
+                    );
+                    setEarnedPremium(totalPremium.toFixed(2));
+                  }
+                  updatePosition(subaccountId, {
+                    instrumentName: selectedStrikeData.instrumentName,
+                    strike: selectedStrikeData.strike,
+                    expiry: selectedStrikeData.expiry,
+                  });
+                  setStep("done");
+                },
+                onError: () => {
+                  // Deposit succeeded but sell failed — stay at selling step so user can retry
+                  setStep("selling");
+                },
+              }
+            );
           },
           onError: () => {
             setStep("select");
           },
         }
       );
-    } else if (step === "quote") {
+    } else if (step === "selling") {
+      // Retry selling if it failed previously
       if (!positionSubaccountId || !selectedStrikeData) return;
-      requestQuote.mutate(
+      sellCall.mutate(
         {
           subaccountId: positionSubaccountId,
           instrumentName: selectedStrikeData.instrumentName,
           amount: amountNum.toString(),
+          limitPrice: selectedStrikeData.premium.toString(),
+          baseAssetAddress: selectedStrikeData.baseAssetAddress,
+          baseAssetSubId: selectedStrikeData.baseAssetSubId,
         },
         {
           onSuccess: (result) => {
-            setRfqId(result.rfq_id);
+            const fills = result.trades.length;
+            if (fills > 0) {
+              const totalPremium = result.trades.reduce(
+                (sum, t) => sum + parseFloat(t.price) * parseFloat(t.amount),
+                0
+              );
+              setEarnedPremium(totalPremium.toFixed(2));
+            }
             updatePosition(positionSubaccountId, {
               instrumentName: selectedStrikeData.instrumentName,
               strike: selectedStrikeData.strike,
               expiry: selectedStrikeData.expiry,
-              status: "quoted",
-            });
-          },
-        }
-      );
-    } else if (step === "accept") {
-      if (!positionSubaccountId || !rfqId || !bestQuote) return;
-      acceptQuote.mutate(
-        {
-          subaccountId: positionSubaccountId,
-          rfqId,
-          quote: bestQuote,
-        },
-        {
-          onSuccess: () => {
-            setEarnedPremium(bestQuote.total_premium);
-            updatePosition(positionSubaccountId, {
-              premiumUsdc: bestQuote.total_premium,
-              status: "active",
             });
             setStep("done");
           },
@@ -206,19 +216,17 @@ export function CoveredCallFlow() {
   }, [
     isConnected, openConnectModal, isAuthenticated, authenticate, step,
     selectedStrikeData, amountNum, amount, btcAssetName,
-    createPosition, positionSubaccountId, requestQuote,
-    rfqId, bestQuote, acceptQuote, updatePosition,
+    createPosition, sellCall, positionSubaccountId, updatePosition,
   ]);
 
   const handleReset = useCallback(() => {
     setStep("select");
     setPositionSubaccountId(null);
-    setRfqId(null);
     setEarnedPremium(null);
     setAmount("");
   }, []);
 
-  const isPending = createPosition.isPending || requestQuote.isPending || acceptQuote.isPending;
+  const isPending = createPosition.isPending || sellCall.isPending;
   const loading = instrumentsLoading || isTickersLoading;
 
   const ctaLabel = (() => {
@@ -227,15 +235,11 @@ export function CoveredCallFlow() {
     if (!isAuthenticated) return "Sign in to Derive";
     switch (step) {
       case "select":
-        return "Deposit BTC & Create Position";
+        return "Deposit BTC & Sell Call";
       case "deposit":
-        return "Deposit BTC & Create Position";
-      case "quote":
-        return rfqId ? "Waiting for quotes..." : "Get Quotes";
-      case "accept":
-        return bestQuote
-          ? `Sell Call for $${parseFloat(bestQuote.total_premium).toLocaleString(undefined, { maximumFractionDigits: 2 })} premium`
-          : "Waiting for quotes...";
+        return "Depositing...";
+      case "selling":
+        return sellCall.isPending ? "Selling Call..." : "Retry Sell Call";
       case "done":
         return "Position Created";
     }
@@ -243,7 +247,6 @@ export function CoveredCallFlow() {
 
   const ctaDisabled = isPending
     || (step === "select" && (!selectedStrikeData || amountNum <= 0))
-    || (step === "quote" && !!rfqId && !bestQuote)
     || step === "done";
 
   return (
@@ -279,8 +282,7 @@ export function CoveredCallFlow() {
             {step !== "select" && (
               <div className="rounded-full border border-accent/20 bg-accent/10 px-3 py-1 text-[10px] font-semibold uppercase tracking-wider text-accent">
                 {step === "deposit" && "Depositing..."}
-                {step === "quote" && "Getting Quotes"}
-                {step === "accept" && "Quote Ready"}
+                {step === "selling" && "Selling Call"}
                 {step === "done" && "Complete"}
               </div>
             )}
@@ -356,20 +358,6 @@ export function CoveredCallFlow() {
                     strategyType="covered_call"
                     collateralLabel={btcDisplayName}
                   />
-                </div>
-              )}
-
-              {step === "accept" && bestQuote && (
-                <div className="mb-5 rounded-[10px] border-[0.5px] border-success/30 bg-success/5 p-4">
-                  <div className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-success">
-                    Best Quote Received
-                  </div>
-                  <div className="text-lg font-bold tracking-[-0.03em] text-foreground font-heading">
-                    ${parseFloat(bestQuote.total_premium).toLocaleString(undefined, { maximumFractionDigits: 2 })} <span className="text-xs text-muted-foreground">USDC</span>
-                  </div>
-                  <div className="mt-1 text-xs text-muted-foreground">
-                    Expires {new Date(bestQuote.valid_until * 1000).toLocaleTimeString()}
-                  </div>
                 </div>
               )}
 

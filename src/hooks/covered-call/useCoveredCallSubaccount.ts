@@ -9,6 +9,7 @@ import { useConfig as useWagmiConfig } from "wagmi";
 import {
   encodeDepositData,
   encodeWithdrawData,
+  encodeTradeData,
   toTokenAmount,
   signAction,
   generateNonce,
@@ -17,6 +18,7 @@ import {
 import { getConfig, getAssetConfig, type SupportedAsset } from "@/lib/derive/constants";
 import { sendSponsoredUserOp } from "@/lib/derive/paymaster";
 import { encodeApprove, encodeCreateSubaccount, type ScwAction } from "@/lib/derive/scw-actions";
+import { toBN } from "@/lib/derive/utils";
 import { toast } from "sonner";
 import { createPublicClient, erc20Abi, encodeFunctionData, formatUnits, http } from "viem";
 import { waitForTransactionReceipt } from "wagmi/actions";
@@ -289,6 +291,98 @@ export function useCreateCoveredCallPosition() {
     },
     onError: (error) => {
       toast.error(`Failed to create covered call position: ${error.message}`);
+    },
+  });
+}
+
+interface SellCallParams {
+  subaccountId: number;
+  instrumentName: string;
+  amount: string; // human-readable e.g. "0.1"
+  limitPrice: string; // USD price per option e.g. "1234.56"
+  baseAssetAddress: string;
+  baseAssetSubId: string;
+}
+
+/**
+ * Sell a call option directly into the orderbook.
+ * Uses the covered-call subaccount's session key to sign a limit sell order.
+ */
+export function useSellCall() {
+  const { restClient, deriveWallet } = useDerive();
+  const { sessionKey } = useAccountStore();
+  const { updatePosition } = useCoveredCallStore();
+
+  return useMutation({
+    mutationFn: async (params: SellCallParams) => {
+      if (!sessionKey || !deriveWallet) {
+        throw new Error("Not authenticated");
+      }
+
+      const config = getConfig();
+      const nonce = generateNonce();
+      const signatureExpiry = getSignatureExpiry();
+
+      const amountBN = toBN(params.amount);
+      const limitPriceBN = toBN(params.limitPrice);
+      const maxFeeBN = toBN("100");
+
+      const tradeData = encodeTradeData({
+        assetAddress: params.baseAssetAddress as Hex,
+        subId: BigInt(params.baseAssetSubId),
+        limitPrice: limitPriceBN,
+        amount: amountBN,
+        maxFee: maxFeeBN,
+        subaccountId: BigInt(params.subaccountId),
+        isBid: false, // selling
+      });
+
+      const signature = await signAction({
+        subaccountId: BigInt(params.subaccountId),
+        nonce: BigInt(nonce),
+        module: config.tradeModule,
+        data: tradeData,
+        expiry: BigInt(signatureExpiry),
+        owner: deriveWallet,
+        sessionPrivateKey: sessionKey.private_key,
+      });
+
+      const result = await restClient.submitOrder({
+        instrument_name: params.instrumentName,
+        direction: "sell",
+        order_type: "limit",
+        amount: params.amount,
+        limit_price: params.limitPrice,
+        time_in_force: "gtc",
+        subaccount_id: params.subaccountId,
+        nonce,
+        signature_expiry_sec: signatureExpiry,
+        signer: sessionKey.public_key,
+        signature: stripSigPrefix(signature),
+        max_fee: "100",
+      });
+
+      return result;
+    },
+    onSuccess: (result, params) => {
+      const fills = result.trades.length;
+      if (fills > 0) {
+        const totalPremium = result.trades.reduce(
+          (sum, t) => sum + parseFloat(t.price) * parseFloat(t.amount),
+          0
+        );
+        toast.success(`Call sold! Earned $${totalPremium.toFixed(2)} premium`);
+        updatePosition(params.subaccountId, {
+          premiumUsdc: totalPremium.toFixed(2),
+          status: "active",
+        });
+      } else {
+        toast.success("Sell order placed on book");
+        updatePosition(params.subaccountId, { status: "quoted" });
+      }
+    },
+    onError: (error) => {
+      toast.error(`Failed to sell call: ${error.message}`);
     },
   });
 }
