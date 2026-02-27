@@ -22,15 +22,15 @@ export function EarnSummary({ outcome, strike, spotPrice, amount, collateralLabe
   ];
 
   return (
-    <div className="rounded-lg border p-4" style={{ borderColor: "#1e293b", background: "#111827" }}>
-      <div className="mb-3 font-mono text-[10px] font-semibold uppercase tracking-wider" style={{ color: "#6b7280" }}>
+    <div className="rounded-[10px] border-[0.5px] border-border bg-card p-4">
+      <div className="mb-3 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
         Order Summary
       </div>
       <div className="space-y-2">
         {rows.map((r) => (
-          <div key={r.label} className="flex items-center justify-between font-mono text-xs">
-            <span style={{ color: "#6b7280" }}>{r.label}</span>
-            <span className="font-medium" style={{ color: r.highlight ? "#22c55e" : "#e5e7eb" }}>{r.value}</span>
+          <div key={r.label} className="flex items-center justify-between text-xs">
+            <span className="text-muted-foreground">{r.label}</span>
+            <span className={r.highlight ? "font-medium text-accent" : "font-medium text-foreground"}>{r.value}</span>
           </div>
         ))}
       </div>

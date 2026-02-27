@@ -5,14 +5,15 @@ import { usePositionMonitor } from "@/hooks/covered-call/usePositionMonitor";
 import { useSettlementDetector } from "@/hooks/covered-call/useSettlementDetector";
 import { useCloseCoveredCallPosition } from "@/hooks/covered-call/useCoveredCallSubaccount";
 import type { CoveredCallPosition, CoveredCallStatus } from "@/lib/derive/types";
+import { cn } from "@/lib/utils";
 
-const statusColors: Record<CoveredCallStatus, { bg: string; text: string; border: string }> = {
-  deposited: { bg: "rgba(59, 130, 246, 0.1)", text: "#3b82f6", border: "rgba(59, 130, 246, 0.25)" },
-  quoted: { bg: "rgba(168, 85, 247, 0.1)", text: "#a855f7", border: "rgba(168, 85, 247, 0.25)" },
-  active: { bg: "rgba(34, 197, 94, 0.1)", text: "#22c55e", border: "rgba(34, 197, 94, 0.25)" },
-  expiring: { bg: "rgba(234, 179, 8, 0.1)", text: "#eab308", border: "rgba(234, 179, 8, 0.25)" },
-  settled: { bg: "rgba(107, 114, 128, 0.1)", text: "#9ca3af", border: "rgba(107, 114, 128, 0.25)" },
-  closed: { bg: "rgba(107, 114, 128, 0.05)", text: "#6b7280", border: "rgba(107, 114, 128, 0.15)" },
+const statusColors: Record<CoveredCallStatus, string> = {
+  deposited: "border-blue-500/25 bg-blue-500/10 text-blue-500",
+  quoted: "border-purple-500/25 bg-purple-500/10 text-purple-500",
+  active: "border-success/25 bg-success/10 text-success",
+  expiring: "border-warning/25 bg-warning/10 text-warning",
+  settled: "border-secondary-foreground/25 bg-secondary-foreground/10 text-secondary-foreground",
+  closed: "border-muted-foreground/15 bg-muted-foreground/5 text-muted-foreground",
 };
 
 function PositionCard({ position }: { position: CoveredCallPosition }) {
@@ -25,7 +26,6 @@ function PositionCard({ position }: { position: CoveredCallPosition }) {
     strike: position.strike,
   });
 
-  const colors = statusColors[position.status];
   const canClose = position.status === "settled" || position.status === "deposited";
 
   const expiryLabel = position.expiry
@@ -33,51 +33,54 @@ function PositionCard({ position }: { position: CoveredCallPosition }) {
     : null;
 
   return (
-    <div className="rounded-lg border p-4 transition-colors hover:border-[#2d3a4d]" style={{ borderColor: "#1e293b", background: "#111827" }}>
+    <div className="rounded-[10px] border-[0.5px] border-border bg-card p-4 transition-colors hover:border-zinc-600">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0 flex-1">
-          <div className="truncate font-mono text-sm font-semibold" style={{ color: "#e5e7eb" }}>
+          <div className="truncate text-sm font-semibold text-foreground">
             {position.instrumentName || `Subaccount #${position.subaccountId}`}
           </div>
 
-          <div className="mt-1 flex flex-wrap gap-2 font-mono text-xs" style={{ color: "#9ca3af" }}>
+          <div className="mt-1 flex flex-wrap gap-2 text-xs text-secondary-foreground">
             {position.strike && <span>Strike ${position.strike.toLocaleString()}</span>}
             {expiryLabel && <span>· Exp {expiryLabel}</span>}
           </div>
 
-          <div className="mt-2 flex flex-wrap gap-3 font-mono text-xs" style={{ color: "#6b7280" }}>
+          <div className="mt-2 flex flex-wrap gap-3 text-xs text-muted-foreground">
             <span>{position.amount} WBTC deposited</span>
             {position.premiumUsdc && (
-              <span style={{ color: "#22c55e" }}>
+              <span className="text-success">
                 +${parseFloat(position.premiumUsdc).toLocaleString(undefined, { maximumFractionDigits: 2 })} premium
               </span>
             )}
           </div>
 
           {monitorStatus !== "loading" && (btcCollateral || usdcCollateral) && (
-            <div className="mt-1 flex flex-wrap gap-3 font-mono text-[10px]" style={{ color: "#6b7280" }}>
+            <div className="mt-1 flex flex-wrap gap-3 text-[10px] text-muted-foreground">
               {btcCollateral && <span>WBTC: {parseFloat(btcCollateral.amount).toFixed(6)}</span>}
               {usdcCollateral && <span>USDC: {parseFloat(usdcCollateral.amount).toFixed(2)}</span>}
             </div>
           )}
 
           {settlement.isNearExpiry && !settlement.isSettled && (
-            <div className="mt-2 font-mono text-[10px] font-semibold uppercase" style={{ color: "#eab308" }}>
+            <div className="mt-2 text-[10px] font-semibold uppercase text-warning">
               Expiring soon
             </div>
           )}
           {settlement.isSettled && settlement.outcome && (
-            <div className="mt-2 font-mono text-[10px]" style={{ color: settlement.outcome === "otm" ? "#22c55e" : "#9ca3af" }}>
+            <div className={cn(
+              "mt-2 text-[10px]",
+              settlement.outcome === "otm" ? "text-success" : "text-secondary-foreground"
+            )}>
               Settled {settlement.outcome === "otm" ? "OTM — BTC returned" : "ITM — settled in USDC"}
             </div>
           )}
         </div>
 
         <div className="flex flex-col items-end gap-2">
-          <div
-            className="whitespace-nowrap rounded-full px-2.5 py-0.5 font-mono text-[10px] font-semibold uppercase tracking-wider"
-            style={{ background: colors.bg, color: colors.text, border: `1px solid ${colors.border}` }}
-          >
+          <div className={cn(
+            "whitespace-nowrap rounded border px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider",
+            statusColors[position.status]
+          )}>
             {position.status}
           </div>
 
@@ -85,8 +88,7 @@ function PositionCard({ position }: { position: CoveredCallPosition }) {
             <button
               onClick={() => closePosition.mutate({ subaccountId: position.subaccountId })}
               disabled={closePosition.isPending}
-              className="rounded border px-3 py-1 font-mono text-[10px] font-medium transition-colors hover:border-[#9ca3af] hover:text-[#e5e7eb] disabled:opacity-40"
-              style={{ borderColor: "#1e293b", color: "#6b7280", background: "#0b1018" }}
+              className="rounded-md border-[0.5px] border-border bg-background px-3 py-1 text-[10px] font-medium text-muted-foreground transition-colors hover:border-secondary-foreground hover:text-foreground disabled:opacity-40"
             >
               {closePosition.isPending ? "Closing..." : "Withdraw & Close"}
             </button>
@@ -109,7 +111,7 @@ export function CoveredCallPositions() {
     <div className="mx-auto max-w-6xl px-6 pb-6">
       {activePositions.length > 0 && (
         <div>
-          <div className="mb-3 font-mono text-[10px] font-semibold uppercase tracking-wider" style={{ color: "#6b7280" }}>
+          <div className="mb-3 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
             Active Positions
           </div>
           <div className="space-y-3">
@@ -122,7 +124,7 @@ export function CoveredCallPositions() {
 
       {closedPositions.length > 0 && (
         <div className={activePositions.length > 0 ? "mt-6" : ""}>
-          <div className="mb-3 font-mono text-[10px] font-semibold uppercase tracking-wider" style={{ color: "#4b5563" }}>
+          <div className="mb-3 text-[10px] font-semibold uppercase tracking-wider text-zinc-600">
             Closed Positions
           </div>
           <div className="space-y-3">

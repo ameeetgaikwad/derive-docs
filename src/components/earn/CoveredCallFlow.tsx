@@ -15,6 +15,7 @@ import { StrikeSelector } from "./StrikeSelector";
 import { AmountInput } from "./AmountInput";
 import { OutcomePreview } from "./OutcomePreview";
 import { EarnSummary } from "./EarnSummary";
+import { cn } from "@/lib/utils";
 
 type FlowStep = "select" | "deposit" | "quote" | "accept" | "done";
 
@@ -42,7 +43,6 @@ export function CoveredCallFlow() {
   const { data: perpTicker } = useTicker("BTC-PERP");
   const spotPrice = perpTicker ? parseFloat(perpTicker.index_price) : 0;
 
-  // Pass selectedExpiry + spotPrice so the hook can select smart OTM strikes
   const { expiries, strikes: rawStrikes, isLoading: instrumentsLoading, isTickersLoading } = useAvailableStrikes(selectedExpiry, spotPrice);
   const createPosition = useCreateCoveredCallPosition();
   const requestQuote = useRequestQuote();
@@ -53,30 +53,24 @@ export function CoveredCallFlow() {
   const { data: rfqData } = useQuotes(rfqId, positionSubaccountId);
   const { data: collaterals = [] } = useCollaterals();
 
-  // Find BTC-related collateral (WBTC, CBBTC, etc.)
   const btcCollateral = collaterals.find((c) =>
     ["WBTC", "CBBTC", "LBTC", "BTC"].includes(c.asset_name)
   );
   const btcBalance = btcCollateral ? parseFloat(btcCollateral.amount) : 0;
   const btcAssetName = btcCollateral?.asset_name ?? "CBBTC";
 
-  // Auto-select a good default expiry (skip < 2 days, prefer ~7-14 day expiries)
   useEffect(() => {
     if (expiries.length > 0 && (selectedExpiry === null || !expiries.find((e) => e.epoch === selectedExpiry))) {
       const now = Date.now() / 1000;
-      // Prefer expiries > 2 days out for better liquidity
       const viable = expiries.filter((e) => e.epoch - now > 2 * 86400);
       setSelectedExpiry(viable.length > 0 ? viable[0].epoch : expiries[0].epoch);
     }
   }, [expiries, selectedExpiry]);
 
-  // Build UI strikes with APR from live market prices (bid or mark)
   const strikes: StrikeOptionForUI[] = useMemo(() => {
     if (!selectedExpiry || spotPrice <= 0) return [];
-
     const dte = daysToExpiry(selectedExpiry);
     if (dte <= 0) return [];
-
     return rawStrikes
       .filter((s) => s.estimatedPrice > 0)
       .map((s) => ({
@@ -89,7 +83,6 @@ export function CoveredCallFlow() {
       }));
   }, [rawStrikes, selectedExpiry, spotPrice]);
 
-  // Auto-select the first OTM strike (lowest strike above spot = highest premium)
   useEffect(() => {
     if (strikes.length > 0 && (selectedStrike === null || !strikes.find((s) => s.strike === selectedStrike))) {
       setSelectedStrike(strikes[0].strike);
@@ -236,13 +229,13 @@ export function CoveredCallFlow() {
     || step === "done";
 
   return (
-    <div className="min-h-screen p-6" style={{ background: "#0b1018" }}>
+    <div className="min-h-screen bg-background p-6">
       <div className="mx-auto grid max-w-6xl gap-6 lg:grid-cols-[1fr_320px]">
         {/* Main panel */}
-        <div className="rounded-xl border p-6" style={{ borderColor: "#1e293b", background: "#111827" }}>
+        <div className="rounded-[10px] border-[0.5px] border-border bg-card p-6">
           {/* Top bar */}
           <div className="mb-6 flex flex-wrap items-center gap-3">
-            <div className="rounded-lg border px-3 py-1.5 font-mono text-xs font-semibold" style={{ borderColor: "#1e293b", color: "#e5e7eb", background: "#0b1018" }}>
+            <div className="rounded-md border-[0.5px] border-border bg-background px-3 py-1.5 text-xs font-semibold text-foreground">
               BTC Covered Call
             </div>
 
@@ -250,8 +243,7 @@ export function CoveredCallFlow() {
               value={selectedExpiry ?? ""}
               onChange={(e) => { setSelectedExpiry(Number(e.target.value)); setSelectedStrike(null); }}
               disabled={step !== "select"}
-              className="rounded-lg border px-3 py-1.5 font-mono text-xs font-medium disabled:opacity-50"
-              style={{ borderColor: "#1e293b", color: "#e5e7eb", background: "#0b1018" }}
+              className="rounded-md border-[0.5px] border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground disabled:opacity-50"
             >
               {expiries.map((e) => (
                 <option key={e.epoch} value={e.epoch}>{e.label}</option>
@@ -261,13 +253,13 @@ export function CoveredCallFlow() {
             <div className="flex-1" />
 
             {spotPrice > 0 && (
-              <div className="rounded-lg border px-3 py-1.5 font-mono text-xs" style={{ borderColor: "#1e293b", background: "#0b1018", color: "#6b7280" }}>
-                Spot: <span className="font-semibold" style={{ color: "#e5e7eb" }}>${spotPrice.toLocaleString(undefined, { maximumFractionDigits: 2 })}</span>
+              <div className="rounded-md border-[0.5px] border-border bg-background px-3 py-1.5 text-xs text-muted-foreground">
+                Spot: <span className="font-semibold text-foreground">${spotPrice.toLocaleString(undefined, { maximumFractionDigits: 2 })}</span>
               </div>
             )}
 
             {step !== "select" && (
-              <div className="rounded-full px-3 py-1 font-mono text-[10px] font-semibold uppercase tracking-wider" style={{ color: "#22c55e", background: "rgba(34, 197, 94, 0.1)", border: "1px solid rgba(34, 197, 94, 0.2)" }}>
+              <div className="rounded-full border border-accent/20 bg-accent/10 px-3 py-1 text-[10px] font-semibold uppercase tracking-wider text-accent">
                 {step === "deposit" && "Depositing..."}
                 {step === "quote" && "Getting Quotes"}
                 {step === "accept" && "Quote Ready"}
@@ -279,23 +271,22 @@ export function CoveredCallFlow() {
           {/* Done state */}
           {step === "done" ? (
             <div className="py-10 text-center">
-              <div className="mb-2 font-mono text-lg font-bold" style={{ color: "#22c55e" }}>
+              <div className="mb-2 text-lg font-bold tracking-[-0.03em] text-success font-heading">
                 Position Created
               </div>
-              <div className="mb-1 font-mono text-sm" style={{ color: "#9ca3af" }}>
+              <div className="mb-1 text-sm text-secondary-foreground">
                 Earned{" "}
-                <span className="font-semibold" style={{ color: "#e5e7eb" }}>
+                <span className="font-semibold text-foreground">
                   ${earnedPremium ? parseFloat(earnedPremium).toLocaleString(undefined, { maximumFractionDigits: 2 }) : "—"}
                 </span>{" "}
                 premium
               </div>
-              <div className="mb-6 font-mono text-xs" style={{ color: "#6b7280" }}>
+              <div className="mb-6 text-xs text-muted-foreground">
                 {selectedStrikeData?.instrumentName} · Subaccount #{positionSubaccountId}
               </div>
               <button
                 onClick={handleReset}
-                className="rounded-lg border px-6 py-2.5 font-mono text-xs font-medium transition-colors hover:border-[#9ca3af]"
-                style={{ borderColor: "#1e293b", color: "#9ca3af", background: "#0b1018" }}
+                className="rounded-md border-[0.5px] border-border bg-background px-6 py-2.5 text-xs font-medium text-secondary-foreground transition-colors hover:border-secondary-foreground"
               >
                 Create Another Position
               </button>
@@ -303,16 +294,16 @@ export function CoveredCallFlow() {
           ) : (
             <>
               {loading ? (
-                <div className="py-10 text-center font-mono text-sm" style={{ color: "#6b7280" }}>Loading strikes...</div>
+                <div className="py-10 text-center text-sm text-muted-foreground">Loading strikes...</div>
               ) : (
                 <>
-                  <div className="mb-1 font-mono text-sm" style={{ color: "#9ca3af" }}>
+                  <div className="mb-1 text-sm text-secondary-foreground">
                     Choose the price at which you are happy to sell{" "}
-                    <span className="font-semibold" style={{ color: "#e5e7eb" }}>BTC</span> on{" "}
-                    <span className="font-semibold" style={{ color: "#e5e7eb" }}>{selectedExpiryData?.label}</span>{" "}
-                    <span style={{ color: "#6b7280" }}>(in {dte} days)</span>
+                    <span className="font-semibold text-foreground">BTC</span> on{" "}
+                    <span className="font-semibold text-foreground">{selectedExpiryData?.label}</span>{" "}
+                    <span className="text-muted-foreground">(in {dte} days)</span>
                   </div>
-                  <div className="mb-4 font-mono text-[10px]" style={{ color: "#6b7280" }}>
+                  <div className="mb-4 text-[10px] text-muted-foreground">
                     Prices are live from the Derive exchange orderbook
                   </div>
                   <div className="mb-6">
@@ -351,14 +342,14 @@ export function CoveredCallFlow() {
               )}
 
               {step === "accept" && bestQuote && (
-                <div className="mb-5 rounded-lg border p-4" style={{ borderColor: "rgba(34, 197, 94, 0.3)", background: "rgba(34, 197, 94, 0.05)" }}>
-                  <div className="mb-1 font-mono text-[10px] font-semibold uppercase tracking-wider" style={{ color: "#22c55e" }}>
+                <div className="mb-5 rounded-[10px] border-[0.5px] border-success/30 bg-success/5 p-4">
+                  <div className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-success">
                     Best Quote Received
                   </div>
-                  <div className="font-mono text-lg font-bold" style={{ color: "#e5e7eb" }}>
-                    ${parseFloat(bestQuote.total_premium).toLocaleString(undefined, { maximumFractionDigits: 2 })} <span style={{ color: "#6b7280", fontSize: "0.75rem" }}>USDC</span>
+                  <div className="text-lg font-bold tracking-[-0.03em] text-foreground font-heading">
+                    ${parseFloat(bestQuote.total_premium).toLocaleString(undefined, { maximumFractionDigits: 2 })} <span className="text-xs text-muted-foreground">USDC</span>
                   </div>
-                  <div className="mt-1 font-mono text-xs" style={{ color: "#6b7280" }}>
+                  <div className="mt-1 text-xs text-muted-foreground">
                     Expires {new Date(bestQuote.valid_until * 1000).toLocaleTimeString()}
                   </div>
                 </div>
@@ -367,11 +358,12 @@ export function CoveredCallFlow() {
               <button
                 onClick={handleCTA}
                 disabled={ctaDisabled}
-                className="w-full rounded-lg py-3.5 font-mono text-sm font-semibold transition-all disabled:cursor-not-allowed disabled:opacity-30"
-                style={{
-                  background: !ctaDisabled ? "#22c55e" : "#1e293b",
-                  color: !ctaDisabled ? "#0b1018" : "#6b7280",
-                }}
+                className={cn(
+                  "w-full rounded-md py-3.5 text-sm font-semibold transition-all disabled:cursor-not-allowed disabled:opacity-30",
+                  !ctaDisabled
+                    ? "bg-accent text-black"
+                    : "bg-card-elevated text-muted-foreground"
+                )}
               >
                 {ctaLabel}
               </button>

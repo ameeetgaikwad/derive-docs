@@ -195,6 +195,27 @@ export interface Trade {
   subaccount_id: number;
 }
 
+export interface TradeHistoryEntry {
+  trade_id: string;
+  instrument_name: string;
+  direction: "buy" | "sell";
+  trade_price: string;
+  trade_amount: string;
+  trade_fee: string;
+  timestamp: number;
+  subaccount_id: number;
+  index_price: string;
+  mark_price: string;
+  realized_pnl: string;
+  realized_pnl_excl_fees: string;
+  liquidity_role: "maker" | "taker";
+  tx_hash: string;
+  tx_status: "settled" | "reverted" | "timed_out";
+  wallet: string;
+  quote_id: string | null;
+  rfq_id: string | null;
+}
+
 // ===== Position Types =====
 
 export interface Position {

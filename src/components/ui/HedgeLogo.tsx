@@ -6,48 +6,21 @@ interface HedgeLogoProps {
 }
 
 export function HedgeLogo({ size = 24, className }: HedgeLogoProps) {
+  const h = size;
+  const w = size * (61.95 / 50); // maintain aspect ratio of the icon
   return (
     <svg
-      width={size}
-      height={size}
-      viewBox="0 0 32 32"
+      width={w}
+      height={h}
+      viewBox="12 15 61.95 50"
       fill="none"
       xmlns="http://www.w3.org/2000/svg"
       className={className}
     >
-      {/* Shield shape */}
-      <path
-        d="M16 2L4 8v8c0 7.18 5.12 13.9 12 15.4C22.88 29.9 28 23.18 28 16V8L16 2z"
-        fill="url(#shield-gradient)"
-        stroke="url(#shield-stroke)"
-        strokeWidth="1"
-      />
-      {/* Upward arrow / chart line — symbolizes yield */}
-      <path
-        d="M10 20l4-5 3 3 5-7"
-        stroke="#0b1018"
-        strokeWidth="2.5"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      {/* Arrow head */}
-      <path
-        d="M19 11h3v3"
-        stroke="#0b1018"
-        strokeWidth="2.5"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      <defs>
-        <linearGradient id="shield-gradient" x1="16" y1="2" x2="16" y2="31" gradientUnits="userSpaceOnUse">
-          <stop stopColor="#22c55e" />
-          <stop offset="1" stopColor="#15803d" />
-        </linearGradient>
-        <linearGradient id="shield-stroke" x1="16" y1="2" x2="16" y2="31" gradientUnits="userSpaceOnUse">
-          <stop stopColor="#4ade80" />
-          <stop offset="1" stopColor="#16a34a" />
-        </linearGradient>
-      </defs>
+      <path d="M42.9029 34.2616L52.8818 40.0222L57.3087 37.4503L42.8746 29.1168L28.6133 37.4047L33.0684 39.9766L42.9029 34.2616Z" fill="white"/>
+      <path d="M65.7525 42.3259L61.3257 44.8988L65.0672 47.0579L64.1299 47.6031L61.0683 49.3821L43.048 59.8552L35.8429 55.6955L31.416 58.2685L43.0762 65L73.9492 47.0579L65.7525 42.3259Z" fill="white"/>
+      <path d="M24.8723 49.3615L21.8204 47.5999L20.8831 47.0579L24.642 44.8738L20.1869 42.3009L12 47.059L23.6602 53.7906L28.0871 51.2176L24.8723 49.3615Z" fill="white"/>
+      <path d="M62.2889 26.2095L57.862 28.7813L65.0671 32.941L64.1298 33.4862L61.0671 35.2652L57.3081 37.4504L52.8812 40.0223L51.944 40.5675L48.8823 42.3465L43.0468 45.7383L37.057 42.2802L34.0062 40.5175L33.0678 39.9766L28.6127 37.4048L24.8712 35.2446L21.8193 33.4819L20.882 32.941L42.9023 20.1448L50.1074 24.3045L54.5332 21.7315L42.873 15L12 32.9421L24.1859 39.9766L28.641 42.5496L29.5783 43.0905L32.6301 44.8521L43.075 50.8831L53.3374 44.9194L56.3991 43.1393L57.3364 42.5952L61.7632 40.0223L73.948 32.941L62.2889 26.2095Z" fill="white"/>
     </svg>
   );
 }

@@ -5,6 +5,7 @@ import type {
   OrderResult,
   Order,
   Trade,
+  TradeHistoryEntry,
   Position,
   Subaccount,
   Collateral,
@@ -442,6 +443,22 @@ export class DeriveRestClient {
   /** Cancel an open RFQ. */
   async cancelRfq(params: { subaccount_id: number; rfq_id: string }) {
     return this.rpc<{ status: string }>("private/cancel_rfq", params);
+  }
+
+  // ===== Trade History =====
+
+  async getTradeHistory(subaccountId: number, params?: {
+    instrument_name?: string;
+    start_time?: number;
+    end_time?: number;
+    page?: number;
+    page_size?: number;
+  }) {
+    const res = await this.rpc<{ trades: TradeHistoryEntry[] } | TradeHistoryEntry[]>(
+      "private/get_trade_history",
+      { subaccount_id: subaccountId, ...params },
+    );
+    return Array.isArray(res) ? res : res.trades ?? [];
   }
 
   // ===== Settlement Methods =====

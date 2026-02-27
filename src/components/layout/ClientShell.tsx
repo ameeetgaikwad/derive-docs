@@ -30,10 +30,11 @@ export function ClientShell({ children }: { children: ReactNode }) {
         position="bottom-right"
         toastOptions={{
           style: {
-            background: "var(--card)",
-            border: "2px solid var(--border)",
-            color: "var(--foreground)",
-            fontFamily: "var(--font-mono), monospace",
+            background: "#18181b",
+            border: "0.5px solid #3f3f46",
+            color: "#fafafa",
+            fontFamily: "var(--font-dm-sans), 'DM Sans', sans-serif",
+            borderRadius: "10px",
           },
         }}
       />

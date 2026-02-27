@@ -1,25 +1,25 @@
 @import "tailwindcss";
 
 :root {
-  --background: #0b1018;
-  --foreground: #e5e7eb;
-  --card: #111827;
-  --card-foreground: #e5e7eb;
-  --card-elevated: #1a2332;
-  --border: #1e293b;
-  --input: #1e293b;
-  --primary: #e5e7eb;
-  --primary-foreground: #0b1018;
-  --secondary: #1e293b;
-  --secondary-foreground: #9ca3af;
-  --muted: #1a2332;
-  --muted-foreground: #6b7280;
-  --accent: #22c55e;
+  --background: #121212;
+  --foreground: #fafafa;
+  --card: #18181b;
+  --card-foreground: #fafafa;
+  --card-elevated: #27272a;
+  --border: #3f3f46;
+  --input: #3f3f46;
+  --primary: #fafafa;
+  --primary-foreground: #121212;
+  --secondary: #27272a;
+  --secondary-foreground: #a1a1aa;
+  --muted: #27272a;
+  --muted-foreground: #71717a;
+  --accent: #fb923c;
   --destructive: #ef4444;
   --success: #22c55e;
   --warning: #eab308;
-  --ring: #3b82f6;
-  --radius: 0.5rem;
+  --ring: #fb923c;
+  --radius: 0.625rem;
 }
 
 @theme inline {
@@ -27,6 +27,7 @@
   --color-foreground: var(--foreground);
   --color-card: var(--card);
   --color-card-foreground: var(--card-foreground);
+  --color-card-elevated: var(--card-elevated);
   --color-border: var(--border);
   --color-input: var(--input);
   --color-primary: var(--primary);
@@ -40,15 +41,16 @@
   --color-success: var(--success);
   --color-warning: var(--warning);
   --color-ring: var(--ring);
-  --font-sans: var(--font-geist-sans);
+  --font-sans: var(--font-dm-sans);
   --font-mono: var(--font-geist-mono);
+  --font-heading: var(--font-schibsted);
   --radius: var(--radius);
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: var(--font-mono), monospace;
+  font-family: var(--font-dm-sans), "DM Sans", sans-serif;
 }
 
 /* Scrollbar styling */
@@ -72,29 +74,26 @@ body {
 
 /* RainbowKit overrides */
 [data-rk] * {
-  font-family: var(--font-mono), monospace !important;
+  font-family: var(--font-dm-sans), "DM Sans", sans-serif !important;
 }
 
 [data-rk] [role="dialog"] {
-  border: 1px solid var(--border) !important;
-  border-radius: var(--radius) !important;
+  border: 0.5px solid var(--border) !important;
+  border-radius: 10px !important;
   overflow: hidden !important;
 }
 
-/* RainbowKit modal overlay */
 [data-rk] [aria-hidden="true"][style*="position: fixed"] {
   background: rgba(0, 0, 0, 0.6) !important;
   backdrop-filter: blur(4px) !important;
 }
 
-/* RainbowKit modal content */
 [data-rk] [role="dialog"] > div:first-child {
   background: var(--card) !important;
 }
 
-/* RainbowKit wallet list items */
 [data-rk] [role="dialog"] button {
-  border: 1px solid var(--border) !important;
+  border: 0.5px solid var(--border) !important;
   background: var(--card) !important;
   color: var(--foreground) !important;
 }
@@ -103,14 +102,13 @@ body {
   background: var(--secondary) !important;
 }
 
-/* RainbowKit connect button */
 [data-rk] button {
-  border-radius: var(--radius) !important;
+  border-radius: 6px !important;
   font-size: 12px !important;
 }
 
 [data-rk] button[data-testid="rk-connect-button"] {
-  border: 1px solid var(--border) !important;
+  border: 0.5px solid var(--border) !important;
   background: var(--card) !important;
   color: var(--foreground) !important;
   height: 28px !important;
@@ -118,7 +116,7 @@ body {
 }
 
 [data-rk] button[data-testid="rk-account-button"] {
-  border: 1px solid var(--border) !important;
+  border: 0.5px solid var(--border) !important;
   background: var(--card) !important;
   color: var(--foreground) !important;
   height: 28px !important;

@@ -27,7 +27,6 @@ export function Header() {
   const { data: collaterals = [] } = useCollaterals();
   const { disconnect } = useDisconnect();
 
-  // Close dropdown on outside click
   useEffect(() => {
     function handleClick(e: MouseEvent) {
       if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
@@ -40,25 +39,22 @@ export function Header() {
 
   return (
     <>
-      <header className="sticky top-0 z-50 border-b" style={{ borderColor: "#1e293b", background: "#111827" }}>
+      <header className="sticky top-0 z-50 border-b border-border bg-card">
         <div className="mx-auto flex h-12 max-w-7xl items-center justify-between px-4">
           <div className="flex items-center gap-6">
             <Link href="/" className="flex items-center gap-2">
               <HedgeLogo size={22} />
-              <span className="font-mono text-sm font-bold" style={{ color: "#e5e7eb" }}>
-                Hedge
+              <span className="text-sm font-bold tracking-[-0.03em] text-foreground font-heading">
+                SatsTerminal
               </span>
             </Link>
             {process.env.NEXT_PUBLIC_DERIVE_ENV === "testnet" && (
-              <span
-                className="rounded px-1.5 py-0.5 font-mono text-[10px] font-bold uppercase"
-                style={{ color: "#f59e0b", background: "rgba(245, 158, 11, 0.1)", border: "1px solid rgba(245, 158, 11, 0.3)" }}
-              >
+              <span className="rounded border border-accent/30 bg-accent/10 px-1.5 py-0.5 text-[10px] font-bold uppercase text-accent">
                 testnet
               </span>
             )}
 
-            <div className="hidden h-4 w-px md:block" style={{ background: "#1e293b" }} />
+            <div className="hidden h-4 w-px bg-border md:block" />
 
             <nav className="hidden items-center gap-1 md:flex">
               {navLinks.map((link) => (
@@ -66,12 +62,11 @@ export function Header() {
                   key={link.href}
                   href={link.href}
                   className={cn(
-                    "rounded-md px-3 py-1.5 font-mono text-xs transition-colors",
+                    "rounded-md px-3 py-1.5 text-xs transition-colors",
                     pathname === link.href
-                      ? "font-bold"
-                      : "hover:text-white"
+                      ? "font-bold text-accent"
+                      : "text-muted-foreground hover:text-foreground"
                   )}
-                  style={{ color: pathname === link.href ? "#22c55e" : "#6b7280" }}
                 >
                   {link.label}
                 </Link>
@@ -87,34 +82,33 @@ export function Header() {
                   <div className="relative" ref={dropdownRef}>
                     <button
                       onClick={connected ? () => setWalletOpen(!walletOpen) : openConnectModal}
-                      className="rounded-lg border px-3 py-1.5 font-mono text-xs font-medium transition-colors"
-                      style={{
-                        borderColor: connected ? "#1e293b" : "#22c55e",
-                        background: connected ? "#0b1018" : "rgba(34, 197, 94, 0.1)",
-                        color: connected ? "#e5e7eb" : "#22c55e",
-                      }}
+                      className={cn(
+                        "rounded-md border-[0.5px] px-3 py-1.5 text-xs font-medium transition-colors",
+                        connected
+                          ? "border-border bg-background text-foreground"
+                          : "border-accent bg-accent/10 text-accent"
+                      )}
                     >
                       {connected
                         ? `${account.address.slice(0, 6)}...${account.address.slice(-4)}`
                         : "Connect Wallet"}
                     </button>
 
-                    {/* Wallet dropdown */}
                     {connected && walletOpen && (
-                      <div
-                        className="absolute right-0 top-full mt-2 w-72 rounded-lg border p-4"
-                        style={{ borderColor: "#1e293b", background: "#111827", zIndex: 100 }}
-                      >
+                      <div className="absolute right-0 top-full z-[100] mt-2 w-72 rounded-[10px] border-[0.5px] border-border bg-card p-4">
                         {/* Address + status */}
                         <div className="mb-3 flex items-center justify-between">
                           <div className="flex items-center gap-2">
-                            <div className="h-2 w-2 rounded-full" style={{ background: isAuthenticated ? "#22c55e" : "#f59e0b" }} />
-                            <span className="font-mono text-xs" style={{ color: "#e5e7eb" }}>
+                            <div className={cn(
+                              "h-2 w-2 rounded-full",
+                              isAuthenticated ? "bg-success" : "bg-accent"
+                            )} />
+                            <span className="text-xs text-foreground">
                               {account.address.slice(0, 6)}...{account.address.slice(-4)}
                             </span>
                           </div>
                           {subaccountId && (
-                            <span className="font-mono text-[10px]" style={{ color: "#6b7280" }}>
+                            <span className="text-[10px] text-muted-foreground">
                               sub#{subaccountId}
                             </span>
                           )}
@@ -124,12 +118,12 @@ export function Header() {
                         {isAuthenticated && collaterals.length > 0 ? (
                           <div className="mb-3 space-y-1.5">
                             {collaterals.map((c) => (
-                              <div key={c.asset_name} className="flex items-center justify-between font-mono text-xs">
-                                <span style={{ color: "#9ca3af" }}>{c.asset_name}</span>
+                              <div key={c.asset_name} className="flex items-center justify-between text-xs">
+                                <span className="text-secondary-foreground">{c.asset_name}</span>
                                 <div>
-                                  <span style={{ color: "#e5e7eb" }}>{parseFloat(c.amount).toFixed(4)}</span>
+                                  <span className="text-foreground">{parseFloat(c.amount).toFixed(4)}</span>
                                   {parseFloat(c.mark_value) > 0 && (
-                                    <span className="ml-1.5" style={{ color: "#6b7280" }}>
+                                    <span className="ml-1.5 text-muted-foreground">
                                       ${parseFloat(c.mark_value).toLocaleString(undefined, { maximumFractionDigits: 2 })}
                                     </span>
                                   )}
@@ -138,7 +132,7 @@ export function Header() {
                             ))}
                           </div>
                         ) : isAuthenticated ? (
-                          <div className="mb-3 py-2 text-center font-mono text-xs" style={{ color: "#6b7280" }}>
+                          <div className="mb-3 py-2 text-center text-xs text-muted-foreground">
                             No balances yet
                           </div>
                         ) : null}
@@ -148,22 +142,19 @@ export function Header() {
                           <div className="mb-3 grid grid-cols-3 gap-1.5">
                             <button
                               onClick={() => { setFundsTab("deposit"); setWalletOpen(false); }}
-                              className="rounded-md py-1.5 font-mono text-[10px] font-semibold transition-colors"
-                              style={{ background: "rgba(34, 197, 94, 0.1)", color: "#22c55e", border: "1px solid rgba(34, 197, 94, 0.2)" }}
+                              className="rounded-md border border-accent/20 bg-accent/10 py-1.5 text-[10px] font-semibold text-accent transition-colors"
                             >
                               Deposit
                             </button>
                             <button
                               onClick={() => { setFundsTab("withdraw"); setWalletOpen(false); }}
-                              className="rounded-md py-1.5 font-mono text-[10px] font-semibold transition-colors"
-                              style={{ background: "rgba(107, 114, 128, 0.1)", color: "#9ca3af", border: "1px solid rgba(107, 114, 128, 0.2)" }}
+                              className="rounded-md border border-secondary-foreground/20 bg-secondary-foreground/10 py-1.5 text-[10px] font-semibold text-secondary-foreground transition-colors"
                             >
                               Withdraw
                             </button>
                             <button
                               onClick={() => { setFundsTab("bridge"); setWalletOpen(false); }}
-                              className="rounded-md py-1.5 font-mono text-[10px] font-semibold transition-colors"
-                              style={{ background: "rgba(59, 130, 246, 0.1)", color: "#3b82f6", border: "1px solid rgba(59, 130, 246, 0.2)" }}
+                              className="rounded-md border border-blue-500/20 bg-blue-500/10 py-1.5 text-[10px] font-semibold text-blue-500 transition-colors"
                             >
                               Bridge
                             </button>
@@ -171,11 +162,10 @@ export function Header() {
                         )}
 
                         {/* Divider + Disconnect */}
-                        <div className="border-t pt-2" style={{ borderColor: "#1e293b" }}>
+                        <div className="border-t border-border pt-2">
                           <button
                             onClick={() => { disconnect(); setWalletOpen(false); }}
-                            className="w-full rounded-md py-1.5 font-mono text-[10px] font-medium transition-colors"
-                            style={{ color: "#ef4444" }}
+                            className="w-full rounded-md py-1.5 text-[10px] font-medium text-destructive transition-colors"
                           >
                             Disconnect
                           </button>
@@ -187,8 +177,7 @@ export function Header() {
               }}
             </ConnectButton.Custom>
             <button
-              className="rounded-md border p-1.5 md:hidden"
-              style={{ borderColor: "#1e293b", color: "#6b7280" }}
+              className="rounded-md border-[0.5px] border-border p-1.5 text-muted-foreground md:hidden"
               onClick={() => setMobileOpen(!mobileOpen)}
               aria-label="Toggle menu"
             >
@@ -211,14 +200,18 @@ export function Header() {
           </div>
         </div>
         {mobileOpen && (
-          <nav className="border-t px-4 py-2 md:hidden" style={{ borderColor: "#1e293b", background: "#111827" }}>
+          <nav className="border-t border-border bg-card px-4 py-2 md:hidden">
             {navLinks.map((link) => (
               <Link
                 key={link.href}
                 href={link.href}
                 onClick={() => setMobileOpen(false)}
-                className="block px-3 py-2 font-mono text-xs transition-colors"
-                style={{ color: pathname === link.href ? "#22c55e" : "#6b7280" }}
+                className={cn(
+                  "block px-3 py-2 text-xs transition-colors",
+                  pathname === link.href
+                    ? "text-accent"
+                    : "text-muted-foreground hover:text-foreground"
+                )}
               >
                 {link.label}
               </Link>
@@ -227,7 +220,6 @@ export function Header() {
         )}
       </header>
 
-      {/* Funds modal */}
       <FundsModal
         open={fundsTab !== null}
         onClose={() => setFundsTab(null)}

@@ -12,6 +12,7 @@ import {
   type SourceChainId,
 } from "@/lib/derive/bridge-config";
 import { formatUnits } from "viem";
+import { cn } from "@/lib/utils";
 
 const STEP_LABELS: Record<BridgeStep, string> = {
   idle: "",
@@ -85,7 +86,7 @@ export function BridgeForm() {
     <div className="space-y-4">
       {/* Source chain selector */}
       <div>
-        <label className="mb-1.5 block font-mono text-[10px] font-semibold uppercase tracking-wider" style={{ color: "#6b7280" }}>
+        <label className="mb-1.5 block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
           Source Chain
         </label>
         <div className="flex flex-wrap gap-1.5">
@@ -94,12 +95,12 @@ export function BridgeForm() {
               key={chain.id}
               onClick={() => setSelectedChain(chain.id)}
               disabled={bridge.isPending}
-              className="rounded-lg border px-3 py-1.5 font-mono text-xs font-medium transition-colors disabled:opacity-50"
-              style={{
-                borderColor: selectedChain === chain.id ? "#3b82f6" : "#1e293b",
-                background: selectedChain === chain.id ? "rgba(59, 130, 246, 0.1)" : "#0b1018",
-                color: selectedChain === chain.id ? "#3b82f6" : "#6b7280",
-              }}
+              className={cn(
+                "rounded-md border-[0.5px] px-3 py-1.5 text-xs font-medium transition-colors disabled:opacity-50",
+                selectedChain === chain.id
+                  ? "border-blue-500 bg-blue-500/10 text-blue-500"
+                  : "border-border bg-background text-muted-foreground hover:text-secondary-foreground"
+              )}
             >
               {chain.name}
             </button>
@@ -109,7 +110,7 @@ export function BridgeForm() {
 
       {/* Token selector */}
       <div>
-        <label className="mb-1.5 block font-mono text-[10px] font-semibold uppercase tracking-wider" style={{ color: "#6b7280" }}>
+        <label className="mb-1.5 block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
           Token
         </label>
         <div className="flex gap-1.5">
@@ -118,12 +119,12 @@ export function BridgeForm() {
               key={t}
               onClick={() => setSelectedToken(t)}
               disabled={bridge.isPending}
-              className="rounded-lg border px-3 py-1.5 font-mono text-xs font-medium transition-colors disabled:opacity-50"
-              style={{
-                borderColor: selectedToken === t ? "#22c55e" : "#1e293b",
-                background: selectedToken === t ? "rgba(34, 197, 94, 0.1)" : "#0b1018",
-                color: selectedToken === t ? "#22c55e" : "#6b7280",
-              }}
+              className={cn(
+                "rounded-md border-[0.5px] px-3 py-1.5 text-xs font-medium transition-colors disabled:opacity-50",
+                selectedToken === t
+                  ? "border-accent bg-accent/10 text-accent"
+                  : "border-border bg-background text-muted-foreground hover:text-secondary-foreground"
+              )}
             >
               {t}
             </button>
@@ -132,10 +133,10 @@ export function BridgeForm() {
       </div>
 
       {/* Balance */}
-      <div className="rounded-lg border p-3" style={{ borderColor: "#1e293b", background: "#0b1018" }}>
-        <div className="flex items-center justify-between font-mono text-xs">
-          <span style={{ color: "#6b7280" }}>{selectedToken} on {chains.find(c => c.id === selectedChain)?.name}</span>
-          <span style={{ color: "#e5e7eb" }}>
+      <div className="rounded-[10px] border-[0.5px] border-border bg-background p-3">
+        <div className="flex items-center justify-between text-xs">
+          <span className="text-muted-foreground">{selectedToken} on {chains.find(c => c.id === selectedChain)?.name}</span>
+          <span className="text-foreground">
             {balance ? `${Number(balance.formatted).toFixed(4)} ${selectedToken}` : "\u2014"}
           </span>
         </div>
@@ -151,21 +152,20 @@ export function BridgeForm() {
           value={amount}
           onChange={(e) => setAmount(e.target.value)}
           disabled={bridge.isPending}
-          className="w-full rounded-lg border py-3 pl-4 pr-20 font-mono text-sm outline-none transition-colors disabled:opacity-50"
-          style={{ borderColor: "#1e293b", background: "#0b1018", color: "#e5e7eb" }}
+          className="w-full rounded-[10px] border-[0.5px] border-border bg-background py-3 pl-4 pr-20 text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground disabled:opacity-50 focus:border-accent"
         />
         <div className="absolute right-3 top-1/2 flex -translate-y-1/2 items-center gap-2">
           {balance && Number(balance.formatted) > 0 && (
-            <button onClick={handleMaxClick} className="font-mono text-[10px] font-semibold" style={{ color: "#3b82f6" }}>
+            <button onClick={handleMaxClick} className="text-[10px] font-semibold text-blue-500">
               MAX
             </button>
           )}
-          <span className="font-mono text-xs" style={{ color: "#6b7280" }}>{selectedToken}</span>
+          <span className="text-xs text-muted-foreground">{selectedToken}</span>
         </div>
       </div>
 
       {/* Fee display */}
-      <div className="font-mono text-xs" style={{ color: "#6b7280" }}>
+      <div className="text-xs text-muted-foreground">
         {feeLoading ? (
           "Estimating bridge fee..."
         ) : fee !== null ? (
@@ -177,8 +177,8 @@ export function BridgeForm() {
 
       {/* Step indicator */}
       {bridge.isPending && bridge.step !== "idle" && (
-        <div className="flex items-center gap-2 font-mono text-xs" style={{ color: "#9ca3af" }}>
-          <span className="inline-block h-2 w-2 animate-pulse rounded-full" style={{ background: "#3b82f6" }} />
+        <div className="flex items-center gap-2 text-xs text-secondary-foreground">
+          <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-blue-500" />
           {STEP_LABELS[bridge.step]}
         </div>
       )}
@@ -187,8 +187,7 @@ export function BridgeForm() {
       <button
         onClick={handleBridge}
         disabled={bridge.isPending || !amount || parseFloat(amount) <= 0}
-        className="w-full rounded-lg py-3 font-mono text-sm font-semibold transition-all disabled:cursor-not-allowed disabled:opacity-30"
-        style={{ background: "#3b82f6", color: "#ffffff" }}
+        className="w-full rounded-md bg-blue-500 py-3 text-sm font-semibold text-white transition-all disabled:cursor-not-allowed disabled:opacity-30"
       >
         {bridge.isPending
           ? STEP_LABELS[bridge.step] || "Processing..."
@@ -197,16 +196,16 @@ export function BridgeForm() {
 
       {/* Error */}
       {bridge.isError && bridge.error && (
-        <p className="font-mono text-xs" style={{ color: "#ef4444" }}>{bridge.error.message}</p>
+        <p className="text-xs text-destructive">{bridge.error.message}</p>
       )}
 
       {/* Success tx hash */}
       {bridge.bridgeTxHash && !bridge.isPending && (
-        <div className="rounded-lg border p-3" style={{ borderColor: "rgba(34, 197, 94, 0.3)", background: "rgba(34, 197, 94, 0.05)" }}>
-          <div className="font-mono text-xs" style={{ color: "#22c55e" }}>
+        <div className="rounded-[10px] border-[0.5px] border-success/30 bg-success/5 p-3">
+          <div className="text-xs text-success">
             Bridge complete!
           </div>
-          <div className="mt-1 font-mono text-[10px]" style={{ color: "#6b7280" }}>
+          <div className="mt-1 text-[10px] text-muted-foreground">
             Tx: {bridge.bridgeTxHash.slice(0, 14)}...{bridge.bridgeTxHash.slice(-8)}
           </div>
         </div>
@@ -226,14 +225,14 @@ export function BridgeModal({ open, onClose }: BridgeModalProps) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
-      <div className="absolute inset-0" style={{ background: "rgba(0, 0, 0, 0.7)" }} onClick={onClose} />
+      <div className="absolute inset-0 bg-black/70" onClick={onClose} />
 
-      <div className="relative w-full max-w-md overflow-hidden rounded-xl border" style={{ borderColor: "#1e293b", background: "#111827" }}>
-        <div className="flex items-center justify-between border-b px-5 py-3" style={{ borderColor: "#1e293b" }}>
-          <span className="font-mono text-sm font-semibold" style={{ color: "#e5e7eb" }}>
+      <div className="relative w-full max-w-md overflow-hidden rounded-[10px] border-[0.5px] border-border bg-card">
+        <div className="flex items-center justify-between border-b border-border bg-card-elevated px-5 py-3">
+          <span className="text-sm font-bold tracking-[-0.03em] text-foreground font-heading">
             Bridge to Derive
           </span>
-          <button onClick={onClose} style={{ color: "#6b7280" }}>
+          <button onClick={onClose} className="text-muted-foreground hover:text-foreground">
             <svg width="16" height="16" viewBox="0 0 20 20" fill="currentColor">
               <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
             </svg>
