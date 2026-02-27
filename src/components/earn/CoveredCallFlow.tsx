@@ -132,12 +132,9 @@ export function CoveredCallFlow() {
       return;
     }
 
-    if (step === "select") {
+    if (step === "select" || step === "deposit") {
       if (!selectedStrikeData || amountNum <= 0) return;
       setStep("deposit");
-    }
-
-    if (step === "deposit") {
       createPosition.mutate(
         { amount: amount, btcAsset: btcAssetName as "WBTC" | "CBBTC" },
         {
@@ -147,9 +144,7 @@ export function CoveredCallFlow() {
           },
         }
       );
-    }
-
-    if (step === "quote") {
+    } else if (step === "quote") {
       if (!positionSubaccountId || !selectedStrikeData) return;
       requestQuote.mutate(
         {
@@ -169,9 +164,7 @@ export function CoveredCallFlow() {
           },
         }
       );
-    }
-
-    if (step === "accept") {
+    } else if (step === "accept") {
       if (!positionSubaccountId || !rfqId || !bestQuote) return;
       acceptQuote.mutate(
         {
