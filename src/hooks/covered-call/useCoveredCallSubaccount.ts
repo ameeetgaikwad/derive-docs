@@ -18,7 +18,7 @@ import { getConfig, getAssetConfig, type SupportedAsset } from "@/lib/derive/con
 import { sendSponsoredUserOp } from "@/lib/derive/paymaster";
 import { encodeApprove, encodeCreateSubaccount, type ScwAction } from "@/lib/derive/scw-actions";
 import { toast } from "sonner";
-import { createPublicClient, erc20Abi, encodeFunctionData, http } from "viem";
+import { createPublicClient, erc20Abi, encodeFunctionData, formatUnits, http } from "viem";
 import { waitForTransactionReceipt } from "wagmi/actions";
 import { getDeriveChain } from "@/lib/chain/derive";
 import type { Hex } from "viem";
@@ -44,72 +44,6 @@ const LIGHT_ACCOUNT_EXECUTE_ABI = [{
   ],
   outputs: [],
 }] as const;
-
-/**
- * Ensure the SCW has enough BTC tokens on Derive Chain for the deposit.
- * If the SCW already has sufficient balance, skip the EOA transfer.
- * Otherwise, transfer from EOA -> SCW.
- */
-async function ensureScwHasBtc({
-  walletClient,
-  wagmiConfig,
-  switchChainAsync,
-  deriveWallet,
-  amount,
-  tokenAddress,
-  assetName,
-}: {
-  walletClient: WalletClient;
-  wagmiConfig: Config;
-  switchChainAsync: ReturnType<typeof useSwitchChain>["switchChainAsync"];
-  deriveWallet: `0x${string}`;
-  amount: string;
-  tokenAddress: `0x${string}`;
-  assetName: string;
-}): Promise<void> {
-  const config = getConfig();
-  const scaledAmount = toTokenAmount(amount, BTC_DECIMALS);
-
-  if (walletClient.chain?.id !== config.chainId) {
-    await switchChainAsync({ chainId: config.chainId });
-  }
-
-  const deriveEnv = (process.env.NEXT_PUBLIC_DERIVE_ENV as "testnet" | "mainnet") || "mainnet";
-  const chain = getDeriveChain(deriveEnv);
-
-  const publicClient = createPublicClient({
-    chain,
-    transport: http(config.rpcUrl),
-  });
-
-  const scwBalance = await publicClient.readContract({
-    address: tokenAddress,
-    abi: erc20Abi,
-    functionName: "balanceOf",
-    args: [deriveWallet],
-  });
-
-  if (scwBalance >= scaledAmount) {
-    console.log(`[CoveredCall] SCW already has sufficient ${assetName}, skipping EOA transfer`);
-    return;
-  }
-
-  const deficit = scaledAmount - scwBalance;
-  const [account] = await walletClient.getAddresses();
-
-  console.log(`[CoveredCall] Transferring ${deficit.toString()} ${assetName} units from EOA to SCW`);
-
-  const txHash = await walletClient.writeContract({
-    address: tokenAddress,
-    abi: erc20Abi,
-    functionName: "transfer",
-    args: [deriveWallet, deficit],
-    account,
-    chain,
-  });
-
-  await waitForTransactionReceipt(wagmiConfig, { hash: txHash });
-}
 
 /**
  * Transfer an ERC-20 token from SCW -> EOA via SCW.execute.
@@ -171,19 +105,18 @@ interface CreateCoveredCallParams {
 }
 
 /**
- * Create a new covered call position:
- * 1. Transfer BTC from EOA -> SCW if needed
+ * Create a new covered call position (entirely gas-free):
+ * 1. Withdraw BTC from main subaccount to SCW if needed (REST API, session key)
  * 2. Create SM subaccount on-chain via paymaster (bundles BTC approvals + subaccount creation)
  * 3. Get the newly created subaccount ID
- * 4. Deposit BTC into the new subaccount (session key signs via REST API)
+ * 4. Deposit BTC into the new subaccount (REST API, session key)
  * 5. Add position to store with status "deposited"
  */
 export function useCreateCoveredCallPosition() {
-  const { restClient, deriveWallet } = useDerive();
+  const { restClient, deriveWallet, subaccountId: mainSubaccountId } = useDerive();
   const { address } = useAccount();
   const { data: walletClient } = useWalletClient();
   const { switchChainAsync } = useSwitchChain();
-  const wagmiConfig = useWagmiConfig();
   const { sessionKey } = useAccountStore();
   const { addPosition } = useCoveredCallStore();
   const queryClient = useQueryClient();
@@ -196,20 +129,78 @@ export function useCreateCoveredCallPosition() {
 
       const config = getConfig();
       const assetConfig = getAssetConfig(btcAsset);
+      const deriveEnv = (process.env.NEXT_PUBLIC_DERIVE_ENV as "testnet" | "mainnet") || "mainnet";
+      const chain = getDeriveChain(deriveEnv);
+      const scaledAmount = toTokenAmount(amount, BTC_DECIMALS);
 
-      // Step 1: Transfer BTC from EOA -> SCW if needed
-      await ensureScwHasBtc({
-        walletClient,
-        wagmiConfig,
-        switchChainAsync,
-        deriveWallet,
-        amount,
-        tokenAddress: assetConfig.tokenAddress,
-        assetName: btcAsset,
+      // Step 1: Ensure SCW has BTC for the deposit (gas-free via internal withdraw)
+      const publicClient = createPublicClient({
+        chain,
+        transport: http(config.rpcUrl),
       });
 
-      // Step 2: Create subaccount on-chain via paymaster
-      // Bundle BTC token approvals + subaccount creation in a single gas-free UserOp
+      const scwBalance = await publicClient.readContract({
+        address: assetConfig.tokenAddress,
+        abi: erc20Abi,
+        functionName: "balanceOf",
+        args: [deriveWallet],
+      });
+
+      if (scwBalance < scaledAmount) {
+        if (!mainSubaccountId) {
+          throw new Error("No main subaccount to withdraw BTC from");
+        }
+
+        const deficit = scaledAmount - scwBalance;
+        const deficitStr = formatUnits(deficit, BTC_DECIMALS);
+
+        const withdrawNonce = generateNonce();
+        const withdrawExpiry = getSignatureExpiry();
+
+        const withdrawData = encodeWithdrawData({
+          amount: deficit,
+          asset: assetConfig.cashAsset,
+        });
+
+        const withdrawSig = await signAction({
+          subaccountId: BigInt(mainSubaccountId),
+          nonce: BigInt(withdrawNonce),
+          module: config.withdrawalModule,
+          data: withdrawData,
+          expiry: BigInt(withdrawExpiry),
+          owner: deriveWallet,
+          sessionPrivateKey: sessionKey.private_key,
+        });
+
+        await restClient.withdraw({
+          subaccount_id: mainSubaccountId,
+          amount: deficitStr,
+          asset_name: btcAsset,
+          nonce: withdrawNonce,
+          signature_expiry_sec: withdrawExpiry,
+          signer: sessionKey.public_key,
+          signature: stripSigPrefix(withdrawSig),
+        });
+
+        console.log(`[CoveredCall] Withdrew ${deficitStr} ${btcAsset} from main subaccount to SCW`);
+
+        // Wait for SCW to receive the tokens on-chain
+        for (let i = 0; i < 20; i++) {
+          const balance = await publicClient.readContract({
+            address: assetConfig.tokenAddress,
+            abi: erc20Abi,
+            functionName: "balanceOf",
+            args: [deriveWallet],
+          });
+          if (balance >= scaledAmount) break;
+          await new Promise((r) => setTimeout(r, 1500));
+        }
+      } else {
+        console.log(`[CoveredCall] SCW already has sufficient ${btcAsset}, skipping withdraw`);
+      }
+
+      // Step 2: Create subaccount on-chain via paymaster (gas-free)
+      // Bundle BTC token approvals + subaccount creation in a single UserOp
       const existingAccount = await restClient.getAccount(deriveWallet);
       const existingIds = new Set(existingAccount.subaccount_ids || []);
 
@@ -245,10 +236,9 @@ export function useCreateCoveredCallPosition() {
 
       console.log(`[CoveredCall] Created SM subaccount on-chain: ${newSubaccountId} (${btcAsset})`);
 
-      // Step 4: Deposit BTC into the new subaccount (session key signs)
+      // Step 4: Deposit BTC into the new subaccount (session key signs, gas-free)
       const depositNonce = generateNonce();
       const depositExpiry = getSignatureExpiry();
-      const scaledAmount = toTokenAmount(amount, BTC_DECIMALS);
 
       const depositData = encodeDepositData({
         amount: scaledAmount,

@@ -158,6 +158,9 @@ export function CoveredCallFlow() {
             setPositionSubaccountId(subaccountId);
             setStep("quote");
           },
+          onError: () => {
+            setStep("select");
+          },
         }
       );
     } else if (step === "quote") {
@@ -325,7 +328,7 @@ export function CoveredCallFlow() {
                     <StrikeSelector
                       strikes={strikes}
                       selectedStrike={selectedStrike}
-                      onSelect={(s) => { if (step === "select") setSelectedStrike(s); }}
+                      onSelect={(s) => { if (step === "select" || step === "deposit") setSelectedStrike(s); }}
                     />
                   </div>
                 </>
@@ -334,7 +337,7 @@ export function CoveredCallFlow() {
               <div className="mb-5">
                 <AmountInput
                   amount={amount}
-                  onAmountChange={(v) => { if (step === "select") setAmount(v); }}
+                  onAmountChange={(v) => { if (step === "select" || step === "deposit") setAmount(v); }}
                   balance={btcBalance}
                   collateralLabel={btcDisplayName}
                   insufficientBalance={amountNum > btcBalance && btcBalance > 0}
