@@ -1,12 +1,15 @@
 "use client";
 
 import { useState, useEffect, type ReactNode } from "react";
+import { usePathname } from "next/navigation";
 import { Providers } from "@/providers";
 import { Header } from "@/components/layout/Header";
 import { Toaster } from "sonner";
 
 export function ClientShell({ children }: { children: ReactNode }) {
   const [mounted, setMounted] = useState(false);
+  const pathname = usePathname();
+  const isLanding = pathname === "/";
 
   useEffect(() => {
     setMounted(true);
@@ -15,7 +18,7 @@ export function ClientShell({ children }: { children: ReactNode }) {
   // Prevent SSR of wallet-connect-dependent code entirely
   if (!mounted) {
     return (
-      <div className="mx-auto max-w-7xl px-4 py-6">
+      <div className={isLanding ? "" : "mx-auto max-w-7xl px-4 py-6"}>
         {children}
       </div>
     );
@@ -24,7 +27,7 @@ export function ClientShell({ children }: { children: ReactNode }) {
   return (
     <Providers>
       <Header />
-      <main className="mx-auto max-w-7xl px-4 py-6">{children}</main>
+      <main className={isLanding ? "" : "mx-auto max-w-7xl px-4 py-6"}>{children}</main>
       <Toaster
         theme="dark"
         position="bottom-right"

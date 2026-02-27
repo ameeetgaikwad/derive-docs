@@ -79,13 +79,11 @@ export default function DotGrid({
     if (ctx) ctx.scale(dpr, dpr);
 
     const cell = dotSize + gap;
-    const cols = Math.floor((width + gap) / cell);
-    const rows = Math.floor((height + gap) / cell);
+    const cols = Math.ceil(width / cell) + 1;
+    const rows = Math.ceil(height / cell) + 1;
 
-    const gridW = cell * cols - gap;
-    const gridH = cell * rows - gap;
-    const startX = (width - gridW) / 2 + dotSize / 2;
-    const startY = (height - gridH) / 2 + dotSize / 2;
+    const startX = dotSize / 2;
+    const startY = dotSize / 2;
 
     const dots: Dot[] = [];
     for (let y = 0; y < rows; y++) {

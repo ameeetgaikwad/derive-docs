@@ -72,15 +72,18 @@ export default function PortfolioContent() {
           </p>
           <button
             onClick={() => {
-              if (!isConnected && openConnectModal) {
+              if (isConnected) {
+                authenticate();
+              } else if (openConnectModal) {
                 openConnectModal();
               } else {
+                // Fallback: try authenticate anyway — it will prompt if needed
                 authenticate();
               }
             }}
             className="rounded-md bg-foreground px-8 py-3 text-sm font-semibold uppercase tracking-wide text-background transition-all hover:opacity-90"
           >
-            {isConnected ? "Sign in to Derive" : "Connect Wallet"}
+            Sign In
           </button>
         </div>
       </div>
