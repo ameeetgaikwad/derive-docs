@@ -1,13 +1,12 @@
 "use client";
 
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback } from "react";
 import { useAccount } from "wagmi";
 import { useConnectModal } from "@rainbow-me/rainbowkit";
 import { useDerive } from "@/providers/DeriveProvider";
 import { useAvailableStrikes } from "@/hooks/covered-call/useAvailableStrikes";
 import { useCreateCoveredCallPosition } from "@/hooks/covered-call/useCoveredCallSubaccount";
 import { useRequestQuote, useQuotes, useAcceptQuote } from "@/hooks/covered-call/useRFQ";
-import { usePremiumWithdraw } from "@/hooks/covered-call/usePremiumWithdraw";
 import { useCoveredCallStore } from "@/stores/covered-call";
 import { useCollaterals } from "@/hooks/portfolio/useCollaterals";
 import { useTicker } from "@/hooks/market/useTicker";
@@ -29,10 +28,17 @@ interface StrikeOptionForUI {
   otmPercent: number;
 }
 
+function getDefaultExpiry(expiries: { epoch: number }[]): number | null {
+  if (expiries.length === 0) return null;
+  const now = Date.now() / 1000;
+  const viable = expiries.filter((e) => e.epoch - now > 2 * 86400);
+  return viable.length > 0 ? viable[0].epoch : expiries[0].epoch;
+}
+
 export function CoveredCallFlow() {
   const { isConnected } = useAccount();
   const { openConnectModal } = useConnectModal();
-  const { isReady, isAuthenticated, authenticate } = useDerive();
+  const { isAuthenticated, authenticate } = useDerive();
 
   const [step, setStep] = useState<FlowStep>("select");
   const [selectedExpiry, setSelectedExpiry] = useState<number | null>(null);
@@ -49,7 +55,6 @@ export function CoveredCallFlow() {
   const createPosition = useCreateCoveredCallPosition();
   const requestQuote = useRequestQuote();
   const acceptQuote = useAcceptQuote();
-  const premiumWithdraw = usePremiumWithdraw();
   const { updatePosition } = useCoveredCallStore();
 
   const { data: rfqData } = useQuotes(rfqId, positionSubaccountId);
@@ -62,17 +67,22 @@ export function CoveredCallFlow() {
   const btcAssetName = btcCollateral?.asset_name ?? "CBBTC"; // actual token for API
   const btcDisplayName = "BTC"; // user-facing label
 
-  useEffect(() => {
-    if (expiries.length > 0 && (selectedExpiry === null || !expiries.find((e) => e.epoch === selectedExpiry))) {
-      const now = Date.now() / 1000;
-      const viable = expiries.filter((e) => e.epoch - now > 2 * 86400);
-      setSelectedExpiry(viable.length > 0 ? viable[0].epoch : expiries[0].epoch);
+  // Auto-select default expiry when expiries load or current selection becomes invalid
+  const effectiveExpiry = useMemo(() => {
+    if (selectedExpiry !== null && expiries.find((e) => e.epoch === selectedExpiry)) {
+      return selectedExpiry;
     }
+    return getDefaultExpiry(expiries);
   }, [expiries, selectedExpiry]);
 
+  // Sync state when effective expiry differs (user hasn't explicitly selected yet)
+  if (effectiveExpiry !== null && effectiveExpiry !== selectedExpiry) {
+    setSelectedExpiry(effectiveExpiry);
+  }
+
   const strikes: StrikeOptionForUI[] = useMemo(() => {
-    if (!selectedExpiry || spotPrice <= 0) return [];
-    const dte = daysToExpiry(selectedExpiry);
+    if (!effectiveExpiry || spotPrice <= 0) return [];
+    const dte = daysToExpiry(effectiveExpiry);
     if (dte <= 0) return [];
     return rawStrikes
       .filter((s) => s.estimatedPrice > 0)
@@ -84,13 +94,19 @@ export function CoveredCallFlow() {
         expiry: s.expiry,
         otmPercent: s.otmPercent ?? 0,
       }));
-  }, [rawStrikes, selectedExpiry, spotPrice]);
+  }, [rawStrikes, effectiveExpiry, spotPrice]);
 
-  useEffect(() => {
-    if (strikes.length > 0 && (selectedStrike === null || !strikes.find((s) => s.strike === selectedStrike))) {
-      setSelectedStrike(strikes[0].strike);
+  // Auto-select default strike when strikes change or current selection becomes invalid
+  const effectiveStrike = useMemo(() => {
+    if (selectedStrike !== null && strikes.find((s) => s.strike === selectedStrike)) {
+      return selectedStrike;
     }
+    return strikes.length > 0 ? strikes[0].strike : null;
   }, [strikes, selectedStrike]);
+
+  if (effectiveStrike !== null && effectiveStrike !== selectedStrike) {
+    setSelectedStrike(effectiveStrike);
+  }
 
   const amountNum = parseFloat(amount) || 0;
   const selectedStrikeData = strikes.find((s) => s.strike === selectedStrike);
@@ -116,11 +132,11 @@ export function CoveredCallFlow() {
     });
   }, [rfqData]);
 
-  useEffect(() => {
-    if (step === "quote" && bestQuote) {
-      setStep("accept");
-    }
-  }, [step, bestQuote]);
+  // Auto-advance from quote to accept when a quote arrives
+  const effectiveStep = step === "quote" && bestQuote ? "accept" : step;
+  if (effectiveStep !== step) {
+    setStep(effectiveStep);
+  }
 
   const handleCTA = useCallback(async () => {
     if (!isConnected) {
@@ -186,7 +202,7 @@ export function CoveredCallFlow() {
     }
   }, [
     isConnected, openConnectModal, isAuthenticated, authenticate, step,
-    selectedStrikeData, amountNum, amount,
+    selectedStrikeData, amountNum, amount, btcAssetName,
     createPosition, positionSubaccountId, requestQuote,
     rfqId, bestQuote, acceptQuote, updatePosition,
   ]);
