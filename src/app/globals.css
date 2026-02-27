@@ -53,7 +53,7 @@ body {
   font-family: var(--font-dm-sans), "DM Sans", sans-serif;
 }
 
-/* Remove default focus outlines — use border-accent instead */
+/* Remove default focus outlines */
 button:focus,
 select:focus,
 input:focus,
@@ -63,11 +63,14 @@ a:focus {
 
 button:focus-visible,
 select:focus-visible,
-input:focus-visible,
 a:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 1px var(--accent);
+  box-shadow: 0 0 0 1px var(--border);
   border-radius: 6px;
+}
+
+input:focus-visible {
+  outline: none;
 }
 
 /* All interactive elements get pointer cursor */

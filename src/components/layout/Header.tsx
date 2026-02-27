@@ -43,11 +43,8 @@ export function Header() {
       <header className="sticky top-0 z-50 border-b border-border bg-card">
         <div className="mx-auto flex h-12 max-w-7xl items-center justify-between px-4">
           <div className="flex items-center gap-6">
-            <Link href="/" className="flex items-center gap-2">
-              <HedgeLogo size={22} />
-              <span className="text-sm font-bold tracking-[-0.03em] text-foreground font-heading">
-                SatsTerminal
-              </span>
+            <Link href="/" className="flex items-center">
+              <HedgeLogo size={18} className="text-foreground" />
             </Link>
             {process.env.NEXT_PUBLIC_DERIVE_ENV === "testnet" && (
               <span className="rounded border border-accent/30 bg-accent/10 px-1.5 py-0.5 text-[10px] font-bold uppercase text-accent">
