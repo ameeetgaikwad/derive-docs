@@ -1,6 +1,7 @@
 "use client";
 
 import { cn } from "@/lib/utils";
+import { TokenIcon } from "@/components/ui/TokenIcon";
 
 interface AmountInputProps {
   amount: string;
@@ -50,7 +51,8 @@ export function AmountInput({
         >
           +
         </button>
-        <span className="rounded-[10px] border-[0.5px] border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground">
+        <span className="flex items-center gap-2 rounded-[10px] border-[0.5px] border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground">
+          <TokenIcon symbol={collateralLabel} size={18} />
           {collateralLabel}
         </span>
       </div>

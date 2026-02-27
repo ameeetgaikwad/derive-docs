@@ -57,7 +57,8 @@ export function CoveredCallFlow() {
     ["WBTC", "CBBTC", "LBTC", "BTC"].includes(c.asset_name)
   );
   const btcBalance = btcCollateral ? parseFloat(btcCollateral.amount) : 0;
-  const btcAssetName = btcCollateral?.asset_name ?? "CBBTC";
+  const btcAssetName = btcCollateral?.asset_name ?? "CBBTC"; // actual token for API
+  const btcDisplayName = "BTC"; // user-facing label
 
   useEffect(() => {
     if (expiries.length > 0 && (selectedExpiry === null || !expiries.find((e) => e.epoch === selectedExpiry))) {
@@ -321,7 +322,7 @@ export function CoveredCallFlow() {
                   amount={amount}
                   onAmountChange={(v) => { if (step === "select") setAmount(v); }}
                   balance={btcBalance}
-                  collateralLabel={btcAssetName}
+                  collateralLabel={btcDisplayName}
                   insufficientBalance={amountNum > btcBalance && btcBalance > 0}
                   step={0.01}
                 />
@@ -336,7 +337,7 @@ export function CoveredCallFlow() {
                     outcome={outcome}
                     expiryLabel={selectedExpiryData?.label || ""}
                     strategyType="covered_call"
-                    collateralLabel={btcAssetName}
+                    collateralLabel={btcDisplayName}
                   />
                 </div>
               )}
@@ -378,7 +379,7 @@ export function CoveredCallFlow() {
             strike={selectedStrike}
             spotPrice={spotPrice}
             amount={amountNum}
-            collateralLabel={btcAssetName}
+            collateralLabel={btcDisplayName}
             apr={selectedStrikeData?.apr ?? 0}
           />
         </div>

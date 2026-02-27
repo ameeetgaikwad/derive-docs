@@ -10,6 +10,7 @@ import {
 import { cn } from "@/lib/utils";
 import type { Collateral } from "@/lib/derive/types";
 import { BridgeForm } from "@/components/account/BridgeModal";
+import { TokenIcon } from "@/components/ui/TokenIcon";
 
 type Tab = "deposit" | "withdraw" | "bridge";
 
@@ -39,7 +40,7 @@ interface FundsModalProps {
 export function FundsModal({ open, onClose, collaterals, initialTab = "deposit" }: FundsModalProps) {
   const [tab, setTab] = useState<Tab>(initialTab);
   const [amount, setAmount] = useState("");
-  const [asset, setAsset] = useState<"USDC" | "WBTC">("USDC");
+  const [asset, setAsset] = useState<"USDC" | "BTC">("USDC");
   const deposit = useDeposit();
   const withdraw = useWithdraw();
 
@@ -51,10 +52,13 @@ export function FundsModal({ open, onClose, collaterals, initialTab = "deposit" 
   if (!open) return null;
 
   const usdcCollateral = collaterals.find((c) => c.asset_name === "USDC");
-  const wbtcCollateral = collaterals.find((c) => c.asset_name === "WBTC");
+  const btcCollateral = collaterals.find((c) =>
+    ["WBTC", "CBBTC", "LBTC", "BTC"].includes(c.asset_name)
+  );
   const usdcBalance = usdcCollateral ? parseFloat(usdcCollateral.amount) : 0;
-  const wbtcBalance = wbtcCollateral ? parseFloat(wbtcCollateral.amount) : 0;
-  const selectedBalance = asset === "USDC" ? usdcBalance : wbtcBalance;
+  const btcBalance = btcCollateral ? parseFloat(btcCollateral.amount) : 0;
+  const selectedBalance = asset === "USDC" ? usdcBalance : btcBalance;
+  const displayAsset = asset; // already "USDC" or "BTC"
 
   const isDeposit = tab === "deposit";
   const isSubmitting = isDeposit ? deposit.isPending : withdraw.isPending;
@@ -109,15 +113,12 @@ export function FundsModal({ open, onClose, collaterals, initialTab = "deposit" 
                 onClick={() => setTab(t)}
                 className={cn(
                   "flex-1 rounded-md py-2 text-xs font-semibold capitalize transition-colors",
-                  tab === t
-                    ? "bg-card-elevated"
-                    : "text-muted-foreground hover:text-secondary-foreground"
+                  tab !== t && "text-muted-foreground hover:text-secondary-foreground",
+                  tab === t && "bg-card-elevated",
+                  tab === t && t === "deposit" && "text-accent",
+                  tab === t && t === "withdraw" && "text-destructive",
+                  tab === t && t === "bridge" && "text-blue-500",
                 )}
-                style={{
-                  color: tab === t
-                    ? t === "deposit" ? "#fb923c" : t === "withdraw" ? "#ef4444" : "#3b82f6"
-                    : undefined,
-                }}
               >
                 {t}
               </button>
@@ -130,17 +131,18 @@ export function FundsModal({ open, onClose, collaterals, initialTab = "deposit" 
             <>
               {/* Asset selector */}
               <div className="flex gap-2">
-                {(["USDC", "WBTC"] as const).map((a) => (
+                {(["USDC", "BTC"] as const).map((a) => (
                   <button
                     key={a}
                     onClick={() => setAsset(a)}
                     className={cn(
-                      "flex-1 rounded-[10px] border-[0.5px] py-2.5 text-xs font-semibold transition-colors",
+                      "flex flex-1 items-center justify-center gap-2 rounded-[10px] border-[0.5px] py-2.5 text-xs font-semibold transition-colors",
                       asset === a
                         ? "border-accent bg-accent/10 text-accent"
                         : "border-border bg-background text-muted-foreground hover:text-secondary-foreground"
                     )}
                   >
+                    <TokenIcon symbol={a} size={18} />
                     {a}
                   </button>
                 ))}
@@ -149,9 +151,9 @@ export function FundsModal({ open, onClose, collaterals, initialTab = "deposit" 
               {/* Balance display */}
               <div className="rounded-[10px] border-[0.5px] border-border bg-background p-3">
                 <div className="flex items-center justify-between text-xs">
-                  <span className="text-muted-foreground">{asset} Balance on Derive</span>
+                  <span className="text-muted-foreground">{displayAsset} Balance on Derive</span>
                   <span className="text-foreground">
-                    {selectedBalance.toFixed(asset === "USDC" ? 2 : 6)} {asset}
+                    {selectedBalance.toFixed(asset === "USDC" ? 2 : 6)} {displayAsset}
                   </span>
                 </div>
               </div>

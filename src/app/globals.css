@@ -53,6 +53,36 @@ body {
   font-family: var(--font-dm-sans), "DM Sans", sans-serif;
 }
 
+/* Remove default focus outlines — use border-accent instead */
+button:focus,
+select:focus,
+input:focus,
+a:focus {
+  outline: none;
+}
+
+button:focus-visible,
+select:focus-visible,
+input:focus-visible,
+a:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 1px var(--accent);
+  border-radius: 6px;
+}
+
+/* All interactive elements get pointer cursor */
+button,
+select,
+[role="button"],
+a {
+  cursor: pointer;
+}
+
+select {
+  -webkit-appearance: none;
+  appearance: none;
+}
+
 /* Scrollbar styling */
 ::-webkit-scrollbar {
   width: 6px;
@@ -70,6 +100,24 @@ body {
 
 ::-webkit-scrollbar-thumb:hover {
   background: var(--muted-foreground);
+}
+
+.scrollbar-thin {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+
+.scrollbar-thin::-webkit-scrollbar {
+  height: 4px;
+}
+
+.scrollbar-thin::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.scrollbar-thin::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 2px;
 }
 
 /* RainbowKit overrides */

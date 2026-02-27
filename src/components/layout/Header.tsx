@@ -9,11 +9,12 @@ import { cn } from "@/lib/utils";
 import { useDerive } from "@/providers/DeriveProvider";
 import { useCollaterals } from "@/hooks/portfolio/useCollaterals";
 import { HedgeLogo } from "@/components/ui/HedgeLogo";
+import { TokenIcon } from "@/components/ui/TokenIcon";
 import { FundsModal } from "@/components/portfolio/FundsModal";
 
 const navLinks = [
-  { href: "/trade", label: "trade" },
-  { href: "/portfolio", label: "portfolio" },
+  { href: "/trade", label: "Trade" },
+  { href: "/portfolio", label: "Portfolio" },
 ];
 
 export function Header() {
@@ -119,7 +120,10 @@ export function Header() {
                           <div className="mb-3 space-y-1.5">
                             {collaterals.map((c) => (
                               <div key={c.asset_name} className="flex items-center justify-between text-xs">
-                                <span className="text-secondary-foreground">{c.asset_name}</span>
+                                <span className="flex items-center gap-2 text-secondary-foreground">
+                                  <TokenIcon symbol={c.asset_name} size={16} />
+                                  {c.asset_name}
+                                </span>
                                 <div>
                                   <span className="text-foreground">{parseFloat(c.amount).toFixed(4)}</span>
                                   {parseFloat(c.mark_value) > 0 && (

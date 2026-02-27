@@ -14,6 +14,7 @@ import { StrikeSelector } from "./StrikeSelector";
 import { AmountInput } from "./AmountInput";
 import { OutcomePreview } from "./OutcomePreview";
 import { EarnSummary } from "./EarnSummary";
+import { cn } from "@/lib/utils";
 
 interface StrikeOption {
   strike: number;
@@ -196,20 +197,20 @@ export function EarnFlow() {
   }, [isConnected, isAuthenticated, authenticate, selectedStrikeData, outcome, amountNum, submitOrder]);
 
   const loading = instrumentsLoading || tickersLoading;
+  const ctaEnabled = !!selectedStrikeData && amountNum > 0;
 
   return (
-    <div className="min-h-screen p-6" style={{ background: "#faf8f5" }}>
+    <div className="min-h-screen bg-background p-6">
       <div className="mx-auto grid max-w-6xl gap-6 lg:grid-cols-[1fr_320px]">
         {/* Main panel */}
-        <div className="rounded-lg border p-6" style={{ borderColor: "#d4cfc6", background: "#ffffff" }}>
+        <div className="rounded-[10px] border-[0.5px] border-border bg-card p-6">
           {/* Top bar: dropdowns */}
           <div className="mb-6 flex flex-wrap items-center gap-3">
             {/* Asset */}
             <select
               value={asset}
               onChange={(e) => { setAsset(e.target.value as Currency); setSelectedStrike(null); }}
-              className="rounded-lg border px-3 py-1.5 font-mono text-xs font-medium"
-              style={{ borderColor: "#d4cfc6", color: "#1a1a1a", background: "#fff" }}
+              className="rounded-md border-[0.5px] border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground disabled:opacity-50"
             >
               <option value="ETH">ETH</option>
               <option value="BTC">BTC</option>
@@ -219,8 +220,7 @@ export function EarnFlow() {
             <select
               value={strategyType}
               onChange={(e) => { setStrategyType(e.target.value as StrategyType); setSelectedStrike(null); }}
-              className="rounded-lg border px-3 py-1.5 font-mono text-xs font-medium"
-              style={{ borderColor: "#d4cfc6", color: "#1a1a1a", background: "#fff" }}
+              className="rounded-md border-[0.5px] border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground disabled:opacity-50"
             >
               <option value="covered_call">Covered Call</option>
               <option value="cash_secured_put">Cash Secured Put</option>
@@ -230,8 +230,7 @@ export function EarnFlow() {
             <select
               value={selectedExpiry ?? ""}
               onChange={(e) => { setSelectedExpiry(Number(e.target.value)); setSelectedStrike(null); }}
-              className="rounded-lg border px-3 py-1.5 font-mono text-xs font-medium"
-              style={{ borderColor: "#d4cfc6", color: "#1a1a1a", background: "#fff" }}
+              className="rounded-md border-[0.5px] border-border bg-background px-3 py-1.5 text-xs font-medium text-foreground disabled:opacity-50"
             >
               {expiries.map((e) => (
                 <option key={e.epoch} value={e.epoch}>{e.label}</option>
@@ -242,23 +241,26 @@ export function EarnFlow() {
 
             {/* Spot price */}
             {spotPrice > 0 && (
-              <div className="rounded-lg border px-3 py-1.5 font-mono text-xs" style={{ borderColor: "#d4cfc6", background: "#f8f5f0", color: "#6b6560" }}>
-                Spot: <span className="font-medium" style={{ color: "#1a1a1a" }}>${spotPrice.toLocaleString(undefined, { maximumFractionDigits: 2 })}</span>
+              <div className="rounded-md border-[0.5px] border-border bg-background px-3 py-1.5 text-xs text-muted-foreground">
+                Spot: <span className="font-semibold text-foreground">${spotPrice.toLocaleString(undefined, { maximumFractionDigits: 2 })}</span>
               </div>
             )}
           </div>
 
           {/* Header text */}
           {loading ? (
-            <div className="py-10 text-center font-mono text-sm" style={{ color: "#9b9590" }}>Loading strikes...</div>
+            <div className="py-10 text-center text-sm text-muted-foreground">Loading strikes...</div>
           ) : (
             <>
-              <div className="mb-4 font-mono text-sm" style={{ color: "#6b6560" }}>
+              <div className="mb-1 text-sm text-secondary-foreground">
                 Choose the price at which you are happy to{" "}
                 {strategyType === "cash_secured_put" ? "buy" : "sell"}{" "}
-                <span className="font-medium" style={{ color: "#1a1a1a" }}>{asset}</span> on{" "}
-                <span className="font-medium" style={{ color: "#1a1a1a" }}>{selectedExpiryData?.label}</span>{" "}
-                (in {dte} days)
+                <span className="font-semibold text-foreground">{asset}</span> on{" "}
+                <span className="font-semibold text-foreground">{selectedExpiryData?.label}</span>{" "}
+                <span className="text-muted-foreground">(in {dte} days)</span>
+              </div>
+              <div className="mb-4 text-[10px] text-muted-foreground">
+                Prices are live from the Derive exchange orderbook
               </div>
 
               {/* Strike selector */}
@@ -303,13 +305,12 @@ export function EarnFlow() {
           <button
             onClick={handleSubmit}
             disabled={submitOrder.isPending || !selectedStrikeData || amountNum <= 0}
-            className="w-full rounded-lg py-3.5 font-mono text-sm font-semibold transition-all disabled:cursor-not-allowed disabled:opacity-40"
-            style={{
-              background: selectedStrikeData && amountNum > 0 ? "#4a5a3a" : "#d4cfc6",
-              color: selectedStrikeData && amountNum > 0 ? "#ffffff" : "#9b9590",
-              border: "1px solid",
-              borderColor: selectedStrikeData && amountNum > 0 ? "#3d4d2f" : "#d4cfc6",
-            }}
+            className={cn(
+              "w-full rounded-md py-3.5 text-sm font-semibold transition-all disabled:cursor-not-allowed disabled:opacity-30",
+              ctaEnabled
+                ? "bg-accent text-black"
+                : "bg-card-elevated text-muted-foreground"
+            )}
           >
             {submitOrder.isPending
               ? "Submitting..."
