@@ -302,6 +302,17 @@ interface SellCallParams {
   limitPrice: string; // USD price per option e.g. "1234.56"
   baseAssetAddress: string;
   baseAssetSubId: string;
+  amountStep: string;
+  minimumAmount: string;
+  tickSize: string;
+}
+
+/** Round a value down to the nearest step increment. */
+function roundToStep(value: number, step: number): string {
+  if (step <= 0) return value.toString();
+  const decimals = step.toString().split(".")[1]?.length ?? 0;
+  const rounded = Math.floor(value / step) * step;
+  return rounded.toFixed(decimals);
 }
 
 /**
@@ -319,50 +330,98 @@ export function useSellCall() {
         throw new Error("Not authenticated");
       }
 
+      // Wait for deposit to settle — poll until subaccount has BTC collateral
+      for (let i = 0; i < 15; i++) {
+        const collaterals = await restClient.getCollaterals(params.subaccountId);
+        const btc = collaterals.find((c) =>
+          ["WBTC", "CBBTC", "LBTC", "BTC"].includes(c.asset_name)
+        );
+        if (btc && parseFloat(btc.amount) > 0) break;
+        await new Promise((r) => setTimeout(r, 1500));
+      }
+
+      // Round amount and price to instrument constraints
+      const amountStep = parseFloat(params.amountStep) || 0.01;
+      const tickSize = parseFloat(params.tickSize) || 0.01;
+      const minAmount = parseFloat(params.minimumAmount) || 0.01;
+
+      const rawAmount = parseFloat(params.amount);
+      const roundedAmount = roundToStep(rawAmount, amountStep);
+      if (parseFloat(roundedAmount) < minAmount) {
+        throw new Error(`Amount ${roundedAmount} is below minimum ${params.minimumAmount}`);
+      }
+
+      const rawPrice = parseFloat(params.limitPrice);
+      const roundedPrice = roundToStep(rawPrice, tickSize);
+
+      console.log(`[SellCall] amount: ${params.amount} -> ${roundedAmount} (step=${amountStep}), price: ${params.limitPrice} -> ${roundedPrice} (tick=${tickSize})`);
+
       const config = getConfig();
-      const nonce = generateNonce();
-      const signatureExpiry = getSignatureExpiry();
 
-      const amountBN = toBN(params.amount);
-      const limitPriceBN = toBN(params.limitPrice);
-      const maxFeeBN = toBN("100");
+      // Retry logic: deposit may not be fully settled in matching engine yet
+      const MAX_RETRIES = 4;
+      const RETRY_DELAYS = [3000, 5000, 8000, 10000];
 
-      const tradeData = encodeTradeData({
-        assetAddress: params.baseAssetAddress as Hex,
-        subId: BigInt(params.baseAssetSubId),
-        limitPrice: limitPriceBN,
-        amount: amountBN,
-        maxFee: maxFeeBN,
-        subaccountId: BigInt(params.subaccountId),
-        isBid: false, // selling
-      });
+      for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+        try {
+          // Generate fresh nonce/expiry each attempt
+          const nonce = generateNonce();
+          const signatureExpiry = getSignatureExpiry();
 
-      const signature = await signAction({
-        subaccountId: BigInt(params.subaccountId),
-        nonce: BigInt(nonce),
-        module: config.tradeModule,
-        data: tradeData,
-        expiry: BigInt(signatureExpiry),
-        owner: deriveWallet,
-        sessionPrivateKey: sessionKey.private_key,
-      });
+          const amountBN = toBN(roundedAmount);
+          const limitPriceBN = toBN(roundedPrice);
+          const maxFeeBN = toBN("10000");
 
-      const result = await restClient.submitOrder({
-        instrument_name: params.instrumentName,
-        direction: "sell",
-        order_type: "limit",
-        amount: params.amount,
-        limit_price: params.limitPrice,
-        time_in_force: "gtc",
-        subaccount_id: params.subaccountId,
-        nonce,
-        signature_expiry_sec: signatureExpiry,
-        signer: sessionKey.public_key,
-        signature: stripSigPrefix(signature),
-        max_fee: "100",
-      });
+          const tradeData = encodeTradeData({
+            assetAddress: params.baseAssetAddress as Hex,
+            subId: BigInt(params.baseAssetSubId),
+            limitPrice: limitPriceBN,
+            amount: amountBN,
+            maxFee: maxFeeBN,
+            subaccountId: BigInt(params.subaccountId),
+            isBid: false, // selling
+          });
 
-      return result;
+          const signature = await signAction({
+            subaccountId: BigInt(params.subaccountId),
+            nonce: BigInt(nonce),
+            module: config.tradeModule,
+            data: tradeData,
+            expiry: BigInt(signatureExpiry),
+            owner: deriveWallet,
+            sessionPrivateKey: sessionKey.private_key,
+          });
+
+          const result = await restClient.submitOrder({
+            instrument_name: params.instrumentName,
+            direction: "sell",
+            order_type: "limit",
+            amount: roundedAmount,
+            limit_price: roundedPrice,
+            time_in_force: "gtc",
+            subaccount_id: params.subaccountId,
+            nonce,
+            signature_expiry_sec: signatureExpiry,
+            signer: sessionKey.public_key,
+            signature: stripSigPrefix(signature),
+            max_fee: "10000",
+          });
+
+          return result;
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          const isTransient = msg.includes("Invalid amount") || msg.includes("invalid amount") || msg.includes("Insufficient funds") || msg.includes("insufficient funds");
+
+          if (isTransient && attempt < MAX_RETRIES) {
+            console.log(`[SellCall] Attempt ${attempt + 1} failed: ${msg}. Retrying in ${RETRY_DELAYS[attempt]}ms...`);
+            await new Promise((r) => setTimeout(r, RETRY_DELAYS[attempt]));
+            continue;
+          }
+          throw err;
+        }
+      }
+
+      throw new Error("Sell order failed after retries");
     },
     onSuccess: (result, params) => {
       const fills = result.trades.length;

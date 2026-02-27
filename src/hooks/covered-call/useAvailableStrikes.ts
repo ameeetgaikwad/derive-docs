@@ -17,6 +17,12 @@ export interface StrikeOption {
   baseAssetAddress: string;
   /** On-chain base asset sub ID for trade encoding */
   baseAssetSubId: string;
+  /** Instrument minimum order amount */
+  minimumAmount: string;
+  /** Instrument order amount step */
+  amountStep: string;
+  /** Instrument tick size for price */
+  tickSize: string;
 }
 
 export interface ExpiryInfo {
@@ -187,6 +193,9 @@ export function useAvailableStrikes(selectedExpiry: number | null = null, spotPr
         otmPercent,
         baseAssetAddress: inst.base_asset_address,
         baseAssetSubId: inst.base_asset_sub_id,
+        minimumAmount: inst.minimum_amount,
+        amountStep: inst.amount_step,
+        tickSize: inst.tick_size,
       };
     });
   }, [suggestedInstruments, tickerQuery.data, spotPrice]);

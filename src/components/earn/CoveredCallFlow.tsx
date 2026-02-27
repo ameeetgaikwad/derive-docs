@@ -27,6 +27,9 @@ interface StrikeOptionForUI {
   otmPercent: number;
   baseAssetAddress: string;
   baseAssetSubId: string;
+  minimumAmount: string;
+  amountStep: string;
+  tickSize: string;
 }
 
 function getDefaultExpiry(expiries: { epoch: number }[]): number | null {
@@ -93,6 +96,9 @@ export function CoveredCallFlow() {
         otmPercent: s.otmPercent ?? 0,
         baseAssetAddress: s.baseAssetAddress,
         baseAssetSubId: s.baseAssetSubId,
+        minimumAmount: s.minimumAmount,
+        amountStep: s.amountStep,
+        tickSize: s.tickSize,
       }));
   }, [rawStrikes, effectiveExpiry, spotPrice]);
 
@@ -151,6 +157,9 @@ export function CoveredCallFlow() {
                 limitPrice: selectedStrikeData.premium.toString(),
                 baseAssetAddress: selectedStrikeData.baseAssetAddress,
                 baseAssetSubId: selectedStrikeData.baseAssetSubId,
+                amountStep: selectedStrikeData.amountStep,
+                minimumAmount: selectedStrikeData.minimumAmount,
+                tickSize: selectedStrikeData.tickSize,
               },
               {
                 onSuccess: (result) => {
@@ -161,6 +170,10 @@ export function CoveredCallFlow() {
                       0
                     );
                     setEarnedPremium(totalPremium.toFixed(2));
+                  } else {
+                    // Order placed on book — show estimated premium
+                    const estimated = selectedStrikeData.premium * amountNum;
+                    setEarnedPremium(estimated.toFixed(2));
                   }
                   updatePosition(subaccountId, {
                     instrumentName: selectedStrikeData.instrumentName,
@@ -192,6 +205,9 @@ export function CoveredCallFlow() {
           limitPrice: selectedStrikeData.premium.toString(),
           baseAssetAddress: selectedStrikeData.baseAssetAddress,
           baseAssetSubId: selectedStrikeData.baseAssetSubId,
+          amountStep: selectedStrikeData.amountStep,
+          minimumAmount: selectedStrikeData.minimumAmount,
+          tickSize: selectedStrikeData.tickSize,
         },
         {
           onSuccess: (result) => {
@@ -202,6 +218,10 @@ export function CoveredCallFlow() {
                 0
               );
               setEarnedPremium(totalPremium.toFixed(2));
+            } else {
+              // Order placed on book — show estimated premium
+              const estimated = selectedStrikeData.premium * amountNum;
+              setEarnedPremium(estimated.toFixed(2));
             }
             updatePosition(positionSubaccountId, {
               instrumentName: selectedStrikeData.instrumentName,
@@ -297,7 +317,7 @@ export function CoveredCallFlow() {
               <div className="mb-1 text-sm text-secondary-foreground">
                 Earned{" "}
                 <span className="font-semibold text-foreground">
-                  ${earnedPremium ? parseFloat(earnedPremium).toLocaleString(undefined, { maximumFractionDigits: 2 }) : "—"}
+                  ${earnedPremium && !isNaN(parseFloat(earnedPremium)) ? parseFloat(earnedPremium).toLocaleString(undefined, { maximumFractionDigits: 2 }) : "—"}
                 </span>{" "}
                 premium
               </div>
