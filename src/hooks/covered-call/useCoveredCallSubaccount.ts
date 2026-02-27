@@ -324,12 +324,14 @@ interface SellCallParams {
   tickSize: string;
 }
 
-/** Round a value down to the nearest step increment. */
+/** Round a value down to the nearest step increment (avoiding floating-point errors). */
 function roundToStep(value: number, step: number): string {
   if (step <= 0) return value.toString();
   const decimals = step.toString().split(".")[1]?.length ?? 0;
-  const rounded = Math.floor(value / step) * step;
-  return rounded.toFixed(decimals);
+  // Use integer math to avoid floating-point precision issues
+  const factor = Math.pow(10, decimals);
+  const rounded = Math.floor(Math.round(value * factor) / Math.round(step * factor)) * step;
+  return parseFloat(rounded.toFixed(decimals)).toString();
 }
 
 /**
@@ -347,16 +349,12 @@ export function useSellCall() {
         throw new Error("Not authenticated");
       }
 
-      // Round amount and price to instrument constraints
+      // Round amount and price to instrument step/tick constraints
       const amountStep = parseFloat(params.amountStep) || 0.01;
       const tickSize = parseFloat(params.tickSize) || 0.01;
-      const minAmount = parseFloat(params.minimumAmount) || 0.01;
 
       const rawAmount = parseFloat(params.amount);
       const roundedAmount = roundToStep(rawAmount, amountStep);
-      if (parseFloat(roundedAmount) < minAmount) {
-        throw new Error(`Amount ${roundedAmount} is below minimum ${params.minimumAmount}`);
-      }
 
       const rawPrice = parseFloat(params.limitPrice);
       const roundedPrice = roundToStep(rawPrice, tickSize);
