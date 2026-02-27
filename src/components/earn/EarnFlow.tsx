@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { useAccount } from "wagmi";
+import { useConnectModal } from "@rainbow-me/rainbowkit";
 import { useInstruments } from "@/hooks/market/useInstruments";
 import { useTicker } from "@/hooks/market/useTicker";
 import { useDerive } from "@/providers/DeriveProvider";
@@ -30,6 +31,7 @@ interface StrikeOption {
 
 export function EarnFlow() {
   const { isConnected } = useAccount();
+  const { openConnectModal } = useConnectModal();
   const { isReady, isAuthenticated, authenticate, subaccountId } = useDerive();
   const submitOrder = useSubmitOrder();
 
@@ -179,7 +181,10 @@ export function EarnFlow() {
     : null;
 
   const handleSubmit = useCallback(async () => {
-    if (!isConnected) return;
+    if (!isConnected) {
+      openConnectModal?.();
+      return;
+    }
     if (!isAuthenticated) {
       await authenticate();
       return;
@@ -194,7 +199,7 @@ export function EarnFlow() {
       baseAssetAddress: selectedStrikeData.baseAssetAddress,
       baseAssetSubId: selectedStrikeData.baseAssetSubId,
     });
-  }, [isConnected, isAuthenticated, authenticate, selectedStrikeData, outcome, amountNum, submitOrder]);
+  }, [isConnected, openConnectModal, isAuthenticated, authenticate, selectedStrikeData, outcome, amountNum, submitOrder]);
 
   const loading = instrumentsLoading || tickersLoading;
   const ctaEnabled = !!selectedStrikeData && amountNum > 0;

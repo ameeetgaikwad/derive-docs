@@ -1,6 +1,8 @@
 "use client";
 
 import { useState } from "react";
+import { useAccount } from "wagmi";
+import { useConnectModal } from "@rainbow-me/rainbowkit";
 import { usePositions } from "@/hooks/portfolio/usePositions";
 import { useCollaterals } from "@/hooks/portfolio/useCollaterals";
 import { useOpenOrders } from "@/hooks/portfolio/useOpenOrders";
@@ -39,6 +41,8 @@ function parseInstrument(name: string) {
    MAIN COMPONENT
    ══════════════════════════════════════════════════════════════════ */
 export default function PortfolioContent() {
+  const { isConnected } = useAccount();
+  const { openConnectModal } = useConnectModal();
   const { isAuthenticated, authenticate } = useDerive();
   const { data: positions = [], isLoading: posLoading } = usePositions();
   const { data: collaterals = [], isLoading: colLoading } = useCollaterals();
@@ -67,10 +71,16 @@ export default function PortfolioContent() {
             Sign in to view your balances, positions, and manage your funds on Derive.
           </p>
           <button
-            onClick={authenticate}
+            onClick={() => {
+              if (!isConnected && openConnectModal) {
+                openConnectModal();
+              } else {
+                authenticate();
+              }
+            }}
             className="rounded-md bg-foreground px-8 py-3 text-sm font-semibold uppercase tracking-wide text-background transition-all hover:opacity-90"
           >
-            Connect Wallet
+            {isConnected ? "Sign in to Derive" : "Connect Wallet"}
           </button>
         </div>
       </div>

@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { useAccount } from "wagmi";
+import { useConnectModal } from "@rainbow-me/rainbowkit";
 import { useDerive } from "@/providers/DeriveProvider";
 import { useAvailableStrikes } from "@/hooks/covered-call/useAvailableStrikes";
 import { useCreateCoveredCallPosition } from "@/hooks/covered-call/useCoveredCallSubaccount";
@@ -30,6 +31,7 @@ interface StrikeOptionForUI {
 
 export function CoveredCallFlow() {
   const { isConnected } = useAccount();
+  const { openConnectModal } = useConnectModal();
   const { isReady, isAuthenticated, authenticate } = useDerive();
 
   const [step, setStep] = useState<FlowStep>("select");
@@ -121,7 +123,10 @@ export function CoveredCallFlow() {
   }, [step, bestQuote]);
 
   const handleCTA = useCallback(async () => {
-    if (!isConnected) return;
+    if (!isConnected) {
+      openConnectModal?.();
+      return;
+    }
     if (!isAuthenticated) {
       await authenticate();
       return;
@@ -187,7 +192,7 @@ export function CoveredCallFlow() {
       );
     }
   }, [
-    isConnected, isAuthenticated, authenticate, step,
+    isConnected, openConnectModal, isAuthenticated, authenticate, step,
     selectedStrikeData, amountNum, amount,
     createPosition, positionSubaccountId, requestQuote,
     rfqId, bestQuote, acceptQuote, updatePosition,
