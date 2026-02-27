@@ -9,15 +9,18 @@ export default function Home() {
   return (
     <div className="relative flex min-h-[calc(100vh-3rem)] flex-col items-center justify-center overflow-hidden text-center">
       {/* Dot grid background */}
-      <div className="absolute inset-0 opacity-20">
+      <div className="absolute inset-0 opacity-15">
         <DotGrid
-          dotSize={3}
-          gap={28}
+          dotSize={2}
+          gap={16}
           baseColor="#fb923c"
           activeColor="#fb923c"
-          proximity={120}
-          shockRadius={200}
-          shockStrength={4}
+          proximity={80}
+          shockRadius={120}
+          shockStrength={1.5}
+          speedTrigger={200}
+          returnStiffness={0.06}
+          returnDamping={0.9}
         />
       </div>
 
