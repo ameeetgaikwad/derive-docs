@@ -15,6 +15,8 @@ import {
   getSignatureExpiry,
 } from "@/lib/derive/signing";
 import { getConfig, getAssetConfig, type SupportedAsset } from "@/lib/derive/constants";
+import { sendSponsoredUserOp } from "@/lib/derive/paymaster";
+import { encodeApprove, encodeCreateSubaccount, type ScwAction } from "@/lib/derive/scw-actions";
 import { toast } from "sonner";
 import { createPublicClient, erc20Abi, encodeFunctionData, http } from "viem";
 import { waitForTransactionReceipt } from "wagmi/actions";
@@ -110,79 +112,6 @@ async function ensureScwHasBtc({
 }
 
 /**
- * Ensure the SCW has approved the deposit module to spend the BTC token.
- */
-async function ensureScwBtcApprovals({
-  walletClient,
-  wagmiConfig,
-  switchChainAsync,
-  deriveWallet,
-  tokenAddress,
-  assetName,
-}: {
-  walletClient: WalletClient;
-  wagmiConfig: Config;
-  switchChainAsync: ReturnType<typeof useSwitchChain>["switchChainAsync"];
-  deriveWallet: `0x${string}`;
-  tokenAddress: `0x${string}`;
-  assetName: string;
-}): Promise<void> {
-  const config = getConfig();
-  const deriveEnv = (process.env.NEXT_PUBLIC_DERIVE_ENV as "testnet" | "mainnet") || "mainnet";
-  const chain = getDeriveChain(deriveEnv);
-  const maxUint256 = BigInt("0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff");
-
-  if (walletClient.chain?.id !== config.chainId) {
-    await switchChainAsync({ chainId: config.chainId });
-  }
-
-  const publicClient = createPublicClient({
-    chain,
-    transport: http(config.rpcUrl),
-  });
-
-  const spenders = [config.depositModule, config.withdrawWrapper];
-
-  for (const spender of spenders) {
-    const allowance = await publicClient.readContract({
-      address: tokenAddress,
-      abi: erc20Abi,
-      functionName: "allowance",
-      args: [deriveWallet, spender],
-    });
-
-    if (allowance > 0n) continue;
-
-    console.log(`[CoveredCall] SCW needs ${assetName} approval for`, spender, "— sending via SCW.execute");
-
-    const approveCalldata = encodeFunctionData({
-      abi: erc20Abi,
-      functionName: "approve",
-      args: [spender, maxUint256],
-    });
-
-    const executeCalldata = encodeFunctionData({
-      abi: LIGHT_ACCOUNT_EXECUTE_ABI,
-      functionName: "execute",
-      args: [tokenAddress, 0n, approveCalldata],
-    });
-
-    const [account] = await walletClient.getAddresses();
-
-    const txHash = await walletClient.sendTransaction({
-      to: deriveWallet,
-      data: executeCalldata,
-      value: 0n,
-      account,
-      chain,
-    });
-
-    await waitForTransactionReceipt(wagmiConfig, { hash: txHash });
-    console.log(`[CoveredCall] ${assetName} approval tx confirmed for`, spender);
-  }
-}
-
-/**
  * Transfer an ERC-20 token from SCW -> EOA via SCW.execute.
  */
 async function transferTokenFromScw({
@@ -243,10 +172,10 @@ interface CreateCoveredCallParams {
 
 /**
  * Create a new covered call position:
- * 1. Create a PM2 subaccount via API (EOA signs)
- * 2. Transfer WBTC from EOA -> SCW if needed
- * 3. Approve deposit module for WBTC
- * 4. Deposit WBTC into the new subaccount (session key signs)
+ * 1. Transfer BTC from EOA -> SCW if needed
+ * 2. Create SM subaccount on-chain via paymaster (bundles BTC approvals + subaccount creation)
+ * 3. Get the newly created subaccount ID
+ * 4. Deposit BTC into the new subaccount (session key signs via REST API)
  * 5. Add position to store with status "deposited"
  */
 export function useCreateCoveredCallPosition() {
@@ -268,41 +197,7 @@ export function useCreateCoveredCallPosition() {
       const config = getConfig();
       const assetConfig = getAssetConfig(btcAsset);
 
-      // Step 1: Create subaccount (session key signs)
-      const createNonce = generateNonce();
-      const createExpiry = getSignatureExpiry();
-
-      const createDepositData = encodeDepositData({
-        amount: 0n,
-        asset: assetConfig.cashAsset,
-        managerForNewAccount: config.standardManager,
-      });
-
-      const createSig = await signAction({
-        subaccountId: 0n,
-        nonce: BigInt(createNonce),
-        module: config.depositModule,
-        data: createDepositData,
-        expiry: BigInt(createExpiry),
-        owner: deriveWallet,
-        sessionPrivateKey: sessionKey.private_key,
-      });
-
-      const createResult = await restClient.createSubaccount({
-        wallet: deriveWallet,
-        amount: "0",
-        asset_name: btcAsset,
-        nonce: createNonce,
-        signature_expiry_sec: createExpiry,
-        signer: sessionKey.public_key,
-        signature: stripSigPrefix(createSig),
-        margin_type: "SM",
-      });
-
-      const newSubaccountId = createResult.subaccount_id;
-      console.log(`[CoveredCall] Created SM subaccount: ${newSubaccountId} (${btcAsset})`);
-
-      // Step 2: Transfer BTC from EOA -> SCW if needed
+      // Step 1: Transfer BTC from EOA -> SCW if needed
       await ensureScwHasBtc({
         walletClient,
         wagmiConfig,
@@ -313,15 +208,42 @@ export function useCreateCoveredCallPosition() {
         assetName: btcAsset,
       });
 
-      // Step 3: Approve deposit module for BTC token
-      await ensureScwBtcApprovals({
-        walletClient,
-        wagmiConfig,
-        switchChainAsync,
-        deriveWallet,
-        tokenAddress: assetConfig.tokenAddress,
-        assetName: btcAsset,
-      });
+      // Step 2: Create subaccount on-chain via paymaster
+      // Bundle BTC token approvals + subaccount creation in a single gas-free UserOp
+      const existingAccount = await restClient.getAccount(deriveWallet);
+      const existingIds = new Set(existingAccount.subaccount_ids || []);
+
+      const actions: ScwAction[] = [
+        encodeApprove(assetConfig.tokenAddress, config.depositModule),
+        encodeApprove(assetConfig.tokenAddress, config.withdrawWrapper),
+        encodeCreateSubaccount(),
+      ];
+
+      if (walletClient.chain?.id !== config.chainId) {
+        await switchChainAsync({ chainId: config.chainId });
+      }
+
+      await sendSponsoredUserOp(walletClient, actions);
+
+      // Step 3: Get the newly created subaccount ID
+      let newSubaccountId: number | null = null;
+      for (let i = 0; i < 10; i++) {
+        const updatedAccount = await restClient.getAccount(deriveWallet);
+        const newId = (updatedAccount.subaccount_ids || []).find(
+          (id) => !existingIds.has(id)
+        );
+        if (newId !== undefined) {
+          newSubaccountId = newId;
+          break;
+        }
+        await new Promise((r) => setTimeout(r, 1000));
+      }
+
+      if (newSubaccountId === null) {
+        throw new Error("Could not find newly created subaccount after on-chain creation");
+      }
+
+      console.log(`[CoveredCall] Created SM subaccount on-chain: ${newSubaccountId} (${btcAsset})`);
 
       // Step 4: Deposit BTC into the new subaccount (session key signs)
       const depositNonce = generateNonce();
