@@ -7,9 +7,9 @@ const DotGrid = dynamic(() => import("@/components/ui/DotGrid"), { ssr: false })
 
 export default function Home() {
   return (
-    <div className="relative flex min-h-[calc(100vh-3rem)] flex-col items-center justify-center overflow-hidden text-center">
+    <div className="relative flex h-[calc(100vh-3rem)] flex-col items-center justify-center overflow-hidden text-center">
       {/* Dot grid background */}
-      <div className="absolute inset-0 opacity-15">
+      <div className="absolute inset-0 h-full w-full opacity-15">
         <DotGrid
           dotSize={2}
           gap={16}
