@@ -11,7 +11,6 @@ import {
   encodeWithdrawData,
   toTokenAmount,
   signAction,
-  signActionWithWallet,
   generateNonce,
   getSignatureExpiry,
 } from "@/lib/derive/signing";
@@ -269,7 +268,7 @@ export function useCreateCoveredCallPosition() {
       const config = getConfig();
       const assetConfig = getAssetConfig(btcAsset);
 
-      // Step 1: Create subaccount (EOA signs via signActionWithWallet)
+      // Step 1: Create subaccount (session key signs)
       const createNonce = generateNonce();
       const createExpiry = getSignatureExpiry();
 
@@ -279,16 +278,14 @@ export function useCreateCoveredCallPosition() {
         managerForNewAccount: config.standardManager,
       });
 
-      const createSig = await signActionWithWallet({
+      const createSig = await signAction({
         subaccountId: 0n,
         nonce: BigInt(createNonce),
         module: config.depositModule,
         data: createDepositData,
         expiry: BigInt(createExpiry),
         owner: deriveWallet,
-        signer: address,
-        signTypedData: (args) =>
-          walletClient.signTypedData(args) as Promise<Hex>,
+        sessionPrivateKey: sessionKey.private_key,
       });
 
       const createResult = await restClient.createSubaccount({
@@ -297,7 +294,7 @@ export function useCreateCoveredCallPosition() {
         asset_name: btcAsset,
         nonce: createNonce,
         signature_expiry_sec: createExpiry,
-        signer: address,
+        signer: sessionKey.public_key,
         signature: stripSigPrefix(createSig),
         margin_type: "SM",
       });
