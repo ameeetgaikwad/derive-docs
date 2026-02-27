@@ -270,7 +270,24 @@ export function useCreateCoveredCallPosition() {
 
       console.log(`[CoveredCall] Deposited ${amount} ${btcAsset} into subaccount ${newSubaccountId}`);
 
-      // Step 5: Add position to store
+      // Step 5: Wait for deposit to fully settle in the matching engine.
+      // get_collaterals reflects the balance before the matching engine is ready
+      // to accept orders, so we poll until collateral shows AND add an extra delay.
+      for (let i = 0; i < 20; i++) {
+        const subCollaterals = await restClient.getCollaterals(newSubaccountId);
+        const btcCol = subCollaterals.find((c) =>
+          ["WBTC", "CBBTC", "LBTC", "BTC"].includes(c.asset_name)
+        );
+        if (btcCol && parseFloat(btcCol.amount) > 0) {
+          console.log(`[CoveredCall] Deposit confirmed in subaccount after ${i + 1} polls`);
+          break;
+        }
+        await new Promise((r) => setTimeout(r, 1500));
+      }
+      // Extra settle time for the matching engine to catch up
+      await new Promise((r) => setTimeout(r, 3000));
+
+      // Step 6: Add position to store
       addPosition({
         subaccountId: newSubaccountId,
         asset: btcAsset,
@@ -330,16 +347,6 @@ export function useSellCall() {
         throw new Error("Not authenticated");
       }
 
-      // Wait for deposit to settle — poll until subaccount has BTC collateral
-      for (let i = 0; i < 15; i++) {
-        const collaterals = await restClient.getCollaterals(params.subaccountId);
-        const btc = collaterals.find((c) =>
-          ["WBTC", "CBBTC", "LBTC", "BTC"].includes(c.asset_name)
-        );
-        if (btc && parseFloat(btc.amount) > 0) break;
-        await new Promise((r) => setTimeout(r, 1500));
-      }
-
       // Round amount and price to instrument constraints
       const amountStep = parseFloat(params.amountStep) || 0.01;
       const tickSize = parseFloat(params.tickSize) || 0.01;
@@ -358,9 +365,9 @@ export function useSellCall() {
 
       const config = getConfig();
 
-      // Retry logic: deposit may not be fully settled in matching engine yet
-      const MAX_RETRIES = 4;
-      const RETRY_DELAYS = [3000, 5000, 8000, 10000];
+      // Safety net retry: in case the matching engine still needs more time
+      const MAX_RETRIES = 2;
+      const RETRY_DELAYS = [5000, 8000];
 
       for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
         try {

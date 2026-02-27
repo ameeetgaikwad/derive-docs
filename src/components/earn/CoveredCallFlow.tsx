@@ -6,6 +6,7 @@ import { useConnectModal } from "@rainbow-me/rainbowkit";
 import { useDerive } from "@/providers/DeriveProvider";
 import { useAvailableStrikes } from "@/hooks/covered-call/useAvailableStrikes";
 import { useCreateCoveredCallPosition, useSellCall } from "@/hooks/covered-call/useCoveredCallSubaccount";
+import { useScwBtcBalance } from "@/hooks/covered-call/useScwBtcBalance";
 import { useCoveredCallStore } from "@/stores/covered-call";
 import { useCollaterals } from "@/hooks/portfolio/useCollaterals";
 import { useTicker } from "@/hooks/market/useTicker";
@@ -60,12 +61,20 @@ export function CoveredCallFlow() {
   const { updatePosition } = useCoveredCallStore();
 
   const { data: collaterals = [] } = useCollaterals();
+  const { data: scwBtc } = useScwBtcBalance();
 
-  const btcCollateral = collaterals.find((c) =>
+  // Main subaccount BTC (can be withdrawn to SCW)
+  const mainBtcCollateral = collaterals.find((c) =>
     ["WBTC", "CBBTC", "LBTC", "BTC"].includes(c.asset_name)
   );
-  const btcBalance = btcCollateral ? parseFloat(btcCollateral.amount) : 0;
-  const btcAssetName = btcCollateral?.asset_name ?? "CBBTC"; // actual token for API
+  const mainBtcBalance = mainBtcCollateral ? parseFloat(mainBtcCollateral.amount) : 0;
+
+  // SCW on-chain BTC balance (already available for deposit)
+  const scwBtcBalance = scwBtc?.balance ?? 0;
+
+  // Total available: SCW balance + main subaccount balance (create position handles the withdraw)
+  const btcBalance = scwBtcBalance + mainBtcBalance;
+  const btcAssetName = scwBtc?.assetName ?? mainBtcCollateral?.asset_name ?? "CBBTC";
   const btcDisplayName = "BTC"; // user-facing label
 
   // Auto-select default expiry when expiries load or current selection becomes invalid
