@@ -66,6 +66,8 @@ export function useDeriveAccount() {
   const { switchChainAsync } = useSwitchChain();
   const store = useAccountStore();
   const authInProgress = useRef(false);
+  const walletClientRef = useRef(walletClient);
+  walletClientRef.current = walletClient;
 
   // On wallet connect, try to restore session key (no wallet prompts)
   useEffect(() => {
@@ -143,8 +145,8 @@ export function useDeriveAccount() {
   async function performSponsoredOnboarding(
     deriveWallet: `0x${string}`,
     eoaAddress: `0x${string}`,
+    wc: NonNullable<typeof walletClient>,
   ) {
-    if (!walletClient) throw new Error("Wallet client not available");
     const config = getConfig();
 
     // Switch to Derive Chain first
@@ -156,7 +158,7 @@ export function useDeriveAccount() {
     console.log("[Auth] Built", actions.length, "onboarding actions, submitting via paymaster...");
 
     // Send as a sponsored UserOperation (1 wallet popup for signing)
-    const txHash = await sendSponsoredUserOp(walletClient, actions);
+    const txHash = await sendSponsoredUserOp(wc, actions);
     console.log("[Auth] Sponsored onboarding tx mined:", txHash);
     return txHash;
   }
@@ -171,8 +173,24 @@ export function useDeriveAccount() {
    * 5. Fetch subaccounts -> ready
    */
   const authenticate = useCallback(async () => {
-    if (!address || !walletClient) {
+    if (!address) {
       store.setError("Wallet not connected");
+      return;
+    }
+
+    // walletClient can be undefined briefly while wagmi initializes it,
+    // even though the wallet IS connected. Use the ref to get the latest
+    // value and retry a few times if needed.
+    let wc = walletClient ?? walletClientRef.current;
+    if (!wc && isConnected) {
+      for (let i = 0; i < 6; i++) {
+        await new Promise((r) => setTimeout(r, 500));
+        wc = walletClientRef.current;
+        if (wc) break;
+      }
+    }
+    if (!wc) {
+      store.setError("Wallet client not ready — please try again");
       return;
     }
 
@@ -239,7 +257,7 @@ export function useDeriveAccount() {
         // in a single gas-free UserOperation via Derive's paymaster.
         store.setStatus("sponsoring_setup");
         try {
-          await performSponsoredOnboarding(deriveWallet, sessionKey.public_key);
+          await performSponsoredOnboarding(deriveWallet, sessionKey.public_key, wc);
           console.log("[Auth] Sponsored onboarding complete");
 
           // Set up REST client auth with the new session key
