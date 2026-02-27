@@ -104,7 +104,7 @@ async function ensureScwHasBtc({
     functionName: "transfer",
     args: [deriveWallet, deficit],
     account,
-    chain: { id: config.chainId } as any,
+    chain,
   });
 
   await waitForTransactionReceipt(wagmiConfig, { hash: txHash });
@@ -175,7 +175,7 @@ async function ensureScwBtcApprovals({
       data: executeCalldata,
       value: 0n,
       account,
-      chain: { id: config.chainId } as any,
+      chain,
     });
 
     await waitForTransactionReceipt(wagmiConfig, { hash: txHash });
@@ -204,6 +204,8 @@ async function transferTokenFromScw({
   scaledAmount: bigint;
 }): Promise<Hex> {
   const config = getConfig();
+  const deriveEnv = (process.env.NEXT_PUBLIC_DERIVE_ENV as "testnet" | "mainnet") || "mainnet";
+  const chain = getDeriveChain(deriveEnv);
 
   if (walletClient.chain?.id !== config.chainId) {
     await switchChainAsync({ chainId: config.chainId });
@@ -228,7 +230,7 @@ async function transferTokenFromScw({
     data: executeCalldata,
     value: 0n,
     account,
-    chain: { id: config.chainId } as any,
+    chain,
   });
 
   await waitForTransactionReceipt(wagmiConfig, { hash: txHash });
@@ -267,14 +269,14 @@ export function useCreateCoveredCallPosition() {
       const config = getConfig();
       const assetConfig = getAssetConfig(btcAsset);
 
-      // Step 1: Create PM2 subaccount (EOA signs via signActionWithWallet)
+      // Step 1: Create subaccount (EOA signs via signActionWithWallet)
       const createNonce = generateNonce();
       const createExpiry = getSignatureExpiry();
 
       const createDepositData = encodeDepositData({
         amount: 0n,
         asset: assetConfig.cashAsset,
-        managerForNewAccount: config.portfolioManager,
+        managerForNewAccount: config.standardManager,
       });
 
       const createSig = await signActionWithWallet({
@@ -297,11 +299,11 @@ export function useCreateCoveredCallPosition() {
         signature_expiry_sec: createExpiry,
         signer: address,
         signature: stripSigPrefix(createSig),
-        margin_type: "PM2",
+        margin_type: "SM",
       });
 
       const newSubaccountId = createResult.subaccount_id;
-      console.log(`[CoveredCall] Created PM2 subaccount: ${newSubaccountId} (${btcAsset})`);
+      console.log(`[CoveredCall] Created SM subaccount: ${newSubaccountId} (${btcAsset})`);
 
       // Step 2: Transfer BTC from EOA -> SCW if needed
       await ensureScwHasBtc({
@@ -332,7 +334,7 @@ export function useCreateCoveredCallPosition() {
       const depositData = encodeDepositData({
         amount: scaledAmount,
         asset: assetConfig.cashAsset,
-        managerForNewAccount: config.portfolioManager,
+        managerForNewAccount: config.standardManager,
       });
 
       const depositSig = await signAction({

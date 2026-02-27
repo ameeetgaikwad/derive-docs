@@ -3,7 +3,7 @@
  * Addresses sourced from SocketDotTech/socket-plugs prod_lyra_addresses.json
  */
 
-export type BridgeToken = "USDC" | "WETH" | "WBTC";
+export type BridgeToken = "USDC" | "WETH" | "WBTC" | "CBBTC";
 
 export type SourceChainId = 1 | 10 | 42161 | 8453;
 
@@ -108,6 +108,12 @@ const BRIDGE_REGISTRY: Record<SourceChainId, Partial<Record<BridgeToken, BridgeT
       vault: "0xBd282333710B9C7e33E8a37d027885A7C079Ae23",
       connector: "0xbE9DBda519e15a1c0d238cEa0b3daD47a484A6Ff",
       decimals: 18,
+    },
+    CBBTC: {
+      token: "0xcbB7C0000aB88B473b1f5aFd9ef808440eed33Bf",
+      vault: "0x76624ff43D610F64177Bb9c194A2503642e9B803",
+      connector: "0x457379de638CAFeB1759a22457fe893b288E2e89",
+      decimals: 8,
     },
   },
 };
