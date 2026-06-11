@@ -17,10 +17,9 @@
     "default": "dark"
   },
   "background": {
-    "decoration": "gradient",
     "color": {
       "light": "#FFFFFF",
-      "dark": "#0C0A09"
+      "dark": "#0A0A0A"
     }
   },
   "fonts": {
