@@ -7,7 +7,45 @@ import {
   type PublicClient,
   type WalletClient,
 } from "viem";
+import { sendTransaction, writeContract } from "viem/actions";
 import { bsc, bscTestnet, foundry } from "viem/chains";
+
+/**
+ * BSC testnet (97) quirk: public nodes mishandle EIP-1559 fee fields (the
+ * chain reports a zero base fee), which makes 1559-typed transactions fail
+ * with "insufficient funds: have 0". Every transaction on 97 must be a
+ * LEGACY transaction with an explicit gasPrice of 0.2 gwei.
+ */
+export const BSC_TESTNET_GAS_PRICE = 200_000_000n; // 0.2 gwei
+
+/** Per-chain tx field overrides to spread into write calls (see above). */
+export function txOverrides(
+  chainId: number,
+): { type: "legacy"; gasPrice: bigint } | Record<string, never> {
+  return chainId === 97 ? { type: "legacy", gasPrice: BSC_TESTNET_GAS_PRICE } : {};
+}
+
+/**
+ * BSC testnet RPCs are load-balanced and a lagging node can return a stale
+ * eth_getTransactionCount right after the previous tx mined, so the next
+ * write fails with "nonce too low". That error is raised at submission (the
+ * tx was NOT accepted), so retrying with a refetched nonce is safe and cannot
+ * double-send. Only nonce-too-low is retried — anything else rethrows.
+ */
+async function retryNonceTooLow<T>(fn: () => Promise<T>, attempts = 5): Promise<T> {
+  let lastErr: unknown;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      return await fn();
+    } catch (err) {
+      const msg = err instanceof Error ? `${err.name} ${err.message}` : String(err);
+      if (!/nonce too low|nonce provided for the transaction is lower/i.test(msg)) throw err;
+      lastErr = err;
+      await new Promise((r) => setTimeout(r, 3000 * (i + 1)));
+    }
+  }
+  throw lastErr;
+}
 
 export const CHAINS: Record<number, Chain> = {
   31337: foundry, // anvil — acceptance target
@@ -47,9 +85,25 @@ export function makeWalletClient(
   opts?: { chainId?: number; rpcUrl?: string },
 ): WalletClient {
   const chainId = opts?.chainId ?? getChainId();
-  return createWalletClient({
+  const client = createWalletClient({
     account,
     chain: getChain(chainId),
     transport: http(opts?.rpcUrl ?? getRpcUrl()),
   });
+  if (chainId !== 97) return client;
+  // BSC testnet: force legacy txs with a fixed gasPrice on every write,
+  // regardless of what the caller (or a simulateContract request) passed.
+  // (Wrapped as casts: the wrappers are intentionally non-generic.)
+  const overrides = txOverrides(chainId);
+  return {
+    ...client,
+    writeContract: (args: unknown) =>
+      retryNonceTooLow(() =>
+        writeContract(client, { ...(args as object), ...overrides } as never),
+      ),
+    sendTransaction: (args: unknown) =>
+      retryNonceTooLow(() =>
+        sendTransaction(client, { ...(args as object), ...overrides } as never),
+      ),
+  } as unknown as WalletClient;
 }

@@ -2,14 +2,19 @@ import {
   encodeFunctionData,
   http,
   createPublicClient,
-  createWalletClient,
   type Address,
   type Hex,
   type PublicClient,
   type WalletClient,
   type Account,
 } from "viem";
-import { matchingAbi, subAccountsAbi, getChain, type Action } from "@sats-options/shared";
+import {
+  matchingAbi,
+  subAccountsAbi,
+  getChain,
+  makeWalletClient,
+  type Action,
+} from "@sats-options/shared";
 
 /**
  * Read-side chain boundary — mocked in tests, viem-backed in production.
@@ -145,7 +150,11 @@ export function makeViemChain(params: {
   const chain = getChain(params.chainId);
   const transport = http(params.rpcUrl);
   const publicClient = createPublicClient({ chain, transport });
-  const walletClient = createWalletClient({ chain, transport, account: params.account });
+  // shared factory: forces legacy gas on BSC testnet (97); plain client elsewhere
+  const walletClient = makeWalletClient(params.account, {
+    chainId: params.chainId,
+    rpcUrl: params.rpcUrl,
+  });
   return {
     reader: new ViemChainReader(publicClient, params.addresses),
     submitter: new ViemTxSubmitter(

@@ -93,12 +93,16 @@ export class FeedPoster {
       chainId: this.chainId,
       feedAddress: this.addressFor(kind),
     });
+    // acceptData is permissionless (BaseLyraFeed only verifies the embedded
+    // signer signatures), so the tx is sent from the wallet client's account
+    // (the funded poster, e.g. the deployer on testnet) — the feed signer key
+    // only signs the FeedData payload and needs no gas.
     const hash = await this.walletClient.writeContract({
       address: this.addressFor(kind),
       abi: FEED_ABIS[kind],
       functionName: "acceptData",
       args: [encoded],
-      account: this.signer,
+      account: this.walletClient.account ?? this.signer,
       chain: this.walletClient.chain ?? null,
     });
     const receipt = await this.publicClient.waitForTransactionReceipt({ hash });
