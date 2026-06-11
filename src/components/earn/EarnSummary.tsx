@@ -1,6 +1,6 @@
 "use client";
 
-import type { OutcomeResult } from "@/lib/derive/apr";
+import type { OutcomeResult } from "@/lib/protocol/apr";
 
 interface EarnSummaryProps {
   outcome: OutcomeResult | null;

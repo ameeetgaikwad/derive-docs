@@ -1,6 +1,6 @@
 "use client";
 
-import type { StrategyType, OutcomeResult } from "@/lib/derive/apr";
+import type { StrategyType, OutcomeResult } from "@/lib/protocol/apr";
 
 interface OutcomePreviewProps {
   asset: string;

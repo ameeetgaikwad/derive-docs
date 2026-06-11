@@ -1,6 +1,5 @@
 "use client";
 
-import { cn } from "@/lib/utils";
 import { TokenIcon } from "@/components/ui/TokenIcon";
 
 interface AmountInputProps {

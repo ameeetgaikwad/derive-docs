@@ -26,8 +26,9 @@ const schibstedGrotesk = Schibsted_Grotesk({
 });
 
 export const metadata: Metadata = {
-  title: "Hedge — BTC Covered Calls",
-  description: "Earn yield on your BTC with covered call strategies, powered by Derive.",
+  title: "sats-options — BTC Covered Calls",
+  description:
+    "Earn yield on your BTC with covered calls sold to market makers via RFQ, fully on-chain on BNB Chain.",
 };
 
 export default function RootLayout({

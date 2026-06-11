@@ -5,10 +5,7 @@ import { WagmiProvider } from "wagmi";
 import { RainbowKitProvider, darkTheme } from "@rainbow-me/rainbowkit";
 import { useState, type ReactNode } from "react";
 import { config } from "@/lib/config/wagmi";
-import { DeriveProvider } from "@/providers/DeriveProvider";
-import { OnboardingModal } from "@/components/account/OnboardingModal";
 import { NetworkGuard } from "@/components/layout/NetworkGuard";
-import { WsStatusBanner } from "@/components/layout/WsStatusBanner";
 
 import "@rainbow-me/rainbowkit/styles.css";
 
@@ -36,12 +33,8 @@ export function Providers({ children }: { children: ReactNode }) {
             overlayBlur: "small",
           })}
         >
-          <DeriveProvider>
-            {children}
-            <OnboardingModal />
-            <NetworkGuard />
-            <WsStatusBanner />
-          </DeriveProvider>
+          {children}
+          <NetworkGuard />
         </RainbowKitProvider>
       </QueryClientProvider>
     </WagmiProvider>

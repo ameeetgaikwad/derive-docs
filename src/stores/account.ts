@@ -1,56 +1,48 @@
 import { create } from "zustand";
-import type { SessionKey, Subaccount } from "@/lib/derive/types";
+import { persist } from "zustand/middleware";
 
-export type OnboardingStatus =
-  | "disconnected"
-  | "connecting"
-  | "checking_account"
-  | "creating_account"
-  | "generating_session_key"
-  | "registering_session_key"
-  | "sponsoring_setup"
-  | "no_account"
-  | "ready"
-  | "error";
-
+/**
+ * Per-EOA protocol account state, persisted to localStorage.
+ *
+ * The protocol has no account-discovery API in v1 (Matching only exposes
+ * subaccountId -> owner), so the frontend remembers the subaccount it created
+ * for each address. Stored ids are re-verified on-chain
+ * (Matching.subAccountToOwner) before use.
+ */
 interface AccountState {
-  status: OnboardingStatus;
-  error: string | null;
-  subaccounts: Subaccount[];
-  activeSubaccountId: number | null;
-  sessionKey: SessionKey | null;
-  deriveWallet: `0x${string}` | null;
-
-  setStatus: (status: OnboardingStatus) => void;
-  setError: (error: string | null) => void;
-  setSubaccounts: (subaccounts: Subaccount[]) => void;
-  setActiveSubaccountId: (id: number | null) => void;
-  setSessionKey: (key: SessionKey | null) => void;
-  setDeriveWallet: (wallet: `0x${string}` | null) => void;
-  reset: () => void;
+  /** lowercased EOA address -> subaccount id (decimal string) */
+  subaccountByAddress: Record<string, string>;
+  setSubaccount: (address: string, subaccountId: bigint) => void;
+  clearSubaccount: (address: string) => void;
+  getSubaccount: (address: string | undefined) => bigint | null;
 }
 
-export const useAccountStore = create<AccountState>((set) => ({
-  status: "disconnected",
-  error: null,
-  subaccounts: [],
-  activeSubaccountId: null,
-  sessionKey: null,
-  deriveWallet: null,
+export const useAccountStore = create<AccountState>()(
+  persist(
+    (set, get) => ({
+      subaccountByAddress: {},
 
-  setStatus: (status) => set({ status, error: status === "error" ? undefined : null }),
-  setError: (error) => set(error ? { error, status: "error" } : { error: null }),
-  setSubaccounts: (subaccounts) => set({ subaccounts }),
-  setActiveSubaccountId: (activeSubaccountId) => set({ activeSubaccountId }),
-  setSessionKey: (sessionKey) => set({ sessionKey }),
-  setDeriveWallet: (deriveWallet) => set({ deriveWallet }),
-  reset: () =>
-    set({
-      status: "disconnected",
-      error: null,
-      subaccounts: [],
-      activeSubaccountId: null,
-      sessionKey: null,
-      deriveWallet: null,
+      setSubaccount: (address, subaccountId) =>
+        set((state) => ({
+          subaccountByAddress: {
+            ...state.subaccountByAddress,
+            [address.toLowerCase()]: subaccountId.toString(),
+          },
+        })),
+
+      clearSubaccount: (address) =>
+        set((state) => {
+          const next = { ...state.subaccountByAddress };
+          delete next[address.toLowerCase()];
+          return { subaccountByAddress: next };
+        }),
+
+      getSubaccount: (address) => {
+        if (!address) return null;
+        const id = get().subaccountByAddress[address.toLowerCase()];
+        return id ? BigInt(id) : null;
+      },
     }),
-}));
+    { name: "sats-options.subaccounts" }
+  )
+);

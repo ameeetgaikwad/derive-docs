@@ -131,6 +131,15 @@ export class RfqEngineServer {
     const url = new URL(req.url ?? "/", "http://localhost");
     const path = url.pathname.replace(/\/+$/, "") || "/";
 
+    // CORS: the sats-options frontend calls this API straight from the
+    // browser. Permissive by design — the API is unauthenticated and every
+    // state-changing call is gated by EIP-712 signatures verified on-chain.
+    if (req.method === "OPTIONS") {
+      res.writeHead(204, CORS_HEADERS);
+      res.end();
+      return;
+    }
+
     if (req.method === "GET" && path === "/health") {
       return sendJson(res, 200, { ok: true, service: "rfq-engine" });
     }
@@ -374,11 +383,19 @@ export class RfqEngineServer {
 
 // ---------------------------------------------------------------------------
 
+const CORS_HEADERS = {
+  "access-control-allow-origin": "*",
+  "access-control-allow-methods": "GET, POST, OPTIONS",
+  "access-control-allow-headers": "content-type",
+  "access-control-max-age": "86400",
+} as const;
+
 function sendJson(res: ServerResponse, status: number, body: unknown): void {
   const payload = JSON.stringify(body);
   res.writeHead(status, {
     "content-type": "application/json",
     "content-length": Buffer.byteLength(payload),
+    ...CORS_HEADERS,
   });
   res.end(payload);
 }

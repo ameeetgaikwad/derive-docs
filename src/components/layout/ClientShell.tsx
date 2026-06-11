@@ -1,33 +1,30 @@
 "use client";
 
-import { useState, useEffect, type ReactNode } from "react";
-import { usePathname } from "next/navigation";
+import { useSyncExternalStore, type ReactNode } from "react";
 import { Providers } from "@/providers";
 import { Header } from "@/components/layout/Header";
 import { Toaster } from "sonner";
 
+const emptySubscribe = () => () => {};
+
 export function ClientShell({ children }: { children: ReactNode }) {
-  const [mounted, setMounted] = useState(false);
-  const pathname = usePathname();
-  const isLanding = pathname === "/";
+  // true on the client after hydration, false during SSR/prerender
+  const mounted = useSyncExternalStore(
+    emptySubscribe,
+    () => true,
+    () => false
+  );
 
-  useEffect(() => {
-    setMounted(true);
-  }, []);
-
-  // Prevent SSR of wallet-connect-dependent code entirely
+  // Prevent SSR/prerender of wallet-dependent code entirely: the whole app
+  // needs WagmiProvider, so render nothing until mounted on the client.
   if (!mounted) {
-    return (
-      <div className={isLanding ? "" : "mx-auto max-w-7xl px-4 py-6"}>
-        {children}
-      </div>
-    );
+    return <main className="min-h-screen bg-background" />;
   }
 
   return (
     <Providers>
       <Header />
-      <main className={isLanding ? "" : "mx-auto max-w-7xl px-4 py-6"}>{children}</main>
+      <main>{children}</main>
       <Toaster
         theme="dark"
         position="bottom-right"

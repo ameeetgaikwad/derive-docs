@@ -1,41 +1,56 @@
 import { create } from "zustand";
-import type { CoveredCallPosition, CoveredCallStatus } from "@/lib/derive/types";
+import { persist } from "zustand/middleware";
 
-export type { CoveredCallStatus };
+/**
+ * Trade records for covered calls sold through the RFQ flow, persisted to
+ * localStorage. The authoritative position state (option/cash/BTCB balances,
+ * settlement) is read on-chain from SubAccounts; these records add the
+ * off-chain context (premium received at trade time, tx hash).
+ */
+export interface CoveredCallTrade {
+  /** lowercased seller EOA */
+  address: string;
+  subaccountId: string;
+  /** e.g. BTC-20260619-69000-C */
+  instrumentName: string;
+  /** whole quote units (USDT) */
+  strike: number;
+  /** unix seconds */
+  expiry: number;
+  /** option amount sold, human decimal */
+  amount: string;
+  /** total premium received, USDT human decimal */
+  premium: string;
+  txHash: string;
+  /** ms epoch */
+  createdAt: number;
+}
 
 interface CoveredCallState {
-  positions: CoveredCallPosition[];
-  addPosition: (position: CoveredCallPosition) => void;
-  updatePosition: (subaccountId: number, update: Partial<CoveredCallPosition>) => void;
-  removePosition: (subaccountId: number) => void;
-  getPosition: (subaccountId: number) => CoveredCallPosition | undefined;
-  getActivePositions: () => CoveredCallPosition[];
+  trades: CoveredCallTrade[];
+  addTrade: (trade: CoveredCallTrade) => void;
+  tradesFor: (address: string | undefined) => CoveredCallTrade[];
   reset: () => void;
 }
 
-export const useCoveredCallStore = create<CoveredCallState>((set, get) => ({
-  positions: [],
+export const useCoveredCallStore = create<CoveredCallState>()(
+  persist(
+    (set, get) => ({
+      trades: [],
 
-  addPosition: (position) =>
-    set((state) => ({ positions: [...state.positions, position] })),
+      addTrade: (trade) =>
+        set((state) => ({
+          trades: [...state.trades, { ...trade, address: trade.address.toLowerCase() }],
+        })),
 
-  updatePosition: (subaccountId, update) =>
-    set((state) => ({
-      positions: state.positions.map((p) =>
-        p.subaccountId === subaccountId ? { ...p, ...update } : p
-      ),
-    })),
+      tradesFor: (address) => {
+        if (!address) return [];
+        const a = address.toLowerCase();
+        return get().trades.filter((t) => t.address === a);
+      },
 
-  removePosition: (subaccountId) =>
-    set((state) => ({
-      positions: state.positions.filter((p) => p.subaccountId !== subaccountId),
-    })),
-
-  getPosition: (subaccountId) =>
-    get().positions.find((p) => p.subaccountId === subaccountId),
-
-  getActivePositions: () =>
-    get().positions.filter((p) => p.status !== "closed"),
-
-  reset: () => set({ positions: [] }),
-}));
+      reset: () => set({ trades: [] }),
+    }),
+    { name: "sats-options.covered-calls" }
+  )
+);

@@ -12,6 +12,11 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Not part of the frontend (own toolchains / vendored read-only code):
+    "protocol/**",
+    "services/**",
+    "docs/**",
+    "docs-site/**",
   ]),
 ]);
 
