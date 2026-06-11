@@ -1,0 +1,88 @@
+---
+title: "Runbook: quoting in 30 minutes"
+description: "Stand up the reference maker bot against BSC testnet — from a fresh key to your first executed fill."
+icon: "terminal"
+---
+
+**Prerequisites:** Node 22, pnpm, Foundry's `cast`, a fresh EOA key, ~0.05 tBNB from a faucet.
+
+<Steps>
+  <Step title="Clone + install (~5 min)">
+    ```sh
+    git clone <repo> && cd <repo>/services
+    pnpm install
+    pnpm --filter @sats-options/shared build
+    pnpm --filter @sats-options/maker-bot build
+    ```
+  </Step>
+  <Step title="Set the environment">
+    Every maker-bot command reads these:
+
+    ```sh
+    export CHAIN_ID=97
+    export RPC_URL=https://bsc-testnet.bnbchain.org     # or your thirdweb endpoint
+    export PRIVATE_KEY=0x<your maker key>
+    export RFQ_ENGINE_WS=ws://<engine-host>:3030/maker  # ask the team for the current testnet host
+    ```
+  </Step>
+  <Step title="Mint yourself collateral (~2 min)">
+    The mocks are open-mint:
+
+    ```sh
+    cast send 0x9896AF08d261E52a629EF58cBebd32E8e0AA8eA9 \
+      "mint(address,uint256)" $(cast wallet address $PRIVATE_KEY) 200000ether \
+      --rpc-url $RPC_URL --private-key $PRIVATE_KEY --legacy --gas-price 200000000
+    ```
+  </Step>
+  <Step title="One-time setup: subaccount + cash (3 txs, ~2 min)">
+    ```sh
+    DEPOSIT_USDT=150000 pnpm --filter @sats-options/maker-bot setup
+    # -> "[setup] done: subaccount=<N> cash=150000 USDT"; id persisted to maker-state.97.json
+    ```
+  </Step>
+  <Step title="Sanity-check pricing offline (no chain, no WS)">
+    ```sh
+    pnpm --filter @sats-options/maker-bot exec maker-bot price \
+      --forward 62790 --strike 69000 --days 8 --vol 0.6 --rate 0.05
+    # -> { theo: ~398, bid: ~378 (0.95x), ask: ~418 (1.05x) }
+    ```
+  </Step>
+  <Step title="Run the bot">
+    ```sh
+    pnpm --filter @sats-options/maker-bot dev
+    # [maker-bot] chain=97 owner=0x... subaccount=N
+    # [transport] authenticated as 0x...
+    # ...waits for rfq_open, prices off the on-chain feeds, quotes automatically
+    ```
+  </Step>
+  <Step title="(Optional) trigger a test auction yourself">
+    From a second, taker-side subaccount:
+
+    ```sh
+    curl -s -X POST http://<engine-host>:3030/rfq -H 'content-type: application/json' -d '{
+      "subaccountId": "<takerSubId>",
+      "instrument": { "asset": "BTC", "expiry": 1781856000, "strike": "69000", "isCall": true },
+      "amount": "1", "direction": "sell" }'
+    # watch the bot log: quoted ... -> auction closed ... WON -> executed on-chain tx=0x...
+    ```
+  </Step>
+</Steps>
+
+## Tuning knobs (env)
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `MAKER_BID_RATIO` | `0.95` | Bid as a fraction of Black-76 theo |
+| `MAKER_ASK_RATIO` | `1.05` | Unused until maker-sell flow ships |
+| `MAKER_MAX_FEE` | `"0"` | Signed `maxFee` (keep 0 — module fee is 0 today) |
+| `QUOTE_TTL_SEC` | `300` | Quote TTL — see [Quote TTLs](/market-makers/risk-ops#quote-ttls) |
+| `FORWARD_PRICE` / `SPOT_PRICE` / `IV` / `RATE` | — | Pricing overrides. When forward-or-spot **and** IV are set, the chain feeds are not queried at all — handy for dry runs. |
+
+## Adapting the reference bot
+
+The only protocol-shaped code in the bot is:
+
+- `src/transport.ts` — WS framing + auth handshake
+- `src/quoter.ts` — order encoding + signing
+
+Replace `src/pricing.ts` / `src/black76.ts` with your own pricer and keep the other two. Or port the [wire protocol](/market-makers/wire-protocol) and [signing](/market-makers/signing) pages to your own stack and use `scripts/fake-engine.mjs` — a one-shot local engine that runs the handshake, broadcasts one RFQ, and prints your quote — as a conformance test for your client.

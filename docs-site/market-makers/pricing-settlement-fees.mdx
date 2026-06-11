@@ -1,0 +1,64 @@
+---
+title: "Pricing, settlement & fees"
+description: "On-chain feeds you can price from, how cash settlement works at expiry, and exactly which fees a maker pays."
+icon: "calculator"
+---
+
+## On-chain feeds (the protocol's marks)
+
+The SRM margins and settlement run off on-chain signed feeds, posted by the protocol's oracle-feeds service (testnet: 1-of-1 signer `0xdE50B8E965aD2B8E25f45a19FD87A2d2c737782F` — **testnet only**). You can read them directly; all return 18dp values plus a confidence:
+
+| Feed | Address (97) | Read |
+|---|---|---|
+| BTC spot | `0x69662A47C3C2626EB75a8c861C48a0a87Cb01b2C` | `getSpot() -> (uint price, uint conf)` |
+| BTC forward | `0x86b7148B69F3eFad27Af6d0d892d063D6a6C9e05` | `getForwardPrice(uint64 expiry) -> (uint, uint)` |
+| BTC vol (SVI surface) | `0x5a892364cFBd8e725eC1e7af25855005C0E0f0aE` | `getVol(uint128 strike, uint64 expiry) -> (uint, uint)` |
+| BTC rate | `0x11C394e92592d08B43fE957c1A80f4c1F012d15D` | `getInterestRate(uint64 expiry) -> (int, uint)` |
+| USDT/USD stable | `0x2Eeb9512F40c1964eCA5dc156D8e2479dA632116` | `getSpot() -> (uint, uint)` |
+
+The reference bot prices Black-76 on `forward`/`vol`/`rate` exactly from these reads, falling back to `getSpot()` when an expiry has no forward data yet. Price with your own marks by all means — but note that **margin and the OI fee are computed from *these* feeds**, and the engine's cash pre-check uses your quoted premium.
+
+<Note>
+On testnet the surface is currently a flat 60% IV SVI fit and feeds update only when posted — don't expect live-market dynamics. ABIs for all feeds ship in the TypeScript SDK (`@sats-options/shared`).
+</Note>
+
+## Settlement at expiry
+
+- Options are **European, cash-settled in USDT** against the on-chain settlement price; the taker's BTCB stays in their subaccount as collateral (it is not delivered to you).
+- Sequence: at/after expiry the forward feed receives settlement data fixing the expiry price; then **anyone** may call `StandardManager.settleOptions(optionAsset, subaccountId)` per account. The protocol's ops run this routinely, but you can settle your own subaccount permissionlessly once the fix is posted.
+- Your long call settles to `max(F_settle − K, 0) × size` credited as cash; the short side is debited the same. Until settlement is triggered, the expired position just sits in the subaccount.
+- The fix on testnet comes from the forward feed's settlement-window TWAP aggregates posted by the feed signer; there is no external settlement auction yet.
+
+See the [settlement reference](/reference/settlement) for the taker-side view.
+
+## Fees you pay
+
+Two layers exist; only one is non-zero today.
+
+### 1. Matching/module fee — currently always 0
+
+`FillData.makerFee` is capped by the `maxFee` you sign. **The engine currently always submits 0.** Sign `maxFee: 0` and you are guaranteed zero module fee (`RFQM_FeeTooHigh` protects you on-chain).
+
+### 2. SRM open-interest (OI) fee
+
+Charged by the StandardManager inside the trade transaction whenever a trade **increases open interest** in a subId (every new covered call does), per side, in cash, to the fee-recipient subaccount (id **3** on testnet):
+
+```text
+fee = |amount| × forwardPrice(expiry) × OIFeeRateBPS     (all 18dp decimal math)
+charged = max(fee, minOIFee)        per participant, only if subId OI increased
+```
+
+<Warning>
+**The deployed testnet OI fee rate is a placeholder and is under review.** As currently deployed: `OIFeeRateBPS = 0.1e18` and `minOIFee = 10e18`, i.e. **`max(0.10 × forward notional, 10 USDT)` per side**. Despite the parameter's "BPS" name it is a plain 18dp decimal multiplier — the deployed value is **10% of forward notional**, which on the live smoke trade meant a 6,279 USDT fee against a 378.59 USDT premium (see the [worked example](/market-makers/worked-example)). This is obviously not an economic rate and will change before any real money flows — **do not hard-code it.** Read the current values on-chain:
+
+```text
+SRMPortfolioViewer.OIFeeRateBPS(btcOptionAsset)   // viewer: 0xbC9ae813B45Fa950AabE2E82eAB023Dd45a36486
+StandardManager.minOIFee()
+```
+</Warning>
+
+The OI fee is **not** included in the engine's off-chain cash pre-check, but it *is* part of the on-chain margin transaction — your subaccount must absorb `premium + OI fee` and still pass initial margin.
+
+### Gas
+
+Zero for quoting and fills (the executor pays); you pay gas only for your own deposits/withdrawals.

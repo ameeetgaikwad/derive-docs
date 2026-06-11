@@ -1,0 +1,67 @@
+---
+title: "Worked example: the live testnet trade"
+description: "The first end-to-end covered call on BSC testnet, step by step — feeds, quote, execution, and on-chain effects."
+icon: "microscope"
+---
+
+The first end-to-end covered call on BSC testnet (2026-06-11), exactly as recorded and asserted on-chain. Fill tx: [`0x2d5d7c88ca7ea1c7f8bf46760487c01331525666546903c41dda29d5c2d4d9d3`](https://testnet.bscscan.com/tx/0x2d5d7c88ca7ea1c7f8bf46760487c01331525666546903c41dda29d5c2d4d9d3) (`Matching.verifyAndMatch`, block 112792281).
+
+## Setup
+
+- **Maker** EOA `0x5c9Ca4A3f39Cf36C968402C8E933cB2979882BF8` ran the reference bot's `--setup` → subaccount **5**, deposited **150,000 USDT** cash.
+- **Taker** EOA `0x5Deb87Dd07734d0cDc553BE1502825934514be0e` created subaccount **6** via `Matching.createSubAccount(SRM)` and deposited **1 BTCB** via `WrappedERC20Asset.deposit` (the covered-call collateral).
+- **Feeds** (signed by `0xdE50...782F`): BTC spot **62,790** (CoinGecko, cross-checked vs Chainlink 63,200.785, ~0.7% apart); forward(1781856000) = 62,790; rate = 5%; flat 60% IV SVI surface; USDT stable = 1.0.
+
+## Step 1 — RFQ
+
+Taker opened RFQ `501329a3-aa90-45cd-8607-f37f8439971d`: sell **1× BTC-20260619-69000-C** (strike 69,000 ≈ 110% of spot; expiry `1781856000` = 2026-06-19 08:00 UTC; subId `39614110892406511198553831168` per the [subId encoding](/market-makers/signing#option-subid-encoding)). Auction window: 8 s.
+
+## Step 2 — Quote
+
+The reference bot priced Black-76 on the on-chain feeds: F = 62,790, K = 69,000, T ≈ 8/365 y, σ = 0.60, r = 0.05 → **theo ≈ 398.51 USDT**; bid = 0.95 × theo = **378.586807763808053551 USDT**. It signed an Action (subaccount 5, module RfqModule) whose data decoded to:
+
+```text
+RfqOrder { maxFee: 0, trades: [{
+  asset:  0xD0dD8DcA596540F615e66E07F49d40647D8bC6eD,   // BTC OptionAsset
+  subId:  39614110892406511198553831168,
+  price:  378586807763808053551,                         // 378.5868... 18dp
+  amount: 1000000000000000000 }] }                       // +1.0 (maker receives)
+```
+
+`orderHash = keccak256(abi.encode(trades)) = 0xda4e1328cc4e60399d45385c8e2ba93a8f255da3bcbaebf0be81c3b887adcdbd`.
+
+It was the only quote (1 quote, 8 s window) → won.
+
+## Step 3 — Accept + execution
+
+Taker signed `TakerOrder{ orderHash: 0xda4e1328..., maxFee: 0 }` in their own Action (subaccount 6) and POSTed it to `/rfq/:id/accept`. The engine submitted:
+
+```text
+verifyAndMatch([makerAction, takerAction], [sig_m, sig_t],
+  FillData{ makerAccount: 5, makerFee: 0, takerAccount: 6, takerFee: 0, managerData: 0x })
+```
+
+as a legacy tx at 0.2 gwei.
+
+## Step 4 — On-chain effects (all asserted post-trade)
+
+| Ledger move | Amount |
+|---|---|
+| Option `subId 3961…` taker → maker | 1.0 (taker −1, maker +1) |
+| Cash maker → taker (premium) | 378.586807763808053551 USDT |
+| OI fee, **each side** → fee-recipient subaccount 3 | `max(0.1 × 62,790, 10)` = **6,279 USDT** (12,558 total) |
+
+Resulting balances:
+
+- Maker cash: `150,000 − 378.5868… − 6,279 = 143,342.413192236191946449`
+- Taker cash: `+378.5868… − 6,279 = −5,900.413192236191946449` (a borrow against their 1 BTCB — exactly why the OI fee rate is flagged as a [placeholder](/reference/fees))
+
+SRM initial margin passed for both: taker IM 29,333.99 ≥ 0, maker IM 143,342.41 ≥ 0.
+
+## Step 5 — Settlement (scheduled)
+
+At expiry (2026-06-19 08:00 UTC) the ops side runs the settlement command (`oracle-feeds settle --expiry 1781856000 --price <BTC fix> --subaccounts 5,6`). If BTC fixes above 69,000 the maker's long call is credited `(F_settle − 69,000) × 1` in cash and the taker debited the same; OTM it expires worthless and the taker keeps the full premium (minus that OI fee).
+
+<Info>
+Every transaction in this trade — feed posts, setup, the fill — is linked from the [testnet guide](/resources/testnet#the-live-smoke-trade).
+</Info>

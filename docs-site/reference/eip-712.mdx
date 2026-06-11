@@ -1,0 +1,93 @@
+---
+title: "EIP-712 signing reference"
+description: "The Action struct, domain, typehashes, and ABI encodings — the terse reference for implementers."
+icon: "pen-line"
+---
+
+Every state change in the protocol is a signed **Action** verified by the Matching contract and routed to a single-purpose module. This page is the compact reference; the [market-maker signing guide](/market-makers/signing) is the tutorial.
+
+## Domain
+
+```json
+{
+  "name": "Matching",
+  "version": "1.0",
+  "chainId": 97,
+  "verifyingContract": "0x0A98363B7679BE75682D579C4d8cc5D7b6F5a285"
+}
+```
+
+| Constant | Value |
+|---|---|
+| Domain separator (chain 97) | `0x4cc5ab9a5a9e3993fe20da61e691a365b4b67a1339557e5b0437ba83097c84b5` |
+| Action typehash | `0x4d7a9f27c403ff9c0f19bce61d76d82f9aa29f8d6d4b0c5474607d9770d1af17` |
+
+Verify on-chain: `Matching.domainSeparator()` and `Matching.getActionHash(action)` (public pure helper).
+
+## Action
+
+```text
+Action(uint256 subaccountId,uint256 nonce,address module,bytes data,uint256 expiry,address owner,address signer)
+```
+
+Struct hash:
+
+```text
+keccak256(abi.encode(
+  ACTION_TYPEHASH, subaccountId, nonce, module, keccak256(data), expiry, owner, signer))
+```
+
+Digest: `keccak256(0x1901 || domainSeparator || structHash)` — standard `eth_signTypedData_v4`. On-chain verification uses OpenZeppelin `SignatureChecker` (EOA ECDSA and ERC-1271 both pass at the contract level; the RFQ engine additionally requires `signer == owner` EOA in v1).
+
+| Field | Semantics |
+|---|---|
+| `subaccountId` | Subaccount deposited into Matching; must satisfy `Matching.subAccountToOwner[id] == owner` |
+| `nonce` | Any never-used `uint256` per `(owner, module)`; burned only on on-chain execution (`BM_NonceAlreadyUsed` on reuse) |
+| `module` | The module the action targets (RfqModule for quotes/accepts) |
+| `data` | Module-specific ABI payload, hashed as `keccak256(data)` in the struct hash |
+| `expiry` | Unix seconds; `block.timestamp > expiry` reverts `OV_ActionExpired` |
+| `owner` | Recorded subaccount owner |
+| `signer` | Authorized signer (v1 off-chain policy: must equal `owner`) |
+
+## RfqModule payloads
+
+```solidity
+struct TradeData  { address asset; uint subId; uint price; int amount; }
+struct RfqOrder   { uint maxFee; TradeData[] trades; }   // maker side
+struct TakerOrder { bytes32 orderHash; uint maxFee; }    // taker side
+```
+
+ABI encodings:
+
+| Payload | Encoding |
+|---|---|
+| Maker `action.data` | `abi.encode((uint256, (address,uint256,uint256,int256)[]))` — one tuple parameter containing a dynamic array |
+| `orderHash` | `keccak256(abi.encode((address,uint256,uint256,int256)[]))` — the **bare trades array**, not wrapped in the order tuple |
+| Taker `action.data` | `abi.encode((bytes32, uint256))` |
+
+The taker's `orderHash` must equal the hash of the maker's exact trades (`RFQM_InvalidTakerHash`), which is what makes the fill tamper-proof: neither side's price, size, asset, or subId can be altered by the executor.
+
+## Option subId encoding
+
+```text
+uint96 subId = expiry | (strike/1e10) << 32 | isCall << 95
+  expiry: unix seconds (uint32)
+  strike: 18dp, must be a multiple of 1e10 (8-decimal granularity)
+  isCall: bit 95
+```
+
+Example: `BTC-20260619-69000-C` → `1781856000 | (69000e18/1e10)<<32 | 1<<95` = `39614110892406511198553831168`.
+
+## Execution path & guarantees
+
+`Matching.verifyAndMatch(actions[], signatures[], fillData)` — callable only by registered trade executors — verifies every signature, then hands off to the target module. For RFQ fills (`[makerAction, takerAction]`, in that order):
+
+1. Nonces checked-and-invalidated for both parties.
+2. `FillData` accounts must match the signed subaccount IDs (`RFQM_SignedAccountMismatch`).
+3. Module fees capped by each side's signed `maxFee` (`RFQM_FeeTooHigh`).
+4. Taker's `orderHash` must hash the maker's trades (`RFQM_InvalidTakerHash`).
+5. Asset and cash legs submitted as one `SubAccounts.submitTransfers` batch; the StandardManager margin check and [OI fee](/reference/fees) run in the same transaction. Any failure reverts everything.
+
+## Session keys
+
+The contracts support session keys (`ActionVerifier.registerSessionKey`), but the v1 off-chain policy rejects `signer != owner`. Session-key support in the RFQ flow is **not yet implemented**.

@@ -1,0 +1,44 @@
+---
+title: "Oracles & feeds"
+description: "The signed-feed system that powers margin, pricing marks, and settlement — and its testnet caveats."
+icon: "radio"
+---
+
+Margin checks, mark prices, and settlement all read from **on-chain signed feeds**. Feed data is signed off-chain by whitelisted signers and posted on-chain, where any contract or integrator can read it.
+
+## The feed set (BTC market, chain 97)
+
+All reads return 18dp values plus a confidence value:
+
+| Feed | Address | Read |
+|---|---|---|
+| BTC spot | `0x69662A47C3C2626EB75a8c861C48a0a87Cb01b2C` | `getSpot() -> (uint price, uint conf)` |
+| BTC forward (per expiry) | `0x86b7148B69F3eFad27Af6d0d892d063D6a6C9e05` | `getForwardPrice(uint64 expiry) -> (uint, uint)` |
+| BTC vol — SVI surface (per expiry) | `0x5a892364cFBd8e725eC1e7af25855005C0E0f0aE` | `getVol(uint128 strike, uint64 expiry) -> (uint, uint)` |
+| BTC interest rate (per expiry) | `0x11C394e92592d08B43fE957c1A80f4c1F012d15D` | `getInterestRate(uint64 expiry) -> (int, uint)` |
+| USDT/USD stable | `0x2Eeb9512F40c1964eCA5dc156D8e2479dA632116` | `getSpot() -> (uint, uint)` |
+
+ABIs for all feeds ship in the TypeScript SDK (`@sats-options/shared`).
+
+## How the signed-feed model works
+
+- Feed updates are messages signed by **whitelisted signers** with heartbeats (staleness bounds) and confidence values; anyone can post a correctly signed update on-chain.
+- The volatility surface is stored as **SVI parameters per expiry** — consumers query `getVol(strike, expiry)` and the contract evaluates the surface.
+- Updates can also be piggybacked onto trade transactions via manager data, so a trade can carry the freshest marks it is margined against.
+
+## What each feed is used for
+
+| Consumer | Uses |
+|---|---|
+| StandardManager (margin) | forward, vol, rate, stable — initial-margin checks inside every trade |
+| OI fee | forward price at the trade's expiry ([fee reference](/reference/fees)) |
+| Settlement | the forward feed's fixed settlement price at expiry ([settlement reference](/reference/settlement)) |
+| Reference maker pricing | Black-76 on forward/vol/rate, spot fallback |
+
+## Testnet caveats
+
+<Warning>
+- The testnet feed signer is **1-of-1** (`0xdE50B8E965aD2B8E25f45a19FD87A2d2c737782F`) — a testnet-only trust assumption. Production targets N-of-M whitelisted signers with monitoring, plus an external anchor (e.g. Chainlink) for sanity checks; the first live trade's spot was already cross-checked against Chainlink BTC/USD (within ~0.7%).
+- The vol surface is currently a **flat 60% IV** SVI fit, and feeds update only when posted — do not expect live-market dynamics on testnet.
+- Settlement fixes come from the forward feed's settlement-window TWAP aggregates posted by the feed signer; there is no external settlement auction yet.
+</Warning>

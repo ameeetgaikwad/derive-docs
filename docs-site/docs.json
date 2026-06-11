@@ -1,0 +1,112 @@
+{
+  "$schema": "https://mintlify.com/docs.json",
+  "theme": "mint",
+  "name": "sats Options",
+  "description": "On-chain BTC options on BNB Chain. Fully collateralized covered calls, sold to market makers via sealed-bid RFQ auctions.",
+  "colors": {
+    "primary": "#F7931A",
+    "light": "#FFA94D",
+    "dark": "#E8830A"
+  },
+  "logo": {
+    "light": "/logo/light.svg",
+    "dark": "/logo/dark.svg"
+  },
+  "favicon": "/favicon.svg",
+  "appearance": {
+    "default": "dark"
+  },
+  "background": {
+    "decoration": "gradient",
+    "color": {
+      "light": "#FFFFFF",
+      "dark": "#0C0A09"
+    }
+  },
+  "fonts": {
+    "family": "Inter"
+  },
+  "icons": {
+    "library": "lucide"
+  },
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Get Started",
+        "icon": "rocket",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "index",
+              "how-it-works",
+              "architecture",
+              "why-bnb"
+            ]
+          },
+          {
+            "group": "Resources",
+            "pages": [
+              "resources/testnet",
+              "resources/faq",
+              "resources/roadmap"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Market Makers",
+        "icon": "candlestick-chart",
+        "groups": [
+          {
+            "group": "Integration Guide",
+            "pages": [
+              "market-makers/overview",
+              "market-makers/onboarding",
+              "market-makers/wire-protocol",
+              "market-makers/signing",
+              "market-makers/pricing-settlement-fees",
+              "market-makers/risk-ops",
+              "market-makers/runbook",
+              "market-makers/worked-example"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Protocol Reference",
+        "icon": "book-open",
+        "groups": [
+          {
+            "group": "Reference",
+            "pages": [
+              "reference/contracts",
+              "reference/eip-712",
+              "reference/oracles",
+              "reference/fees",
+              "reference/settlement"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "navbar": {
+    "primary": {
+      "type": "button",
+      "label": "Testnet Explorer",
+      "href": "https://testnet.bscscan.com"
+    }
+  },
+  "footer": {
+    "socials": {
+      "github": "https://github.com/Sats-Terminal/derive"
+    }
+  },
+  "search": {
+    "prompt": "Search sats Options docs..."
+  },
+  "seo": {
+    "indexing": "navigable"
+  }
+}

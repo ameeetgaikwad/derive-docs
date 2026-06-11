@@ -1,0 +1,57 @@
+---
+title: "How it works"
+description: "From depositing BTCB to receiving your premium and settling at expiry — the full lifecycle of a covered call on sats Options."
+icon: "route"
+---
+
+Selling a covered call on sats Options is a five-step journey. Everything that touches your money happens on-chain; the off-chain pieces (the auction) only coordinate signatures.
+
+<Steps>
+  <Step title="Deposit BTCB" icon="wallet">
+    You create a **subaccount** — an on-chain account (an ERC-721 ledger entry) that holds your balances — and deposit BTCB into it. This BTCB is the collateral that makes your call "covered". It never leaves your subaccount during the life of the trade.
+  </Step>
+  <Step title="Pick a strike and expiry" icon="crosshair">
+    Choose the price you'd be happy to sell BTC at (the **strike**, e.g. 110% of the current price) and the date (the **expiry**). Instruments are European-style BTC options, named like `BTC-20260619-69000-C` — a call at 69,000 expiring 2026-06-19.
+  </Step>
+  <Step title="RFQ auction" icon="gavel">
+    Your request-for-quote is broadcast to all connected market makers. For a short, fixed window (seconds), makers submit **sealed bids** — signed, binding quotes for your option. Nobody sees anyone else's bid. When the window closes, the **highest premium wins** (first-price; ties go to the earliest bid). You then accept the winning quote with your own signature.
+  </Step>
+  <Step title="Premium paid upfront" icon="banknote">
+    The protocol executes both signatures in a single atomic transaction: the option moves from you to the maker, and the maker's USDT premium moves to you — simultaneously, with risk checks in the same transaction. If anything fails, nothing happens. The premium is in your subaccount immediately.
+  </Step>
+  <Step title="Settlement at expiry" icon="calendar-check">
+    Options are **European and cash-settled in USDT**. At expiry, a settlement price is fixed on-chain, and anyone can trigger settlement permissionlessly:
+    - **Out of the money** (BTC below strike): the option expires worthless. You keep your BTCB and the premium. Done.
+    - **In the money** (BTC above strike): your subaccount is debited `(settlement price − strike) × size` in USDT; the maker's is credited the same. Your BTCB stays put — combined with the cash debit, your net outcome is having sold the upside above the strike, plus the premium.
+  </Step>
+</Steps>
+
+## Worked numbers
+
+Take the first live testnet trade as a concrete example (full details in the [worked example](/market-makers/worked-example)):
+
+| | |
+|---|---|
+| Spot BTC at trade time | 62,790 USDT |
+| You deposit | 1 BTCB |
+| You sell | 1× `BTC-20260619-69000-C` (strike ≈ 110% of spot, 8 days out) |
+| Auction result | winning bid **378.59 USDT**, paid to you immediately |
+| If BTC fixes at 65,000 at expiry | option expires worthless — you keep 1 BTCB + 378.59 USDT |
+| If BTC fixes at 72,000 at expiry | you pay 3,000 USDT cash; you still hold 1 BTCB + the premium |
+
+<Warning>
+On testnet the deployed open-interest fee is a **placeholder (10% of notional)** and dominates the economics of small trades. It is under review and will change before mainnet. See [Fees](/reference/fees).
+</Warning>
+
+## What you give up, what you get
+
+| You get | You give up |
+|---|---|
+| Premium in USDT, upfront, every time you sell | Upside above the strike until expiry |
+| Competitive pricing from a sealed-bid auction | The ability to exit the position before expiry (no buy-back flow in v1) |
+| Full self-custody — collateral in your own on-chain subaccount | — |
+| No liquidation risk on the covered position | — |
+
+## Trust model in one paragraph
+
+Your signature authorizes exactly one trade: *this* option, at *this* premium, settled into *your* subaccount, once, before a deadline you chose. The auction operator cannot alter the price or size, cannot redirect funds, and cannot execute twice — the contracts enforce all of it. If the operator disappears, your subaccount has a permissionless on-chain escape hatch. The details live in [Risk & operational notes](/market-makers/risk-ops) and the [EIP-712 reference](/reference/eip-712).

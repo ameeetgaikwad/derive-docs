@@ -1,0 +1,76 @@
+---
+title: "Overview & auction model"
+description: "What you are buying, how the sealed-bid RFQ auction works, and the trade lifecycle — for integration engineers at trading firms."
+icon: "telescope"
+---
+
+This section is for **integration engineers at trading firms** running quoting bots against the sats Options retail covered-call flow.
+
+<Note>
+**Status:** live on BSC testnet (chain ID **97**). Mainnet (BSC, 56) is not yet deployed. Everything in this guide is derived from the running system; where a capability is missing it is marked **not yet implemented** rather than speculated.
+</Note>
+
+## What you are buying
+
+The v1 product is **fully collateralized BTC covered calls sold by retail takers to market makers via RFQ**:
+
+- Retail users ("takers") deposit BTCB into a subaccount and sell European BTC call options against it. You, the maker, **buy** those calls and pay the premium in USDT.
+- v1 RFQ direction is `"sell"` only — the taker always sells, the maker always buys. Puts and maker-sells are planned but **not yet implemented** (the engine rejects any other direction with `v1 supports direction "sell" only (covered calls sold to makers)`).
+- Instruments are **European, cash-settled-at-expiry** BTC options, collateralized by physical BTCB on the taker side; premiums and settlement in USDT (the protocol's cash asset).
+- All protocol amounts use **18 decimals** (BTCB and BSC USDT are natively 18-decimal tokens).
+- Instrument naming: `BTC-<YYYYMMDD>-<strike>-C|P`, e.g. `BTC-20260619-69000-C`.
+
+## The auction model
+
+Every RFQ is a short **sealed-bid, first-price auction**:
+
+<Steps>
+  <Step title="Broadcast">
+    The RFQ engine broadcasts the RFQ to **all authenticated makers** over WebSocket.
+  </Step>
+  <Step title="Sealed bidding window">
+    Quotes are collected for a fixed window (`AUCTION_WINDOW_MS`, default **3,000 ms**; the live smoke test ran 8,000 ms). Competitor quotes are **not revealed** during the window.
+  </Step>
+  <Step title="Winner selection">
+    The **highest per-unit premium** wins; ties are broken by earliest arrival. First-price: if you win, you pay exactly the premium you quoted.
+  </Step>
+  <Step title="Taker accept & atomic execution">
+    When the taker accepts the winning quote, the engine (a registered *trade executor*) submits a single `Matching.verifyAndMatch` transaction pairing your signed maker order with the taker's signed accept. Option and cash legs move atomically inside the `SubAccounts` ledger; margin checks run in the same transaction.
+  </Step>
+</Steps>
+
+There is no off-chain settlement, novation, or counterparty credit — **your signed EIP-712 order *is* the trade.**
+
+## RFQ lifecycle
+
+```text
+open ──window ends, ≥1 quote──> closed ──taker accepts──> executing ──mined ok──> executed
+  │                                                            └──reverted/error──> failed
+  └──window ends, 0 quotes──> expired
+```
+
+## What you integrate with
+
+| Component | What it is |
+|---|---|
+| **RFQ engine** | WS/REST auction service + on-chain executor. Your bot connects to its maker WebSocket channel. |
+| **Reference maker bot** | A complete reference implementation (auth, pricing, signing, quoting) — adapt it, or use it as a conformance reference for your own stack. |
+| **TypeScript SDK** (`@sats-options/shared`) | Signing and encoding library: EIP-712 Actions, RFQ order encoding, chain clients. |
+| **Protocol contracts** | Matching + RfqModule + SubAccounts + StandardManager + feeds. Addresses in [Contracts & addresses](/reference/contracts). |
+
+## Reading order
+
+<CardGroup cols={2}>
+  <Card title="Onboarding" icon="key-round" href="/market-makers/onboarding">
+    Keys, subaccounts, collateral — what you need before your first quote.
+  </Card>
+  <Card title="Wire protocol" icon="cable" href="/market-makers/wire-protocol">
+    WS auth handshake, RFQ broadcasts, quote submission, win/loss notifications.
+  </Card>
+  <Card title="Signing" icon="signature" href="/market-makers/signing">
+    EIP-712 Actions and RfqModule order encoding — TypeScript and Python.
+  </Card>
+  <Card title="Runbook" icon="terminal" href="/market-makers/runbook">
+    Quoting on testnet in 30 minutes with the reference bot.
+  </Card>
+</CardGroup>

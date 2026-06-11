@@ -1,0 +1,79 @@
+---
+title: "Onboarding"
+description: "Keys, subaccounts, and collateral — everything a market maker needs before submitting a first quote."
+icon: "key-round"
+---
+
+## What you need
+
+<Steps>
+  <Step title="One EOA private key">
+    In v1 this single key does everything: authenticates your WS session, owns your subaccount, and signs quotes. The protocol contracts support session keys (`ActionVerifier.registerSessionKey`), but the RFQ engine **rejects** quotes with `signer != owner` (`v1 requires signer == owner (no session keys)`) — plan for a single hot key for now.
+  </Step>
+  <Step title="tBNB for gas (setup only)">
+    Gas is only needed for setup transactions (subaccount creation, approvals, deposits) and any direct withdrawals. **Quoting itself is gasless for you** — trades are submitted on-chain by the engine's executor key. Use any BSC testnet faucet; the full smoke-test setup cost ~0.02 tBNB per participant.
+  </Step>
+  <Step title="USDT cash collateral">
+    Deposited into a Matching subaccount — see below.
+  </Step>
+</Steps>
+
+## Testnet mocks (free money)
+
+Both testnet tokens are open-mint mocks — `MockERC20.mint(address,uint256)` is **unrestricted**:
+
+| Token | Address (97) | Decimals |
+|---|---|---|
+| Mock USDT | `0x9896AF08d261E52a629EF58cBebd32E8e0AA8eA9` | 18 |
+| Mock BTCB | `0x32fCF6a260Cdd2A3dc79cD0d4aD6B6c46bF6798A` | 18 |
+
+```sh
+cast send 0x9896AF08d261E52a629EF58cBebd32E8e0AA8eA9 \
+  "mint(address,uint256)" $MAKER_ADDR 200000ether \
+  --rpc-url https://bsc-testnet.bnbchain.org --private-key $PK \
+  --legacy --gas-price 200000000
+```
+
+<Warning>
+Note the `--legacy --gas-price 200000000`. Every transaction you send on chain 97 must be a legacy transaction at 0.2 gwei — see the [BSC testnet gas quirk](/market-makers/risk-ops#bsc-testnet-legacy-gas-quirk).
+</Warning>
+
+## Creating a subaccount under Matching
+
+The account model: `SubAccounts` is an ERC-721 ledger; each subaccount NFT holds asset balances and is risk-checked by its manager (the **StandardManager / SRM**). To trade through the RFQ system your subaccount NFT must be **deposited into the Matching contract**, which records you as the off-chain owner (`Matching.subAccountToOwner[id] == your EOA`). The engine verifies this on-chain for every quote.
+
+The easy path is the reference bot's `--setup` command, which performs exactly:
+
+<Steps>
+  <Step title="Create the subaccount">
+    `Matching.createSubAccount(standardManager)` — creates the subaccount with the NFT held by Matching and you recorded as owner. Returns your `subaccountId`.
+  </Step>
+  <Step title="Approve">
+    `USDT.approve(cashAsset, amount)`
+  </Step>
+  <Step title="Deposit cash">
+    `CashAsset.deposit(subaccountId, amount)` — pulls USDT from your EOA and credits 18dp "cash" to the subaccount. Deposit is permissionless for any recipient account.
+  </Step>
+</Steps>
+
+The bot persists the subaccount ID to `maker-state.<chainId>.json` (overridable with `MAKER_SUBACCOUNT_ID` / `MAKER_STATE_FILE`). You can equally do these three calls yourself — **no permission from the protocol is required for any of them**.
+
+## Margin: what buying a call requires
+
+Manager: StandardManager (SRM) at `0x4d55A929e184fc366664C11526E3B54aB70340B5`.
+
+- A **long call is fully paid-for**: it requires no maintenance margin of its own. Your constraint is that after paying `premium + fees`, your subaccount must still pass the SRM **initial margin** check (≥ 0) in the trade transaction.
+- USDT cash is the natural collateral. A negative cash balance is a borrow against other collateral (the taker side does exactly this — see the [worked example](/market-makers/worked-example)), but as a USDT-only maker you simply need enough cash.
+- The engine additionally pre-checks **off-chain at quote time** that your cash balance covers `price * amount / 1e18 + maxFee`, rejecting otherwise (`insufficient maker cash: ...`).
+
+<Warning>
+The off-chain pre-check does **not** include the on-chain OI fee (see [Pricing, settlement & fees](/market-makers/pricing-settlement-fees#fees-you-pay)) — the on-chain margin check does, so keep a buffer.
+</Warning>
+
+### Useful reads for monitoring (all 18dp)
+
+```text
+SubAccounts.getBalance(subaccountId, cashAsset, 0)            // signed cash balance
+SubAccounts.getBalance(subaccountId, btcOptionAsset, subId)   // option position
+StandardManager.getMargin(subaccountId, true)                 // initial margin (SRM)
+```

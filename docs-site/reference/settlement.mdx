@@ -1,0 +1,46 @@
+---
+title: "Settlement"
+description: "How European cash settlement works at expiry — the fix, the payoff, and who can trigger it."
+icon: "calendar-check"
+---
+
+All v1 instruments are **European options, cash-settled in USDT** at expiry. The underlying BTCB is never delivered: it stays in the writer's subaccount as collateral throughout.
+
+## The sequence
+
+<Steps>
+  <Step title="Expiry passes">
+    Until the settlement price is fixed, expired positions simply sit in their subaccounts. Nothing is at risk of "exercise by surprise" — settlement is deterministic from the on-chain fix.
+  </Step>
+  <Step title="The settlement price is fixed">
+    At/after expiry, the forward feed receives signed settlement data fixing the expiry price. On testnet the fix comes from the feed's settlement-window TWAP aggregates posted by the feed signer; there is no external settlement auction yet.
+  </Step>
+  <Step title="Anyone settles, per account">
+    Once the fix is posted, **anyone** may call `StandardManager.settleOptions(optionAsset, subaccountId)` for any account — settlement is permissionless. The protocol's ops service runs this routinely for known accounts, but you never depend on it for your own.
+  </Step>
+</Steps>
+
+## The payoff
+
+For a call with strike `K`, settlement fix `F_settle`, and size `size`:
+
+| Position | Cash movement at settlement |
+|---|---|
+| Long call | `+ max(F_settle − K, 0) × size` |
+| Short call (covered writer) | `− max(F_settle − K, 0) × size` |
+
+- **OTM** (`F_settle ≤ K`): the option expires worthless; the writer keeps BTCB collateral and the premium received at trade time.
+- **ITM** (`F_settle > K`): the writer's subaccount is debited the intrinsic value in USDT. If that exceeds their cash balance, the difference is a borrow against their BTCB collateral within their margin limits — economically equivalent to having sold the upside above the strike.
+
+The premium itself is **not** part of settlement — it was paid upfront when the trade executed.
+
+## Helper contracts
+
+| | Address (97) |
+|---|---|
+| OptionSettlementHelper | `0x9b8d576114b76deE0272135aD9Fc368849b866d9` |
+| SettlementUtils | `0xc7bbb714525CfA7ee4B221Bc62bB810C756F1B67` |
+
+<Info>
+The first live testnet trade settles at expiry 2026-06-19 08:00 UTC — see the [worked example](/market-makers/worked-example#step-5--settlement-scheduled).
+</Info>

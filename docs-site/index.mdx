@@ -1,0 +1,60 @@
+---
+title: "Introduction"
+description: "On-chain BTC options on BNB Chain — fully collateralized covered calls, sold to market makers via RFQ auctions."
+icon: "house"
+---
+
+**sats Options** is an on-chain options protocol on BNB Chain. The first product is simple and conservative: **fully collateralized BTC covered calls**. You deposit BTCB, sell a call option against it, and competing market makers bid for your option in a sealed auction. The winning premium is paid to you **upfront, in USDT**, settled atomically on-chain.
+
+<Note>
+sats Options is **live on BSC testnet** (chain ID 97). Mainnet (BSC, chain ID 56) is not yet deployed. The name "sats Options" is a working name.
+</Note>
+
+## What is a covered call?
+
+A covered call is one of the oldest and most conservative options strategies:
+
+1. **You own BTC** and you're willing to sell it — but only at a price higher than today's.
+2. **You sell someone the right** to buy your BTC at that higher price (the *strike*) on a fixed date (the *expiry*).
+3. **You get paid for it immediately.** That payment is the *premium*, and it's yours to keep no matter what happens.
+
+At expiry there are two outcomes:
+
+- **BTC stays below the strike** — the option expires worthless. You keep your BTC *and* the premium. This is income on BTC you were holding anyway.
+- **BTC rises above the strike** — the buyer exercises. On sats Options the contract is cash-settled: you pay out the difference between the settlement price and the strike in USDT, while your BTCB stays in your account. Economically it's as if you sold your upside above the strike — which is the price you said you'd be happy to sell at.
+
+The trade-off is explicit: you cap your upside above the strike in exchange for guaranteed income today. There is no leverage, no liquidation risk on the covered position, and no hidden counterparty — the position is fully collateralized by your BTCB on-chain.
+
+## How sats Options is different
+
+<CardGroup cols={2}>
+  <Card title="Fully on-chain settlement" icon="link">
+    No off-chain ledger, no novation, no counterparty credit. The trade is a single atomic transaction on BNB Chain: option leg and cash leg move together, with margin checks in the same transaction.
+  </Card>
+  <Card title="Competitive RFQ auctions" icon="gavel">
+    Every trade is a short sealed-bid, first-price auction. Market makers bid against each other for your option and the highest premium wins — price discovery works for you, not against you.
+  </Card>
+  <Card title="Premium upfront" icon="banknote">
+    The winning maker pays your premium in USDT the moment the trade executes — not at expiry, not in installments.
+  </Card>
+  <Card title="Fully collateralized" icon="shield-check">
+    Every call is backed 1:1 by BTCB escrowed in your own subaccount. No undercollateralized writing, no liquidation engine needed for covered positions.
+  </Card>
+</CardGroup>
+
+## Where to go next
+
+<CardGroup cols={2}>
+  <Card title="How it works" icon="route" href="/how-it-works">
+    The full user flow: deposit BTCB, pick a strike, auction, premium, settlement.
+  </Card>
+  <Card title="Architecture" icon="layers" href="/architecture">
+    The layered design: on-chain contracts, RFQ engine, signed price feeds.
+  </Card>
+  <Card title="Market maker integration" icon="candlestick-chart" href="/market-makers/overview">
+    Run a quoting bot against the RFQ flow — wire protocol, signing, runbook.
+  </Card>
+  <Card title="Testnet guide" icon="flask-conical" href="/resources/testnet">
+    Contract addresses, faucets, open-mint test tokens, and the first live trade.
+  </Card>
+</CardGroup>

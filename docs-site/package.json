@@ -1,0 +1,11 @@
+{
+  "name": "sats-options-docs",
+  "private": true,
+  "scripts": {
+    "dev": "mint dev",
+    "check": "mint broken-links"
+  },
+  "devDependencies": {
+    "mint": "^4.2.615"
+  }
+}

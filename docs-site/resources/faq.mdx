@@ -1,0 +1,51 @@
+---
+title: "FAQ"
+description: "Honest answers to the questions people actually ask about sats Options."
+icon: "circle-help"
+---
+
+<AccordionGroup>
+  <Accordion title="Do I lose my BTC when I sell a covered call?">
+    No. Options are **cash-settled in USDT** — your BTCB never leaves your subaccount. If BTC finishes below the strike, nothing happens: you keep your BTCB and the premium. If BTC finishes above the strike, your subaccount is debited the difference `(settlement price − strike) × size` in USDT; if your cash balance doesn't cover it, the shortfall becomes a borrow against your BTCB collateral. Economically you've sold your upside above the strike — but you never lose custody of the BTCB itself.
+  </Accordion>
+
+  <Accordion title="When do I receive the premium?">
+    Immediately, at trade execution. The premium moves from the maker's subaccount to yours **in the same atomic transaction** that transfers the option. There is no escrow period and no waiting for expiry.
+  </Accordion>
+
+  <Accordion title="Is this custodial? Can the operator take my funds?">
+    Your balances live in a subaccount NFT held by the Matching contract, with your address recorded as owner. Every state change requires **your EIP-712 signature**, and each signature authorizes exactly one narrowly scoped operation. The trade executor cannot change prices or sizes, redirect funds, or execute anything twice. If the operator vanishes, you can withdraw your subaccount permissionlessly: `requestWithdrawAccount` → wait 30 minutes → `completeWithdrawAccount`, after which you control the NFT directly on-chain.
+  </Accordion>
+
+  <Accordion title="What exactly does my signature authorize?">
+    One trade: *this* instrument, at *this* price and size, settled into *your* subaccount, executed at most once, before an expiry timestamp you chose. The contracts enforce all of these bounds (`RFQM_SignedAccountMismatch`, `RFQM_InvalidTakerHash`, `RFQM_FeeTooHigh`, nonce invalidation, `OV_ActionExpired`). See the [EIP-712 reference](/reference/eip-712).
+  </Accordion>
+
+  <Accordion title="Why was the fee on the testnet trade so large?">
+    The deployed open-interest fee rate on testnet is a **placeholder**: 10% of forward notional per side (min 10 USDT), which produced a 6,279 USDT fee against a 378.59 USDT premium on the first live trade. It is explicitly under review and will change before any real money flows. Read the live values on-chain rather than hard-coding them — see [Fees](/reference/fees).
+  </Accordion>
+
+  <Accordion title="Can I close or cancel a position before expiry?">
+    Not in v1. Options are European and there is no buy-back/unwind flow yet — once your covered call is sold, the position runs to expiry. For makers, a signed quote likewise cannot be cancelled; it can only age out at its expiry timestamp. Plan strikes, expiries, and quote TTLs accordingly.
+  </Accordion>
+
+  <Accordion title="What happens if no market maker quotes my RFQ?">
+    The auction window closes with zero quotes and the RFQ status becomes `expired`. Nothing executes, nothing is charged, and your collateral is untouched. You can simply open a new RFQ.
+  </Accordion>
+
+  <Accordion title="Do market makers need permission to participate?">
+    Currently no — there is no allowlist in the engine: any address that completes the signature handshake and has a funded subaccount under Matching can quote. Whitelisting/KYC gating is not yet implemented. The practical gate today is that the maker WebSocket endpoint is not yet publicly exposed; integrators get the current testnet host from the team.
+  </Accordion>
+
+  <Accordion title="Are puts, other assets, or buying options supported?">
+    Not yet. v1 is **sell-direction covered calls on BTC only** — the engine rejects any other direction. Cash-secured puts, more underlyings, and margin-traded (cash-settled) options are on the [roadmap](/resources/roadmap).
+  </Accordion>
+
+  <Accordion title="Where do the prices used for margin and settlement come from?">
+    From the protocol's on-chain **signed feeds**: BTC spot, per-expiry forwards, an SVI vol surface, rates, and a USDT/USD feed. On testnet these are posted by a 1-of-1 signer with a flat 60% IV surface — a known, testnet-only trust assumption. Production targets N-of-M signers plus an external anchor like Chainlink. Details in [Oracles & feeds](/reference/oracles).
+  </Accordion>
+
+  <Accordion title="Is the protocol audited?">
+    The contracts are a pinned fork of open-source protocol contracts whose base was **audited by Sigma Prime** (public reports). The fork is deployed with the vendored source kept read-only; sats Options' own changes (deploy scripts, configuration, off-chain services) are the target for differential review. No independent audit of the sats Options deployment has been completed yet — it's testnet for a reason.
+  </Accordion>
+</AccordionGroup>

@@ -1,0 +1,33 @@
+---
+title: "Roadmap"
+description: "Where sats Options is headed: covered calls today, cash-secured puts next, then margin trading — and maybe, later, an order book."
+icon: "map"
+---
+
+The protocol was deliberately built on full exchange rails — subaccounts, modular execution, a standard risk manager — so each phase extends the same system rather than replacing it.
+
+<Warning>
+This is a build plan, not a promise. Scope and order may change; nothing here is a commitment to ship by a date.
+</Warning>
+
+<Steps>
+  <Step title="Now — BTC covered calls via RFQ (BSC testnet)" icon="check">
+    Fully collateralized covered calls sold to market makers through sealed-bid RFQ auctions. Live on BSC testnet with a completed end-to-end trade; mainnet deployment follows MM onboarding, fee-parameter finalization (the testnet OI fee is a placeholder), and review of the deployment's changes against the audited base.
+  </Step>
+  <Step title="Next — cash-secured puts" icon="circle-dot">
+    The mirror product: deposit USDT, sell a put, earn premium — get paid to set a limit-buy on BTC. Same RFQ rail, same fully collateralized model; the engine's maker-sell/put paths are the main lift (today it rejects any direction except taker-sell calls).
+  </Step>
+  <Step title="Then — margin & cash-settled options" icon="circle-dashed">
+    Cash-settled options without full collateralization: StandardManager margin trading, Dutch-auction liquidations (the contracts are already deployed, dormant), a funded security module, more underlyings (BNB, ETH), and session keys so hot quoting keys can be separated from account owners.
+  </Step>
+  <Step title="Maybe later — central-limit order book" icon="circle">
+    The TradeModule ships with the protocol but lies dormant. If flow outgrows episodic RFQ auctions, a CLOB (and portfolio margin for capital-efficient makers) can be layered onto the same accounts and assets. RFQ may also simply remain the right venue shape for options — this phase is intentionally a "maybe".
+  </Step>
+</Steps>
+
+## Cross-cutting work, independent of phases
+
+- **Oracle hardening** — from the testnet 1-of-1 feed signer to N-of-M signers, monitoring, and an external (e.g. Chainlink) anchor.
+- **Public maker endpoint** — a TLS `wss://` maker channel (today external makers connect via a managed tunnel).
+- **Gasless UX** — sponsored deposits/trades via BNB Chain's MegaFuel paymaster and EIP-7702 batched approvals.
+- **Notification surface for makers** — taker-accept deadlines, fill/fail push messages, and realized-fee reports (today: reconcile from chain events).

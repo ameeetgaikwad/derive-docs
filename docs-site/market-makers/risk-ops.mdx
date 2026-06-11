@@ -1,0 +1,70 @@
+---
+title: "Risk & operational notes"
+description: "What the executor can and cannot do with your signature, the self-custody escape hatch, quote TTLs, margin monitoring, and testnet quirks."
+icon: "shield-alert"
+---
+
+## What the executor can and cannot do with your signature
+
+The RFQ engine's executor key (`tradeExecutor` in the deployments file, currently `0x6e154BEA64a1808dbAD715d87226e104Ad1EE9eB`) is the only address that can call `Matching.verifyAndMatch`.
+
+Given your signed quote it **can**:
+
+- execute your exact trades, once, before expiry,
+- paired only with a taker who signed your trades' hash,
+- charging you a module fee of at most your signed `maxFee` (currently always 0).
+
+It **cannot**:
+
+- change price, size, asset or subId;
+- execute twice (nonce invalidation);
+- pick a different maker/taker subaccount than signed (`RFQM_SignedAccountMismatch`);
+- withdraw or transfer anything else from your subaccount — each module only does its one job, and your signature binds `module = RfqModule`;
+- survive your `expiry`.
+
+<Check>
+A malicious executor's worst case is *not executing* (censoring) or executing a quote you wish had lost — both bounded by your own quoted price and TTL.
+</Check>
+
+## Self-custody and the escape hatch
+
+Your subaccount NFT sits inside the Matching contract with your EOA recorded as owner. You never need the operator's cooperation to leave:
+
+```text
+Matching.requestWithdrawAccount(subaccountId)    // starts cooldown; only recorded owner
+... wait WITHDRAW_COOLDOWN = 30 minutes ...
+Matching.completeWithdrawAccount(subaccountId)   // NFT transferred back to your EOA
+```
+
+After that you hold the subaccount NFT directly and can manage balances against `SubAccounts` / `CashAsset.withdraw` yourself, fully outside the off-chain system. (While inside Matching, cash withdrawals go through the WithdrawalModule via a signed action routed by the executor — the escape hatch above is the trust-minimized path.)
+
+## Quote TTLs
+
+- Engine constraint: `action.expiry >= ceil(auctionEndsAt / 1000)` or the quote is rejected.
+- Your constraint: **expiry is the only thing that kills a signed quote** (no cancel). The taker-accept step has **no deadline**, so a winning quote can be accepted any time before your expiry — including after the market has moved.
+- The reference bot uses `expiry = max(auctionEnd + 60 s, now + QUOTE_TTL_SEC)` with `QUOTE_TTL_SEC = 300`.
+
+<Warning>
+Treat the TTL as a free option you are short to the taker, and price it accordingly — or keep it tight.
+</Warning>
+
+## Margin monitoring
+
+Keep your subaccount's cash comfortably above your worst-case `Σ(open quotes: premium + OI fee)`. Monitor with the reads in [Onboarding](/market-makers/onboarding#margin-what-buying-a-call-requires).
+
+- Long-only call buying cannot be liquidated in v1 economics (no negative exposure), but a failed initial-margin check makes your **fills revert**, which burns goodwill and shows up as a failed RFQ on the operator's side.
+- The engine validates your cash **at quote time** against premium + maxFee only — **concurrent wins across simultaneous auctions can over-commit your balance**; the engine does not reserve balances across open quotes.
+
+## BSC testnet legacy-gas quirk
+
+BSC testnet public nodes mishandle EIP-1559 fee fields (the chain reports a zero base fee), so 1559-typed transactions fail with `insufficient funds: have 0`. **Every transaction you send on chain 97 must be a legacy transaction with an explicit gasPrice of 0.2 gwei** (`200000000` wei).
+
+- `cast`/`forge`: `--legacy --with-gas-price 200000000` (and prefer `--retries 12 --delay 5` — public RPCs are flaky).
+- viem: use `makeWalletClient` from `@sats-options/shared` — it forces `{ type: "legacy", gasPrice: 200000000n }` on every write on chain 97 and retries `nonce too low` errors caused by load-balanced lagging nodes.
+- This applies only to *your* setup/withdrawal transactions; fills are sent by the executor, which already does this.
+
+## Engine availability semantics
+
+- The RFQ store is **in-memory**: if the engine restarts, open auctions and historical RFQ state are gone (the WS replay after `auth_ok` covers only RFQs the current process knows). **Reconcile fills from chain events** (`RFQTradeCompleted` on RfqModule), not from the engine.
+- Auth is per-connection; always re-run the handshake after reconnect.
+- One WS connection per maker process is the supported pattern; multiple connections from the same address are not deduplicated (each gets every broadcast — guard against double-quoting; note duplicate quotes are *both* admitted).

@@ -1,0 +1,233 @@
+---
+title: "Signing quotes"
+description: "Building and signing EIP-712 Actions and RfqModule orders — with the TypeScript SDK or from scratch in any language."
+icon: "signature"
+---
+
+Everything you sign is one struct: the Matching **Action**. The engine and the chain verify the same signature; what varies per use-case is the `data` payload.
+
+## Domain (testnet values — verify these)
+
+```json
+{
+  "name": "Matching",
+  "version": "1.0",
+  "chainId": 97,
+  "verifyingContract": "0x0A98363B7679BE75682D579C4d8cc5D7b6F5a285"
+}
+```
+
+Expected domain separator (cross-check your implementation, and/or call `Matching.domainSeparator()` on-chain):
+
+```text
+0x4cc5ab9a5a9e3993fe20da61e691a365b4b67a1339557e5b0437ba83097c84b5
+```
+
+## The Action struct
+
+Type string (typehash `0x4d7a9f27c403ff9c0f19bce61d76d82f9aa29f8d6d4b0c5474607d9770d1af17`):
+
+```text
+Action(uint256 subaccountId,uint256 nonce,address module,bytes data,uint256 expiry,address owner,address signer)
+```
+
+Struct hash, exactly as the contract computes it:
+
+```text
+keccak256(abi.encode(
+  ACTION_TYPEHASH, subaccountId, nonce, module, keccak256(data), expiry, owner, signer))
+```
+
+Digest: `keccak256(0x1901 || domainSeparator || structHash)` — i.e. standard `eth_signTypedData_v4`. Any EIP-712 library that hashes `bytes` members as `keccak256(data)` (they all should) produces the right digest. Signature verification on-chain goes through OpenZeppelin `SignatureChecker`, so EOA ECDSA signatures and ERC-1271 contract signatures both work at the contract level — but remember the engine requires `signer == owner` EOA in v1.
+
+| Field | Meaning |
+|---|---|
+| `subaccountId` | Your maker subaccount (deposited into Matching) |
+| `nonce` | Any uint you have never used before (per owner, per module) — see [nonce semantics](#nonce-and-expiry-semantics) |
+| `module` | RfqModule = `0x2769E33b2169C83304cEa0c5C8fbC5a1707E305D` |
+| `data` | `abi.encode(RfqOrder)` — below |
+| `expiry` | Unix seconds. On-chain: `block.timestamp > expiry` reverts `OV_ActionExpired`. Off-chain: must outlive the auction window |
+| `owner` | Your EOA (must equal `Matching.subAccountToOwner[subaccountId]`) |
+| `signer` | Your EOA (v1: == owner) |
+
+## RfqModule order encoding (what your signature commits to)
+
+The maker action's `data` is the ABI encoding of:
+
+```solidity
+struct TradeData { address asset; uint subId; uint price; int amount; }
+struct RfqOrder  { uint maxFee; TradeData[] trades; }
+// encoding: abi.encode(RfqOrder) == abi.encode((uint256,(address,uint256,uint256,int256)[]))
+```
+
+For a v1 covered-call quote, `trades` has exactly one entry:
+
+```text
+asset  = instrument.optionAsset            (BTC OptionAsset)
+subId  = instrument.subId                  (verbatim from the RFQ broadcast)
+price  = your per-unit premium, 18dp uint  (always positive)
+amount = +rfq.amount, 18dp int             (positive: YOU receive the option)
+```
+
+The taker signs the mirror-image `TakerOrder`:
+
+```solidity
+struct TakerOrder { bytes32 orderHash; uint maxFee; }
+// orderHash MUST equal keccak256(abi.encode(makerOrder.trades))
+// i.e. keccak256 of abi.encode((address,uint256,uint256,int256)[]) over your trades array
+```
+
+### On-chain fill semantics
+
+`RfqModule.executeAction` — the contract your signature ultimately authorizes — receives `[makerAction, takerAction]` in that exact order plus an executor-supplied `FillData{makerAccount, makerFee, takerAccount, takerFee, managerData}`:
+
+1. Both nonces are checked-and-invalidated (`BM_NonceAlreadyUsed` on reuse).
+2. `fill.makerAccount`/`fill.takerAccount` must equal the signed `subaccountId`s (`RFQM_SignedAccountMismatch`) — the executor cannot redirect the fill to other accounts.
+3. `fill.makerFee <= makerOrder.maxFee` and `fill.takerFee <= takerOrder.maxFee` (`RFQM_FeeTooHigh`) — the executor cannot charge you more module-fee than you signed for. **The engine currently always sets `makerFee = takerFee = 0`.**
+4. `takerOrder.orderHash == keccak256(abi.encode(makerOrder.trades))` (`RFQM_InvalidTakerHash`) — the taker provably agreed to *your exact* trades; neither side's price/size can be altered.
+5. For each trade: the asset position moves **taker → maker** for `amount`, and cash `price × amount` (18dp decimal mul) moves **maker → taker**. Module fees (zero today) move to the fee-recipient subaccount.
+6. All transfers are submitted as one `SubAccounts.submitTransfers` batch — the SRM margin check and [OI fee](/market-makers/pricing-settlement-fees#fees-you-pay) run here, atomically. Any failure reverts the whole trade.
+
+<Check>
+Your signature authorizes **exactly one thing**: "transfer at most `price × amount` USDT (+ up to `maxFee`) out of subaccount `subaccountId` in exchange for exactly `amount` of option `(asset, subId)`, any time before `expiry`, once." Nothing else. It can only be exercised through `Matching.verifyAndMatch`, which only registered trade executors can call, and only paired with a taker who signed over the hash of your exact trades.
+</Check>
+
+## Nonce and expiry semantics
+
+- **Nonces are not sequential.** Any never-before-used `uint256` per `(owner, module)` works; modules store `usedNonces[owner][nonce]`. A nonce is burned **only when the action executes on-chain**. Losing quotes never touch the chain, so their nonces stay unused — that is fine, just never reuse a nonce you may have outstanding. The SDK default is `Date.now() * 1000 + rand(0..999)`.
+- **Expiry is your only kill switch.** There is no on-chain cancel for a signed action and no off-chain quote-cancel message. An admitted losing quote remains executable *in principle* until expiry (in practice the engine only ever executes the winning quote, but treat TTL as your risk bound). Keep it short: the reference bot uses `QUOTE_TTL_SEC=300` and clamps to `max(auctionEnd + 60s, now + TTL)`.
+
+## Option subId encoding
+
+`subId` arrives verbatim in the RFQ broadcast; you only need to encode it yourself if you derive instruments independently:
+
+```text
+uint96 subId = expiry | (strike/1e10) << 32 | isCall << 95
+  expiry: unix seconds (uint32)
+  strike: 18dp, must be a multiple of 1e10 (8-decimal granularity)
+  isCall: bit 95
+```
+
+Worked: `BTC-20260619-69000-C` → `1781856000 | (69000e18/1e10)<<32 | 1<<95` = `39614110892406511198553831168` — matches the live trade.
+
+## Build and sign a quote
+
+<Tabs>
+  <Tab title="TypeScript (SDK)">
+    The exact path the reference bot takes, using `@sats-options/shared`:
+
+    ```ts
+    import { privateKeyToAccount } from "viem/accounts";
+    import {
+      buildAction, encodeRfqOrder, hashRfqTrades, signAction,
+      type RfqTradeData,
+    } from "@sats-options/shared";
+
+    const account = privateKeyToAccount(process.env.PRIVATE_KEY as `0x${string}`);
+
+    const MATCHING   = "0x0A98363B7679BE75682D579C4d8cc5D7b6F5a285";
+    const RFQ_MODULE = "0x2769E33b2169C83304cEa0c5C8fbC5a1707E305D";
+    const CHAIN_ID = 97;
+
+    // From the rfq_open broadcast:
+    const rfq = /* parsed PublicRfq */;
+
+    const trades: RfqTradeData[] = [{
+      asset: rfq.instrument.optionAsset,     // BTC OptionAsset
+      subId: BigInt(rfq.instrument.subId),
+      price: 378_586807763808053551n,        // your premium, 18dp ($378.5868...)
+      amount: BigInt(rfq.amount),            // +1e18: you receive the option
+    }];
+
+    const action = buildAction({
+      subaccountId: 5n,                      // your maker subaccount
+      module: RFQ_MODULE,
+      data: encodeRfqOrder({ maxFee: 0n, trades }),
+      owner: account.address,                // signer defaults to owner
+      expiry: BigInt(Math.ceil(rfq.auctionEndsAt / 1000) + 300),
+    });                                      // nonce auto-generated
+
+    const signature = await signAction({
+      action, signer: account, chainId: CHAIN_ID, matchingAddress: MATCHING,
+    });
+
+    ws.send(JSON.stringify({
+      type: "quote",
+      rfqId: rfq.id,
+      action: {                              // bigints -> decimal strings on the wire
+        subaccountId: action.subaccountId.toString(),
+        nonce: action.nonce.toString(),
+        module: action.module,
+        data: action.data,
+        expiry: action.expiry.toString(),
+        owner: action.owner,
+        signer: action.signer,
+      },
+      signature,
+    }));
+
+    // hashRfqTrades(trades) === the orderHash the taker will sign — useful for reconciliation.
+    ```
+
+    Or skip the plumbing entirely and use the reference bot's `buildSignedQuote()`, which prices with Black-76 from the on-chain feeds and returns `{ action, signature, orderHash, trades }` ready to send.
+  </Tab>
+  <Tab title="Python (from scratch)">
+    No SDK required. You need: (a) `eth_signTypedData_v4`-style EIP-712 signing, (b) ABI encoding, (c) EIP-191 personal-sign for the WS challenge.
+
+    ```python
+    from eth_account import Account
+    from eth_account.messages import encode_typed_data, encode_defunct
+    from eth_abi import encode
+    from eth_utils import keccak
+
+    acct = Account.from_key(PRIVATE_KEY)
+
+    MATCHING   = "0x0A98363B7679BE75682D579C4d8cc5D7b6F5a285"
+    RFQ_MODULE = "0x2769E33b2169C83304cEa0c5C8fbC5a1707E305D"
+
+    ACTION_TYPES = {
+        "Action": [
+            {"name": "subaccountId", "type": "uint256"},
+            {"name": "nonce",        "type": "uint256"},
+            {"name": "module",       "type": "address"},
+            {"name": "data",         "type": "bytes"},
+            {"name": "expiry",       "type": "uint256"},
+            {"name": "owner",        "type": "address"},
+            {"name": "signer",       "type": "address"},
+        ],
+    }
+
+    # 1. WS auth: EIP-191 personal sign of the challenge string
+    sig = acct.sign_message(encode_defunct(text=challenge)).signature.hex()
+
+    # 2. Quote: encode RfqOrder, then sign the Action as typed data
+    trades = [(OPTION_ASSET, sub_id, price_18dp, amount_18dp)]
+    rfq_order = encode(
+        ["(uint256,(address,uint256,uint256,int256)[])"], [(max_fee, trades)])
+    order_hash = keccak(encode(["(address,uint256,uint256,int256)[]"], [trades]))
+
+    action = {
+        "subaccountId": 5, "nonce": nonce, "module": RFQ_MODULE,
+        "data": rfq_order, "expiry": expiry,
+        "owner": acct.address, "signer": acct.address,
+    }
+    signed = acct.sign_message(encode_typed_data(full_message={
+        "types": ACTION_TYPES,
+        "primaryType": "Action",
+        "domain": {"name": "Matching", "version": "1.0", "chainId": 97,
+                   "verifyingContract": MATCHING},
+        "message": action,
+    }))
+    ```
+  </Tab>
+</Tabs>
+
+### ABI types for `action.data`
+
+- Maker `RfqOrder`: `abi.encode( (uint256 maxFee, (address asset, uint256 subId, uint256 price, int256 amount)[] trades) )` — a single tuple parameter containing a dynamic array, standard head/tail encoding.
+- `orderHash = keccak256( abi.encode( (address,uint256,uint256,int256)[] trades ) )` — note: the **bare array**, not wrapped in the order tuple.
+- Taker `TakerOrder`: `abi.encode( (bytes32 orderHash, uint256 maxFee) )`.
+
+<Tip>
+Validate your implementation against the live chain: `Matching.domainSeparator()` must return the domain separator above, and `Matching.getActionHash(action)` (a public pure helper on the contract) must match your struct hash.
+</Tip>

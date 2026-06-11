@@ -1,0 +1,44 @@
+---
+title: "Fees"
+description: "The protocol's fee layers — module fees (currently zero) and the open-interest fee (testnet value is a placeholder under review)."
+icon: "receipt"
+---
+
+Two fee layers exist in the protocol. Only one is non-zero today, and its current testnet value is explicitly a placeholder.
+
+## 1. Matching module fee — currently 0
+
+Each fill can carry a module fee per side (`FillData.makerFee` / `takerFee`), **hard-capped on-chain by the `maxFee` each party signed** (`RFQM_FeeTooHigh`). The RFQ engine currently always submits **0** for both sides. A participant who signs `maxFee: 0` is cryptographically guaranteed zero module fee.
+
+## 2. Open-interest (OI) fee
+
+The StandardManager charges an OI fee inside the trade transaction whenever a trade **increases open interest** in an instrument (every newly written covered call does). It is charged **per side**, in cash (USDT), to the fee-recipient subaccount (id **3** on testnet):
+
+```text
+fee     = |amount| × forwardPrice(expiry) × OIFeeRateBPS    (18dp decimal math)
+charged = max(fee, minOIFee)     per participant, only if subId OI increased
+```
+
+<Warning>
+**The testnet OI fee rate is a placeholder and is under review.**
+
+As deployed on chain 97: `OIFeeRateBPS = 0.1e18`, `minOIFee = 10e18` — i.e. **`max(10% of forward notional, 10 USDT)` per side**. Despite the parameter's "BPS" name it is a plain 18dp decimal multiplier, and 10% of notional is obviously not an economic rate: on the [first live trade](/market-makers/worked-example) it produced a 6,279 USDT fee per side against a 378.59 USDT premium. It will change before any real value flows. **Do not hard-code it.**
+</Warning>
+
+Read the live values on-chain:
+
+```text
+SRMPortfolioViewer.OIFeeRateBPS(btcOptionAsset)   // viewer: 0xbC9ae813B45Fa950AabE2E82eAB023Dd45a36486
+StandardManager.minOIFee()
+```
+
+Operational notes:
+
+- The OI fee is **not** included in the RFQ engine's off-chain maker-cash pre-check, but it **is** charged in the on-chain trade transaction — both sides must absorb it and still pass initial margin.
+- Settlement and pure transfers that do not increase OI are not charged.
+
+## Gas
+
+- **Takers and makers pay no gas to trade** — fills are submitted by the protocol's executor.
+- Participants pay gas only for their own setup, deposits, and withdrawals.
+- On BSC testnet, all transactions must be legacy-typed at 0.2 gwei — see the [testnet guide](/resources/testnet#known-quirks).

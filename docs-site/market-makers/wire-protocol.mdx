@@ -1,0 +1,200 @@
+---
+title: "Wire protocol"
+description: "The maker WebSocket channel: auth handshake, RFQ broadcasts, quote submission and validation, auction close, and REST status."
+icon: "cable"
+---
+
+Wire format is JSON. **All bigints travel as decimal strings**; all on-chain quantities are 18dp integers; timestamps named `*At` are **milliseconds** epoch, `expiry` fields are **unix seconds**.
+
+## Endpoints
+
+| Channel | Path | Who |
+|---|---|---|
+| Maker WS | `ws://<host>:<port>/maker` | you |
+| Taker WS | `ws://<host>:<port>/taker` | retail frontend |
+| REST | `POST /rfq`, `GET /rfq/:id`, `POST /rfq/:id/accept`, `GET /health` | takers / status polling |
+
+Default port is **3030** (`RFQ_PORT`/`PORT` env on the engine). The reference bot default is `RFQ_ENGINE_WS=ws://127.0.0.1:3030/maker`.
+
+<Warning>
+**Deployment caveat (current code):** the server binds `127.0.0.1` by default and the production entrypoint does not expose a host override or TLS. A public `wss://` maker endpoint is **not yet implemented** — external makers currently connect via a tunnel/proxy stood up by the team. Ask for the current testnet hostname.
+</Warning>
+
+`GET /rfq/:id` and `GET /health` are unauthenticated; makers may poll RFQ status over REST too.
+
+## Auth handshake (maker WS)
+
+Immediately on connect the server sends a challenge:
+
+```json
+{ "type": "auth_challenge",
+  "challenge": "sats-options rfq-engine maker auth 1c1f7b3e-83b7-4d54-9f3e-0db1b15c2f11 1781770000000" }
+```
+
+The challenge is `sats-options rfq-engine maker auth <uuid> <ms-timestamp>`, unique per connection. You sign it as an **EIP-191 personal message** (`personal_sign` / viem `account.signMessage` — *not* EIP-712) with the EOA that owns your subaccount, and reply:
+
+```json
+{ "type": "auth", "address": "0x5c9Ca4A3f39Cf36C968402C8E933cB2979882BF8", "signature": "0x..." }
+```
+
+On success:
+
+```json
+{ "type": "auth_ok", "address": "0x5c9Ca4A3f39Cf36C968402C8E933cB2979882BF8" }
+```
+
+…followed immediately by a **replay of every currently-open RFQ** as individual `rfq_open` frames, so reconnects never miss live auctions. On failure you get `{ "type": "error", "message": "auth failed: bad signature" }` and remain unauthenticated (the socket is not closed). Sending a quote before authenticating yields `{ "type": "error", "message": "authenticate first" }`.
+
+<Info>
+There is **no maker allowlist** in the current code: any address with a valid signature can authenticate and quote. Whitelisting/KYC gating is **not yet implemented**.
+</Info>
+
+Re-authenticate on every reconnect (new challenge each time). The reference client reconnects with exponential backoff (1 s doubling to 30 s). There is **no application-level ping/heartbeat** — detect dead connections yourself.
+
+## RFQ broadcast
+
+Every new auction is pushed to all authenticated makers:
+
+```json
+{
+  "type": "rfq_open",
+  "rfq": {
+    "id": "501329a3-aa90-45cd-8607-f37f8439971d",
+    "takerSubaccountId": "6",
+    "direction": "sell",
+    "instrument": {
+      "name": "BTC-20260619-69000-C",
+      "currency": "BTC",
+      "optionAsset": "0xD0dD8DcA596540F615e66E07F49d40647D8bC6eD",
+      "expiry": "1781856000",
+      "strike": "69000000000000000000000",
+      "isCall": true,
+      "subId": "39614110892406511198553831168"
+    },
+    "amount": "1000000000000000000",
+    "createdAt": 1781770000000,
+    "auctionEndsAt": 1781770008000,
+    "status": "open"
+  }
+}
+```
+
+Field notes:
+
+| Field | Meaning |
+|---|---|
+| `id` | UUID — the key for everything that follows |
+| `direction` | v1: always `"sell"` (taker sells, you buy) |
+| `instrument.expiry` | unix **seconds** |
+| `instrument.strike` | 18dp (here: 69,000) |
+| `instrument.subId` | option subId encoding — see [Signing § subId encoding](/market-makers/signing#option-subid-encoding) |
+| `amount` | 18dp option size (here: 1.0) |
+| `auctionEndsAt` | ms epoch — quotes accepted **strictly before** this |
+| `status` | `open\|closed\|expired\|executing\|executed\|failed` |
+
+## Quote submission
+
+A quote is nothing but your **fully signed EIP-712 Action targeting RfqModule** (construction in [Signing](/market-makers/signing)). One message:
+
+```json
+{
+  "type": "quote",
+  "rfqId": "501329a3-aa90-45cd-8607-f37f8439971d",
+  "action": {
+    "subaccountId": "5",
+    "nonce": "1781770003123456",
+    "module": "0x2769E33b2169C83304cEa0c5C8fbC5a1707E305D",
+    "data": "0x...",
+    "expiry": "1781770368",
+    "owner": "0x5c9Ca4A3f39Cf36C968402C8E933cB2979882BF8",
+    "signer": "0x5c9Ca4A3f39Cf36C968402C8E933cB2979882BF8"
+  },
+  "signature": "0x..."
+}
+```
+
+- `subaccountId` — **your** maker subaccount
+- `module` — the RfqModule address
+- `data` — `abi.encode(RfqOrder{maxFee, trades[]})`
+- `expiry` — unix seconds; must outlive `auctionEndsAt`
+- `signer` — v1: must equal `owner`
+- `signature` — 65-byte EIP-712 signature
+
+The server replies with exactly one of:
+
+```json
+{ "type": "quote_ack", "rfqId": "501329a3-...", "quoteId": "8a2b4c..." }
+{ "type": "quote_rejected", "rfqId": "501329a3-...", "reason": "<human-readable reason>" }
+```
+
+### Validation, in the exact order the engine runs it
+
+1. RFQ exists and is `open`; clock strictly before `auctionEndsAt` (`unknown rfq ...`, `rfq ... is closed`, `auction window closed`).
+2. Action shape: `action.module` == RfqModule; `action.owner` == your authenticated WS address; `signer == owner`; `subaccountId != 0`; `action.expiry` in the future **and** `>= ceil(auctionEndsAt/1000)` (`action.expiry must outlive the auction window`).
+3. `action.data` ABI-decodes as `RfqOrder` with **exactly one trade**, and that trade matches the RFQ exactly: `trade.asset == instrument.optionAsset`, `trade.subId == instrument.subId`, `trade.amount == +rfq.amount` (positive — you receive what the taker sells), `trade.price > 0`.
+4. EIP-712 signature recovers to `action.signer` (`invalid EIP-712 signature`).
+5. On-chain reads: `Matching.subAccountToOwner(action.subaccountId)` must equal your address (`subaccount N is not deposited into Matching by 0x...`), and your cash balance must cover `trade.price * trade.amount / 1e18 + maxFee` (`insufficient maker cash: balance X < required Y`).
+6. After the chain reads, the window is re-checked — a quote that straddles the close is rejected with `auction window closed`. **Budget your latency: RPC round-trips happen inside the window.**
+
+<Note>
+- You may submit **multiple quotes** for the same RFQ (e.g. to improve your bid). All admitted quotes are kept and the best wins; there is **no cancel/replace** message — a submitted quote cannot be withdrawn (it dies only with its `action.expiry`). The reference bot quotes once per RFQ.
+- Quotes are sealed: nothing about competitor quotes is sent to you while the auction is open.
+</Note>
+
+## Auction close, win/loss, execution
+
+When the window ends, **every** authenticated maker receives:
+
+```json
+{ "type": "rfq_closed",
+  "rfqId": "501329a3-...",
+  "bestQuoteId": "8a2b4c...",
+  "won": true }
+```
+
+- `bestQuoteId` is `null` if zero valid quotes arrived (the RFQ status moves to `expired`).
+- `won: true` is present **only on the winning maker's socket**; there is no explicit `lost` flag — infer loss from the absence of `won`.
+- Losers are **not** told the winning premium, only the winning `quoteId`.
+
+If your quote won, the RFQ moves to `closed` and waits for the taker to accept. The taker signs a `TakerOrder{orderHash, maxFee}` over the hash of *your* trades and POSTs it to `/rfq/:id/accept`; the engine then submits `Matching.verifyAndMatch` on-chain. On success all authenticated makers receive:
+
+```json
+{ "type": "rfq_executed", "rfqId": "501329a3-...", "txHash": "0x2d5d7c88..." }
+```
+
+<Warning>
+**Gaps in the current notification surface (not yet implemented):**
+
+- There is **no taker-accept deadline** and **no notification if the taker never accepts**. Your signed quote simply ages out at `action.expiry` (the engine refuses to execute against an expired maker action: `winning maker quote has expired`). Size your quote TTL accordingly — see [Risk & ops](/market-makers/risk-ops#quote-ttls).
+- If execution **fails on-chain** (revert), the engine emits an internal `rfq_failed` event that is pushed to taker subscribers only — **makers get no message**. Poll `GET /rfq/:id` if you need resolution; a reverted execution does *not* burn your nonce, so the action technically remains valid until expiry.
+- No fill report with realized fees is pushed to the maker; the on-chain `RFQTradeCompleted`/`FeeCharged` events and the REST status response are the records.
+</Warning>
+
+## REST status (useful for reconciliation)
+
+`GET /rfq/:id` → `200`:
+
+```json
+{
+  "rfq": { "...": "PublicRfq as in the broadcast; status reflects lifecycle" },
+  "quoteCount": 1,
+  "bestQuote": {
+    "quoteId": "8a2b4c...",
+    "maker": "0x5c9C...",
+    "makerSubaccountId": "5",
+    "premium": "378586807763808053551",
+    "totalPremium": "378586807763808053551",
+    "orderHash": "0xda4e1328...",
+    "trades": [ { "asset": "0xD0dD...", "subId": "3961411089...", "price": "3785868...", "amount": "1000000000000000000" } ],
+    "actionExpiry": "1781770368"
+  },
+  "execution": { "txHash": "0x2d5d...", "status": "success", "blockNumber": "112792281" },
+  "error": null
+}
+```
+
+- `bestQuote` is `null` until the window closes with at least one quote; `premium` is per-unit 18dp, `totalPremium = premium × amount / 1e18`.
+- `orderHash` is `keccak256(abi.encode(trades))` — what the taker signs.
+- `execution` is `null` pre-execution; `error` is set when `status === "failed"`.
+
+Error codes: `404` unknown RFQ; accept returns `409` on validation failure, `502` on on-chain failure, `200` on success.
