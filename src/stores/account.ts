@@ -43,6 +43,6 @@ export const useAccountStore = create<AccountState>()(
         return id ? BigInt(id) : null;
       },
     }),
-    { name: "sats-options.subaccounts" }
+    { name: "hedge.subaccounts" }
   )
 );

@@ -10,10 +10,10 @@ importers:
 
   e2e:
     dependencies:
-      '@sats-options/oracle-feeds':
+      '@hedge/oracle-feeds':
         specifier: workspace:*
         version: link:../oracle-feeds
-      '@sats-options/shared':
+      '@hedge/shared':
         specifier: workspace:*
         version: link:../shared
       viem:
@@ -32,7 +32,7 @@ importers:
 
   maker-bot:
     dependencies:
-      '@sats-options/shared':
+      '@hedge/shared':
         specifier: workspace:*
         version: link:../shared
       viem:
@@ -60,7 +60,7 @@ importers:
 
   oracle-feeds:
     dependencies:
-      '@sats-options/shared':
+      '@hedge/shared':
         specifier: workspace:*
         version: link:../shared
       viem:
@@ -82,7 +82,7 @@ importers:
 
   rfq-engine:
     dependencies:
-      '@sats-options/shared':
+      '@hedge/shared':
         specifier: workspace:*
         version: link:../shared
       viem:

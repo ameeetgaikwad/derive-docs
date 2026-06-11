@@ -21,7 +21,7 @@
  * Matching.verifyAndMatch.
  */
 import type { Address, Hex } from "viem";
-import type { Action } from "@sats-options/shared";
+import type { Action } from "@hedge/shared";
 
 // ---------------------------------------------------------------------------
 // Wire types (mirroring rfq-engine/src/types.ts)

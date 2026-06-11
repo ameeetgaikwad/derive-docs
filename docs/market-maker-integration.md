@@ -1,6 +1,6 @@
-# sats-options — Market-Maker Integration Guide (BSC Testnet)
+# Hedge — Market-Maker Integration Guide (BSC Testnet)
 
-**Audience:** integration engineers at trading firms running quoting bots against sats-options retail
+**Audience:** integration engineers at trading firms running quoting bots against Hedge retail
 covered-call flow.
 
 **Status:** live on BSC testnet (chainId **97**) as of 2026-06-11. Mainnet (BSC, 56) not yet deployed.
@@ -27,7 +27,7 @@ marked **not yet implemented** rather than speculated.
 
 ## 1. Overview
 
-sats-options is an on-chain options protocol on BNB Chain, forked from Derive v2. The v1 product is
+Hedge is an on-chain options protocol on BNB Chain, forked from Derive v2. The v1 product is
 **fully-collateralized BTC covered calls sold by retail takers to market makers via RFQ**:
 
 - **What you are buying.** Retail users ("takers") deposit BTCB into a subaccount and sell European
@@ -56,7 +56,7 @@ Components you interact with:
 |---|---|---|
 | rfq-engine | WS/REST auction service + on-chain executor | `services/rfq-engine` |
 | maker-bot | Reference maker implementation (this is what you adapt) | `services/maker-bot` |
-| shared SDK | TypeScript signing/encoding library (`@sats-options/shared`) | `services/shared` |
+| shared SDK | TypeScript signing/encoding library (`@hedge/shared`) | `services/shared` |
 | Protocol contracts | Matching + RfqModule + SubAccounts + SRM + feeds | `protocol/`, addresses in `protocol/deployments/97.json` |
 
 ---
@@ -171,10 +171,10 @@ Immediately on connect the server sends a challenge:
 
 ```json
 { "type": "auth_challenge",
-  "challenge": "sats-options rfq-engine maker auth 1c1f7b3e-83b7-4d54-9f3e-0db1b15c2f11 1781770000000" }
+  "challenge": "Hedge rfq-engine maker auth 1c1f7b3e-83b7-4d54-9f3e-0db1b15c2f11 1781770000000" }
 ```
 
-The challenge is `sats-options rfq-engine maker auth <uuid> <ms-timestamp>`, unique per connection.
+The challenge is `Hedge rfq-engine maker auth <uuid> <ms-timestamp>`, unique per connection.
 You sign it as an **EIP-191 personal message** (`personal_sign` / viem `account.signMessage` — *not*
 EIP-712) with the EOA that owns your subaccount, and reply:
 
@@ -489,7 +489,7 @@ uint96 subId = expiry | (strike/1e10) << 32 | isCall << 95
 Worked: `BTC-20260619-69000-C` → `1781856000 | (69000e18/1e10)<<32 | 1<<95`
 = `39614110892406511198553831168`. ✔ (matches the live trade)
 
-### 4.6 TypeScript: build and sign a quote with `@sats-options/shared`
+### 4.6 TypeScript: build and sign a quote with `@hedge/shared`
 
 This is the exact path the reference bot takes (`services/maker-bot/src/quoter.ts`):
 
@@ -498,7 +498,7 @@ import { privateKeyToAccount } from "viem/accounts";
 import {
   buildAction, encodeRfqOrder, hashRfqTrades, signAction,
   type RfqTradeData,
-} from "@sats-options/shared";
+} from "@hedge/shared";
 
 const account = privateKeyToAccount(process.env.PRIVATE_KEY as `0x${string}`);
 
@@ -759,7 +759,7 @@ chain 97 must be a legacy transaction with an explicit gasPrice of 0.2 gwei** (`
 
 - `cast`/`forge`: `--legacy --with-gas-price 200000000` (and prefer `--retries 12 --delay 5`,
   public RPCs are flaky).
-- viem: use `makeWalletClient` from `@sats-options/shared` — it forces
+- viem: use `makeWalletClient` from `@hedge/shared` — it forces
   `{ type: "legacy", gasPrice: 200000000n }` on every write on chain 97 and retries
   `nonce too low` errors caused by load-balanced lagging nodes.
 - This applies only to *your* setup/withdrawal transactions; fills are sent by our executor, which
@@ -785,8 +785,8 @@ Prereqs: Node 22, pnpm, foundry's `cast`, a fresh EOA key, ~0.05 tBNB from a fau
 # 0. Clone + install (5 min)
 git clone <this repo> && cd derive/services
 pnpm install
-pnpm --filter @sats-options/shared build
-pnpm --filter @sats-options/maker-bot build
+pnpm --filter @hedge/shared build
+pnpm --filter @hedge/maker-bot build
 
 # 1. Env — every maker-bot command reads these
 export CHAIN_ID=97
@@ -800,16 +800,16 @@ cast send 0x9896AF08d261E52a629EF58cBebd32E8e0AA8eA9 \
   --rpc-url $RPC_URL --private-key $PRIVATE_KEY --legacy --gas-price 200000000
 
 # 3. One-time setup: subaccount under Matching + 150k USDT cash (3 txs, ~2 min)
-DEPOSIT_USDT=150000 pnpm --filter @sats-options/maker-bot setup
+DEPOSIT_USDT=150000 pnpm --filter @hedge/maker-bot setup
 # -> "[setup] done: subaccount=<N> cash=150000 USDT"; id persisted to maker-state.97.json
 
 # 4. Sanity-check pricing offline (no chain, no WS)
-pnpm --filter @sats-options/maker-bot exec maker-bot price \
+pnpm --filter @hedge/maker-bot exec maker-bot price \
   --forward 62790 --strike 69000 --days 8 --vol 0.6 --rate 0.05
 # -> { theo: ~398, bid: ~378 (0.95x), ask: ~418 (1.05x) }
 
 # 5. Run the bot
-pnpm --filter @sats-options/maker-bot dev
+pnpm --filter @hedge/maker-bot dev
 # [maker-bot] chain=97 owner=0x... subaccount=N
 # [transport] authenticated as 0x...
 # ...waits for rfq_open, prices off the on-chain feeds, quotes automatically

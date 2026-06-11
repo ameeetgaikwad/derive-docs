@@ -1,6 +1,6 @@
-# sats-options protocol — deployment workspace
+# Hedge protocol — deployment workspace
 
-Foundry workspace that deploys and wires the full sats-options v1 on-chain system
+Foundry workspace that deploys and wires the full Hedge v1 on-chain system
 (BTC covered calls sold to market makers via RFQ), built entirely from the vendored,
 pinned, read-only sources in `lib/v2-core` and `lib/v2-matching` (see `PROVENANCE.md`).
 

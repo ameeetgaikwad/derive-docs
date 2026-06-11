@@ -28,10 +28,10 @@ Immediately on connect the server sends a challenge:
 
 ```json
 { "type": "auth_challenge",
-  "challenge": "sats-options rfq-engine maker auth 1c1f7b3e-83b7-4d54-9f3e-0db1b15c2f11 1781770000000" }
+  "challenge": "Hedge rfq-engine maker auth 1c1f7b3e-83b7-4d54-9f3e-0db1b15c2f11 1781770000000" }
 ```
 
-The challenge is `sats-options rfq-engine maker auth <uuid> <ms-timestamp>`, unique per connection. You sign it as an **EIP-191 personal message** (`personal_sign` / viem `account.signMessage` — *not* EIP-712) with the EOA that owns your subaccount, and reply:
+The challenge is `Hedge rfq-engine maker auth <uuid> <ms-timestamp>`, unique per connection. You sign it as an **EIP-191 personal message** (`personal_sign` / viem `account.signMessage` — *not* EIP-712) with the EOA that owns your subaccount, and reply:
 
 ```json
 { "type": "auth", "address": "0x5c9Ca4A3f39Cf36C968402C8E933cB2979882BF8", "signature": "0x..." }

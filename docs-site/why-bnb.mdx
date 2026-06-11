@@ -1,12 +1,12 @@
 ---
 title: "Why BNB Chain & licensing"
-description: "Why sats Options deploys directly on BNB Chain L1, and the open-source provenance of the protocol contracts."
+description: "Why Hedge deploys directly on BNB Chain L1, and the open-source provenance of the protocol contracts."
 icon: "link"
 ---
 
 ## Why BNB Chain L1
 
-sats Options deploys directly on BNB Chain (BSC) L1 — not on its own app-chain, and not on an L2. The reasoning:
+Hedge deploys directly on BNB Chain (BSC) L1 — not on its own app-chain, and not on an L2. The reasoning:
 
 <CardGroup cols={2}>
   <Card title="Fast, cheap blockspace" icon="zap">
@@ -25,7 +25,7 @@ sats Options deploys directly on BNB Chain (BSC) L1 — not on its own app-chain
 
 ### Why not an app-chain or L2?
 
-Protocols that run their own chain typically do so because portfolio-margin risk checks burn tens of millions of gas per trade, forcing a private sequencer. sats Options v1 uses standard margin with an RFQ execution path — cheap enough for shared blockspace. Running an app-chain would have meant sequencer operations, bridge liquidity bootstrapping, and onboarding friction for market makers, while forfeiting BNB-native distribution. The chain question gets revisited only if the protocol evolves into sub-100 ms cross-margined order-book territory.
+Protocols that run their own chain typically do so because portfolio-margin risk checks burn tens of millions of gas per trade, forcing a private sequencer. Hedge v1 uses standard margin with an RFQ execution path — cheap enough for shared blockspace. Running an app-chain would have meant sequencer operations, bridge liquidity bootstrapping, and onboarding friction for market makers, while forfeiting BNB-native distribution. The chain question gets revisited only if the protocol evolves into sub-100 ms cross-margined order-book territory.
 
 Settlement-critical transactions are submitted by the protocol's executor; private transaction relays are used to keep executor flow out of the public mempool.
 
@@ -41,8 +41,8 @@ The on-chain contracts are a **fork of audited, open-source options-protocol con
 
 What this means in practice:
 
-- **Audited foundation.** The base contracts were audited by **Sigma Prime** (reports are public). sats Options pins the audited snapshot, keeps the vendored source read-only, and limits its own surface to deployment scripts, configuration, and the off-chain services. Changes relative to the base are the natural target for differential audits.
-- **Full rebrand, no trademarks.** GPL and AGPL grant code rights, not trademark rights. sats Options is an independent deployment with its own name, domain separator, addresses, and operations — it has no affiliation with, or endorsement from, the upstream protocol's authors.
+- **Audited foundation.** The base contracts were audited by **Sigma Prime** (reports are public). Hedge pins the audited snapshot, keeps the vendored source read-only, and limits its own surface to deployment scripts, configuration, and the off-chain services. Changes relative to the base are the natural target for differential audits.
+- **Full rebrand, no trademarks.** GPL and AGPL grant code rights, not trademark rights. Hedge is an independent deployment with its own name, domain separator, addresses, and operations — it has no affiliation with, or endorsement from, the upstream protocol's authors.
 - **Copyleft honored.** Modifications to AGPL-licensed code are published. On-chain bytecode is source-verified on BscScan.
 - **Clean-room where required.** Components without clear licensing upstream (e.g. off-chain matching engines and client tooling) were **not** forked — the RFQ engine, feed poster, and maker bot are original implementations.
 

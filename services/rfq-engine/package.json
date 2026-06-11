@@ -1,5 +1,5 @@
 {
-  "name": "@sats-options/rfq-engine",
+  "name": "@hedge/rfq-engine",
   "version": "0.1.0",
   "private": true,
   "description": "RFQ auction + execution service: maker WS channel, taker REST/WS, on-chain RfqModule executor",
@@ -16,7 +16,7 @@
     "smoke": "pnpm build && vitest run"
   },
   "dependencies": {
-    "@sats-options/shared": "workspace:*",
+    "@hedge/shared": "workspace:*",
     "viem": "^2.21.0",
     "ws": "^8.18.0"
   },

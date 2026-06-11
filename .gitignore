@@ -40,7 +40,7 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
-# sats-options protocol (vendored repos restored via protocol/setup-vendor.sh)
+# hedge protocol (vendored repos restored via protocol/setup-vendor.sh)
 /protocol/lib/
 /protocol/out/
 /protocol/cache/

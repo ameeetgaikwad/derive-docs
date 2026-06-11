@@ -60,7 +60,7 @@ Keep your subaccount's cash comfortably above your worst-case `Σ(open quotes: p
 BSC testnet public nodes mishandle EIP-1559 fee fields (the chain reports a zero base fee), so 1559-typed transactions fail with `insufficient funds: have 0`. **Every transaction you send on chain 97 must be a legacy transaction with an explicit gasPrice of 0.2 gwei** (`200000000` wei).
 
 - `cast`/`forge`: `--legacy --with-gas-price 200000000` (and prefer `--retries 12 --delay 5` — public RPCs are flaky).
-- viem: use `makeWalletClient` from `@sats-options/shared` — it forces `{ type: "legacy", gasPrice: 200000000n }` on every write on chain 97 and retries `nonce too low` errors caused by load-balanced lagging nodes.
+- viem: use `makeWalletClient` from `@hedge/shared` — it forces `{ type: "legacy", gasPrice: 200000000n }` on every write on chain 97 and retries `nonce too low` errors caused by load-balanced lagging nodes.
 - This applies only to *your* setup/withdrawal transactions; fills are sent by the executor, which already does this.
 
 ## Engine availability semantics

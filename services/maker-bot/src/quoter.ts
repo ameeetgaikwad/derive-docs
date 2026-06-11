@@ -11,7 +11,7 @@ import {
   type Action,
   type RfqTradeData,
   type TypedDataSigner,
-} from "@sats-options/shared";
+} from "@hedge/shared";
 import { black76Price, yearsToExpiry } from "./black76.js";
 import type { MarketInputs, PriceSource } from "./pricing.js";
 

@@ -1,6 +1,6 @@
-# @sats-options/e2e
+# @hedge/e2e
 
-End-to-end acceptance harness for the full sats-options v1 covered-call flow
+End-to-end acceptance harness for the full Hedge v1 covered-call flow
 (SPEC.md "E2E acceptance"). One command spins up a fresh anvil, deploys the
 protocol, posts signed feeds, funds and opens maker/taker subaccounts, runs a
 live RFQ auction through the real `rfq-engine` + `maker-bot`, executes the
@@ -16,7 +16,7 @@ pnpm install
 pnpm -r build
 
 # the one command:
-pnpm --filter @sats-options/e2e e2e
+pnpm --filter @hedge/e2e e2e
 ```
 
 Results are written to `protocol/E2E.md` (stage-by-stage, tx hashes, balance

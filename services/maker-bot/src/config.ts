@@ -1,6 +1,6 @@
 import { privateKeyToAccount, type PrivateKeyAccount } from "viem/accounts";
 import type { Hex } from "viem";
-import { DEFAULT_RPC_URL, getChainId, getRpcUrl } from "@sats-options/shared";
+import { DEFAULT_RPC_URL, getChainId, getRpcUrl } from "@hedge/shared";
 
 export interface MakerBotConfig {
   chainId: number;

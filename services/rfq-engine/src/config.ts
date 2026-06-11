@@ -4,7 +4,7 @@ import {
   getRpcUrl,
   requireDeployments,
   getDeployedAddress,
-} from "@sats-options/shared";
+} from "@hedge/shared";
 
 /** anvil account #0 — the registered trade executor in deployments/31337.json */
 export const ANVIL_EXECUTOR_KEY: Hex =

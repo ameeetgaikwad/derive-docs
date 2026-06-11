@@ -1,6 +1,6 @@
-# @sats-options/maker-bot
+# @hedge/maker-bot
 
-Reference market-maker bot for sats-options. It is the counterparty in the v1
+Reference market-maker bot for Hedge. It is the counterparty in the v1
 covered-call flow: it listens for RFQ broadcasts from the rfq-engine, prices
 BTC options with Black-76, applies a configurable spread, and responds with a
 fully EIP-712-signed maker `RfqModule` Action that the engine can pass straight
@@ -10,20 +10,20 @@ into `Matching.verifyAndMatch` as `actions[0]`.
 
 ```sh
 pnpm install                      # from services/
-pnpm --filter @sats-options/maker-bot build
+pnpm --filter @hedge/maker-bot build
 
 # one-time self-setup: create a subaccount under Matching (SRM-managed) and
 # deposit USDT cash so the maker can pay premiums and pass SRM margin
-PRIVATE_KEY=0x... DEPOSIT_USDT=100000 pnpm --filter @sats-options/maker-bot setup
+PRIVATE_KEY=0x... DEPOSIT_USDT=100000 pnpm --filter @hedge/maker-bot setup
 
 # run the quoting bot
-PRIVATE_KEY=0x... pnpm --filter @sats-options/maker-bot dev
+PRIVATE_KEY=0x... pnpm --filter @hedge/maker-bot dev
 ```
 
 Smoke check (no chain needed):
 
 ```sh
-pnpm --filter @sats-options/maker-bot smoke
+pnpm --filter @hedge/maker-bot smoke
 # = build + vitest (Black-76 vs numeric-integration reference, signing round-trip)
 #   + an offline `price` CLI invocation
 ```
@@ -69,7 +69,7 @@ as decimal strings.
 
 ```jsonc
 // engine -> maker, on connect
-{ "type": "auth_challenge", "challenge": "sats-options rfq-engine maker auth <uuid> <ts>" }
+{ "type": "auth_challenge", "challenge": "Hedge rfq-engine maker auth <uuid> <ts>" }
 
 // maker -> engine: EIP-191 personal-sign of the challenge string
 { "type": "auth", "address": "0x..", "signature": "0x.." }

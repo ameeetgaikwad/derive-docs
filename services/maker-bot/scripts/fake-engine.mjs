@@ -45,7 +45,7 @@ const timeout = setTimeout(() => {
 }, 30_000);
 
 wss.on("connection", (sock) => {
-  const challenge = `sats-options rfq-engine maker auth ${randomUUID()} ${Date.now()}`;
+  const challenge = `hedge rfq-engine maker auth ${randomUUID()} ${Date.now()}`;
   sock.send(JSON.stringify({ type: "auth_challenge", challenge }));
 
   sock.on("message", (raw) => {

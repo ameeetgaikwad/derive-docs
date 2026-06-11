@@ -14,7 +14,7 @@ import {
   getChain,
   makeWalletClient,
   type Action,
-} from "@sats-options/shared";
+} from "@hedge/shared";
 
 /**
  * Read-side chain boundary — mocked in tests, viem-backed in production.

@@ -1,5 +1,5 @@
 {
-  "name": "@sats-options/maker-bot",
+  "name": "@hedge/maker-bot",
   "version": "0.1.0",
   "private": true,
   "description": "Reference market-maker bot: Black-76 pricing, auto-quoting RFQs over the rfq-engine maker WS",
@@ -19,7 +19,7 @@
     "smoke": "pnpm build && vitest run && node dist/index.js price --forward 100000 --strike 110000 --days 7 --vol 0.6"
   },
   "dependencies": {
-    "@sats-options/shared": "workspace:*",
+    "@hedge/shared": "workspace:*",
     "viem": "^2.21.0"
   },
   "devDependencies": {

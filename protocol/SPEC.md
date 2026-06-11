@@ -1,8 +1,8 @@
-# sats-options — BNB on-chain options protocol (build spec)
+# Hedge — BNB on-chain options protocol (build spec)
 
 Goal: a fully on-chain options protocol on BNB Chain, forked from Derive v2 (see PROVENANCE.md),
 launching as **fully-collateralized BTC covered calls sold to market makers via RFQ**.
-This spec coordinates the initial build. Working name: `sats-options` (rebrand later).
+This spec coordinates the initial build. Working name: `Hedge` (rebrand later).
 
 ## Repo layout
 

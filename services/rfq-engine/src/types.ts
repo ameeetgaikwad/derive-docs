@@ -1,5 +1,5 @@
 import type { Address, Hex } from "viem";
-import type { Action, RfqTradeData } from "@sats-options/shared";
+import type { Action, RfqTradeData } from "@hedge/shared";
 
 // ---------------------------------------------------------------------------
 // Domain types (internal — bigints everywhere, 18dp protocol units)

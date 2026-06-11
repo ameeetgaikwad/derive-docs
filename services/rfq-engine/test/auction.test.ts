@@ -10,7 +10,7 @@ import {
   signAction,
   toUnit,
   type Action,
-} from "@sats-options/shared";
+} from "@hedge/shared";
 import { AuctionEngine } from "../src/auction.js";
 import type { ChainReader, SubmitResult, TxSubmitter } from "../src/chain.js";
 import { Executor } from "../src/executor.js";

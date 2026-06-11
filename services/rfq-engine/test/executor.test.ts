@@ -21,7 +21,7 @@ import {
   toUnit,
   type Action,
   type RfqTradeData,
-} from "@sats-options/shared";
+} from "@hedge/shared";
 import { buildRfqExecution } from "../src/executor.js";
 import type { Quote, Rfq } from "../src/types.js";
 

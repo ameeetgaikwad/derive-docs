@@ -114,14 +114,14 @@ Worked: `BTC-20260619-69000-C` → `1781856000 | (69000e18/1e10)<<32 | 1<<95` = 
 
 <Tabs>
   <Tab title="TypeScript (SDK)">
-    The exact path the reference bot takes, using `@sats-options/shared`:
+    The exact path the reference bot takes, using `@hedge/shared`:
 
     ```ts
     import { privateKeyToAccount } from "viem/accounts";
     import {
       buildAction, encodeRfqOrder, hashRfqTrades, signAction,
       type RfqTradeData,
-    } from "@sats-options/shared";
+    } from "@hedge/shared";
 
     const account = privateKeyToAccount(process.env.PRIVATE_KEY as `0x${string}`);
 

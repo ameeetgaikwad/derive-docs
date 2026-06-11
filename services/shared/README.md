@@ -1,6 +1,6 @@
-# @sats-options/shared
+# @hedge/shared
 
-Shared TypeScript library for all sats-options services (rfq-engine, oracle-feeds,
+Shared TypeScript library for all Hedge services (rfq-engine, oracle-feeds,
 maker-bot, e2e). Node 22 + pnpm + viem, strict TS, ESM.
 
 Everything protocol-facing in here is verified against the vendored, pinned

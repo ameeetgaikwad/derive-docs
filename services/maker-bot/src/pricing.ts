@@ -7,7 +7,7 @@ import {
   lyraSpotFeedAbi,
   lyraVolFeedAbi,
   type DeploymentsFile,
-} from "@sats-options/shared";
+} from "@hedge/shared";
 import type { MakerBotConfig } from "./config.js";
 
 /** Market inputs for a single option (per expiry/strike). */

@@ -1,10 +1,10 @@
 ---
 title: "Architecture"
-description: "The layered design of sats Options: on-chain settlement contracts, an off-chain RFQ auction layer, and signed price feeds."
+description: "The layered design of Hedge: on-chain settlement contracts, an off-chain RFQ auction layer, and signed price feeds."
 icon: "layers"
 ---
 
-sats Options is built as three layers. The bottom layer — the contracts — is where all value lives and all rules are enforced. The layers above it only coordinate signatures and data; they can never move funds outside what a user has signed.
+Hedge is built as three layers. The bottom layer — the contracts — is where all value lives and all rules are enforced. The layers above it only coordinate signatures and data; they can never move funds outside what a user has signed.
 
 ```mermaid
 flowchart TB
@@ -78,4 +78,4 @@ An on-chain order book needs resting orders, cancels, and high-frequency updates
 
 ## Provenance
 
-The settlement contracts are a **fork of audited, open-source protocol contracts** (GPL-3.0 core, AGPL-3.0 matching layer) whose base was audited by Sigma Prime. sats Options pins the forked snapshot, deploys it with its own scripts, and treats the vendored source as read-only; modifications to the AGPL matching layer are published as the license requires. Full licensing detail in [Why BNB Chain & licensing](/why-bnb#licensing-and-provenance).
+The settlement contracts are a **fork of audited, open-source protocol contracts** (GPL-3.0 core, AGPL-3.0 matching layer) whose base was audited by Sigma Prime. Hedge pins the forked snapshot, deploys it with its own scripts, and treats the vendored source as read-only; modifications to the AGPL matching layer are published as the license requires. Full licensing detail in [Why BNB Chain & licensing](/why-bnb#licensing-and-provenance).

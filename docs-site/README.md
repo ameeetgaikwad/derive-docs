@@ -1,6 +1,6 @@
-# sats Options — documentation site
+# Hedge — documentation site
 
-Mintlify documentation for the sats Options protocol. Content lives in `.mdx` pages; site config (branding, navigation) in `docs.json`.
+Mintlify documentation for the Hedge protocol. Content lives in `.mdx` pages; site config (branding, navigation) in `docs.json`.
 
 ## Local preview
 
@@ -32,4 +32,4 @@ Notes:
 
 - `docs.json` is the single source of truth for navigation — a page not listed there is not reachable from the sidebar.
 - Logo/favicon are placeholder SVGs in `logo/` and `favicon.svg`; replace when real branding lands.
-- The protocol name "sats Options" is a working name; update `docs.json` (`name`, logos) on rebrand.
+- The protocol name "Hedge" is a working name; update `docs.json` (`name`, logos) on rebrand.

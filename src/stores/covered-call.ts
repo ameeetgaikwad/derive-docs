@@ -51,6 +51,6 @@ export const useCoveredCallStore = create<CoveredCallState>()(
 
       reset: () => set({ trades: [] }),
     }),
-    { name: "sats-options.covered-calls" }
+    { name: "hedge.covered-calls" }
   )
 );

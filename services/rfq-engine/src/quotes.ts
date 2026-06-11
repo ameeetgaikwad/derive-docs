@@ -8,7 +8,7 @@ import {
   type RfqOrder,
   type RfqTradeData,
   type TakerOrder,
-} from "@sats-options/shared";
+} from "@hedge/shared";
 import type { ChainReader } from "./chain.js";
 import { addressEq, type Quote, type Rfq } from "./types.js";
 

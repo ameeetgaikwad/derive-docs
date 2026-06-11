@@ -1,7 +1,7 @@
-# @sats-options/rfq-engine
+# @hedge/rfq-engine
 
 RFQ auction + execution service — the "sell order flow to market makers" core
-of sats-options. Takers (covered-call sellers) open short auctions; connected
+of Hedge. Takers (covered-call sellers) open short auctions; connected
 market makers stream back EIP-712-signed quotes targeting the on-chain
 `RfqModule`; the best (highest-premium) quote wins; on taker accept the
 service submits `Matching.verifyAndMatch` as the registered trade executor.
@@ -18,12 +18,12 @@ Everything protocol-facing is verified against the vendored pinned Solidity
 ```sh
 # from services/
 pnpm install
-pnpm --filter @sats-options/rfq-engine build
+pnpm --filter @hedge/rfq-engine build
 
 # anvil defaults: RPC http://127.0.0.1:8545, chain 31337, executor = anvil key #0
-pnpm --filter @sats-options/rfq-engine dev      # tsx watch src/index.ts
+pnpm --filter @hedge/rfq-engine dev      # tsx watch src/index.ts
 # or after build:
-pnpm --filter @sats-options/rfq-engine start
+pnpm --filter @hedge/rfq-engine start
 ```
 
 Startup requires `protocol/deployments/<chainId>.json` (written by the deploy
@@ -44,7 +44,7 @@ script) and verifies on-chain that the executor key is registered via
 ### Smoke check
 
 ```sh
-pnpm --filter @sats-options/rfq-engine smoke    # build + vitest
+pnpm --filter @hedge/rfq-engine smoke    # build + vitest
 ```
 
 The vitest suite spins the real server on an ephemeral port, registers fake

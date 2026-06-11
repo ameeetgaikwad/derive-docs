@@ -1,7 +1,7 @@
 {
   "$schema": "https://mintlify.com/docs.json",
   "theme": "mint",
-  "name": "sats Options",
+  "name": "Hedge",
   "description": "On-chain BTC options on BNB Chain. Fully collateralized covered calls, sold to market makers via sealed-bid RFQ auctions.",
   "colors": {
     "primary": "#F7931A",
@@ -104,7 +104,7 @@
     }
   },
   "search": {
-    "prompt": "Search sats Options docs..."
+    "prompt": "Search Hedge docs..."
   },
   "seo": {
     "indexing": "navigable"

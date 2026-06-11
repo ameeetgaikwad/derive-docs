@@ -1,5 +1,5 @@
 {
-  "name": "@sats-options/e2e",
+  "name": "@hedge/e2e",
   "version": "0.1.0",
   "private": true,
   "description": "End-to-end acceptance harness: anvil -> deploy -> feeds -> RFQ covered-call trade -> settlement (OTM + ITM)",
@@ -15,8 +15,8 @@
     "smoke": "pnpm build && tsx src/run.ts"
   },
   "dependencies": {
-    "@sats-options/oracle-feeds": "workspace:*",
-    "@sats-options/shared": "workspace:*",
+    "@hedge/oracle-feeds": "workspace:*",
+    "@hedge/shared": "workspace:*",
     "viem": "^2.21.0"
   },
   "devDependencies": {

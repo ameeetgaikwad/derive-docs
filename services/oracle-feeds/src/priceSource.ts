@@ -1,5 +1,5 @@
 import type { Address, PublicClient } from "viem";
-import { toUnit } from "@sats-options/shared";
+import { toUnit } from "@hedge/shared";
 
 /** Spot price source. Prices are 18dp (the protocol's internal unit). */
 export interface PriceSource {

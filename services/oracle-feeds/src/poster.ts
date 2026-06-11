@@ -14,7 +14,7 @@ import {
   signFeedData,
   toUnit,
   type FeedKind,
-} from "@sats-options/shared";
+} from "@hedge/shared";
 import { annualise, flatIvSviParams, type SviParams } from "./svi.js";
 
 const ONE = 10n ** 18n;

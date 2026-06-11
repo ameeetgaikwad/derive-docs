@@ -26,7 +26,7 @@ import {
   subAccountsAbi,
   toTokenAmount,
   type DeploymentsFile,
-} from "@sats-options/shared";
+} from "@hedge/shared";
 import type { PrivateKeyAccount } from "viem/accounts";
 import type { MakerBotConfig } from "./config.js";
 import { readState, writeState } from "./state.js";

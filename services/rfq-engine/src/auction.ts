@@ -1,6 +1,6 @@
 import { EventEmitter } from "node:events";
 import type { Address, Hex } from "viem";
-import { encodeOptionSubId, instrumentName, toUnit, type Action } from "@sats-options/shared";
+import { encodeOptionSubId, instrumentName, toUnit, type Action } from "@hedge/shared";
 import type { ChainReader } from "./chain.js";
 import { QuoteValidationError, validateQuote, validateTakerAccept } from "./quotes.js";
 import type { RfqStore } from "./store.js";

@@ -15,7 +15,7 @@ import {
   hashFeedData,
   signFeedData,
   toUnit,
-} from "@sats-options/shared";
+} from "@hedge/shared";
 import { annualise, flatIvSviParams, flatSviVol, SECONDS_PER_YEAR } from "../src/svi.js";
 import { SETTLEMENT_TWAP_DURATION } from "../src/poster.js";
 

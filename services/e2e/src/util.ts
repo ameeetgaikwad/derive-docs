@@ -212,7 +212,7 @@ export class Report {
 
   render(overall: "PASSED" | "FAILED"): string {
     const out: string[] = [];
-    out.push("# sats-options E2E acceptance run");
+    out.push("# hedge E2E acceptance run");
     out.push("");
     out.push(`**Result: ${overall}**`);
     out.push("");

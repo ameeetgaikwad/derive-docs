@@ -11,8 +11,8 @@ icon: "terminal"
     ```sh
     git clone <repo> && cd <repo>/services
     pnpm install
-    pnpm --filter @sats-options/shared build
-    pnpm --filter @sats-options/maker-bot build
+    pnpm --filter @hedge/shared build
+    pnpm --filter @hedge/maker-bot build
     ```
   </Step>
   <Step title="Set the environment">
@@ -36,20 +36,20 @@ icon: "terminal"
   </Step>
   <Step title="One-time setup: subaccount + cash (3 txs, ~2 min)">
     ```sh
-    DEPOSIT_USDT=150000 pnpm --filter @sats-options/maker-bot setup
+    DEPOSIT_USDT=150000 pnpm --filter @hedge/maker-bot setup
     # -> "[setup] done: subaccount=<N> cash=150000 USDT"; id persisted to maker-state.97.json
     ```
   </Step>
   <Step title="Sanity-check pricing offline (no chain, no WS)">
     ```sh
-    pnpm --filter @sats-options/maker-bot exec maker-bot price \
+    pnpm --filter @hedge/maker-bot exec maker-bot price \
       --forward 62790 --strike 69000 --days 8 --vol 0.6 --rate 0.05
     # -> { theo: ~398, bid: ~378 (0.95x), ask: ~418 (1.05x) }
     ```
   </Step>
   <Step title="Run the bot">
     ```sh
-    pnpm --filter @sats-options/maker-bot dev
+    pnpm --filter @hedge/maker-bot dev
     # [maker-bot] chain=97 owner=0x... subaccount=N
     # [transport] authenticated as 0x...
     # ...waits for rfq_open, prices off the on-chain feeds, quotes automatically

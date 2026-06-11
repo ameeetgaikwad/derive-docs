@@ -42,7 +42,7 @@ import {MockERC20} from "./mocks/MockERC20.sol";
 
 /**
  * @title DeployAll
- * @notice Deploys + wires the full sats-options v1 system (BTC covered calls via RFQ):
+ * @notice Deploys + wires the full hedge v1 system (BTC covered calls via RFQ):
  *         SubAccounts, InterestRateModel + CashAsset(USDT), SecurityModule, DutchAuction,
  *         StandardManager (SRM) + SRMPortfolioViewer, signed feeds (spot/forward/vol/rate +
  *         USDT stable feed), BTC OptionAsset + BTCB WrappedERC20Asset registered as the BTC
@@ -191,7 +191,7 @@ contract DeployAll is Script {
     uint nonce = vm.getNonce(deployer);
 
     // nonce
-    subAccounts = new SubAccounts("sats-options SubAccounts", "SATS-SA");
+    subAccounts = new SubAccounts("hedge SubAccounts", "SATS-SA");
     // nonce + 1
     rateModel = new InterestRateModel(IRM_MIN_RATE, IRM_RATE_MULTIPLIER, IRM_HIGH_RATE_MULTIPLIER, IRM_OPTIMAL_UTIL);
     // nonce + 2

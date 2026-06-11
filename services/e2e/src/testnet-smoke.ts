@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * sats-options LIVE smoke test on BSC TESTNET (chainId 97).
+ * hedge LIVE smoke test on BSC TESTNET (chainId 97).
  *
  * Adapted from src/run.ts (the anvil acceptance harness), minus everything
  * anvil-only: no anvil spawn, no forge deploy (the stack is already deployed,
@@ -23,7 +23,7 @@
  * TESTNET_TAKER_KEY, SPOT_USD (live BTC spot, decimal), STRIKE_USD.
  * Optional: EXPIRY (unix override), RFQ_PORT, SPOT_SOURCE (report note).
  *
- * All transactions go through @sats-options/shared makeWalletClient, which
+ * All transactions go through @hedge/shared makeWalletClient, which
  * forces LEGACY type + 0.2 gwei gasPrice on chain 97 (BSC testnet nodes
  * mishandle EIP-1559 fee fields).
  */
@@ -55,8 +55,8 @@ import {
   toUnit,
   wrappedErc20AssetAbi,
   type DeploymentsFile,
-} from "@sats-options/shared";
-import { FeedPoster, feedAddressesFromDeployments } from "@sats-options/oracle-feeds";
+} from "@hedge/shared";
+import { FeedPoster, feedAddressesFromDeployments } from "@hedge/oracle-feeds";
 import {
   assert,
   assertEq,

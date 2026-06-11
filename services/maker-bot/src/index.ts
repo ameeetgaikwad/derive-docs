@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * maker-bot — reference market maker for sats-options.
+ * maker-bot — reference market maker for hedge.
  *
  *   maker-bot                  run the quoting bot (needs PRIVATE_KEY + subaccount)
  *   maker-bot --setup          create subaccount under Matching + deposit USDT cash
@@ -14,7 +14,7 @@ import {
   makeWalletClient,
   readDeployments,
   toUnit,
-} from "@sats-options/shared";
+} from "@hedge/shared";
 import type { PublicClient } from "viem";
 import { black76Price } from "./black76.js";
 import { loadAccount, loadConfig } from "./config.js";

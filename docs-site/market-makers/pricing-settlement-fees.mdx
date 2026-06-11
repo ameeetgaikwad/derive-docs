@@ -19,7 +19,7 @@ The SRM margins and settlement run off on-chain signed feeds, posted by the prot
 The reference bot prices Black-76 on `forward`/`vol`/`rate` exactly from these reads, falling back to `getSpot()` when an expiry has no forward data yet. Price with your own marks by all means — but note that **margin and the OI fee are computed from *these* feeds**, and the engine's cash pre-check uses your quoted premium.
 
 <Note>
-On testnet the surface is currently a flat 60% IV SVI fit and feeds update only when posted — don't expect live-market dynamics. ABIs for all feeds ship in the TypeScript SDK (`@sats-options/shared`).
+On testnet the surface is currently a flat 60% IV SVI fit and feeds update only when posted — don't expect live-market dynamics. ABIs for all feeds ship in the TypeScript SDK (`@hedge/shared`).
 </Note>
 
 ## Settlement at expiry

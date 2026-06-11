@@ -1,7 +1,7 @@
-# @sats-options/oracle-feeds
+# @hedge/oracle-feeds
 
 Signed oracle feed poster (spot / forward / rate / SVI vol-surface) and option
-settlement runner for the sats-options protocol.
+settlement runner for the Hedge protocol.
 
 Everything here is verified against the vendored source:
 
@@ -18,8 +18,8 @@ Everything here is verified against the vendored source:
 
 ```sh
 pnpm install          # from services/
-pnpm --filter @sats-options/oracle-feeds build
-pnpm --filter @sats-options/oracle-feeds test   # smoke check (signing + SVI unit tests)
+pnpm --filter @hedge/oracle-feeds build
+pnpm --filter @hedge/oracle-feeds test   # smoke check (signing + SVI unit tests)
 ```
 
 Requires `protocol/deployments/<chainId>.json` (written by the deploy script).
@@ -46,7 +46,7 @@ Timestamps come from the **latest block** (anvil time warps are respected).
 Post spot $100k plus forward / 5% rate / flat 60%-IV SVI surface for a 7-day expiry:
 
 ```sh
-pnpm --filter @sats-options/oracle-feeds post -- \
+pnpm --filter @hedge/oracle-feeds post -- \
   --spot 100000 --expiry 1786000000 --iv 0.6 --rate 0.05
 ```
 
@@ -58,7 +58,7 @@ pnpm --filter @sats-options/oracle-feeds post -- \
 ## Interval daemon
 
 ```sh
-SPOT_PRICE=100000 pnpm --filter @sats-options/oracle-feeds daemon -- \
+SPOT_PRICE=100000 pnpm --filter @hedge/oracle-feeds daemon -- \
   --interval 15 --expiry 1786000000
 ```
 
@@ -71,7 +71,7 @@ the `PriceSource` interface for the testnet/mainnet rollout).
 After chain time passes the expiry (e2e warps anvil):
 
 ```sh
-pnpm --filter @sats-options/oracle-feeds settle -- \
+pnpm --filter @hedge/oracle-feeds settle -- \
   --expiry 1786000000 --price 120000 --subaccounts 4,5
 ```
 
@@ -91,5 +91,5 @@ The package also exports `FeedPoster`, `SettlementRunner`, `flatIvSviParams`,
 `annualise` and the `PriceSource` implementations for the e2e harness:
 
 ```ts
-import { FeedPoster, feedAddressesFromDeployments } from "@sats-options/oracle-feeds";
+import { FeedPoster, feedAddressesFromDeployments } from "@hedge/oracle-feeds";
 ```

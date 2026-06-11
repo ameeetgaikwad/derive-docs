@@ -4,10 +4,10 @@ description: "On-chain BTC options on BNB Chain — fully collateralized covered
 icon: "house"
 ---
 
-**sats Options** is an on-chain options protocol on BNB Chain. The first product is simple and conservative: **fully collateralized BTC covered calls**. You deposit BTCB, sell a call option against it, and competing market makers bid for your option in a sealed auction. The winning premium is paid to you **upfront, in USDT**, settled atomically on-chain.
+**Hedge** is an on-chain options protocol on BNB Chain. The first product is simple and conservative: **fully collateralized BTC covered calls**. You deposit BTCB, sell a call option against it, and competing market makers bid for your option in a sealed auction. The winning premium is paid to you **upfront, in USDT**, settled atomically on-chain.
 
 <Note>
-sats Options is **live on BSC testnet** (chain ID 97). Mainnet (BSC, chain ID 56) is not yet deployed. The name "sats Options" is a working name.
+Hedge is **live on BSC testnet** (chain ID 97). Mainnet (BSC, chain ID 56) is not yet deployed. The name "Hedge" is a working name.
 </Note>
 
 ## What is a covered call?
@@ -21,11 +21,11 @@ A covered call is one of the oldest and most conservative options strategies:
 At expiry there are two outcomes:
 
 - **BTC stays below the strike** — the option expires worthless. You keep your BTC *and* the premium. This is income on BTC you were holding anyway.
-- **BTC rises above the strike** — the buyer exercises. On sats Options the contract is cash-settled: you pay out the difference between the settlement price and the strike in USDT, while your BTCB stays in your account. Economically it's as if you sold your upside above the strike — which is the price you said you'd be happy to sell at.
+- **BTC rises above the strike** — the buyer exercises. On Hedge the contract is cash-settled: you pay out the difference between the settlement price and the strike in USDT, while your BTCB stays in your account. Economically it's as if you sold your upside above the strike — which is the price you said you'd be happy to sell at.
 
 The trade-off is explicit: you cap your upside above the strike in exchange for guaranteed income today. There is no leverage, no liquidation risk on the covered position, and no hidden counterparty — the position is fully collateralized by your BTCB on-chain.
 
-## How sats Options is different
+## How Hedge is different
 
 <CardGroup cols={2}>
   <Card title="Fully on-chain settlement" icon="link">

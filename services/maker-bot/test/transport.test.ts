@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { WebSocketServer, type WebSocket as WsSocket } from "ws";
 import { recoverAddress, verifyMessage, type Address, type Hex } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
-import { encodeOptionSubId, getActionDigest, hashRfqTrades, toUnit } from "@sats-options/shared";
+import { encodeOptionSubId, getActionDigest, hashRfqTrades, toUnit } from "@hedge/shared";
 import { decodeAbiParameters } from "viem";
 import { buildSignedQuote } from "../src/quoter.js";
 import {
@@ -41,7 +41,7 @@ describe("MakerWsClient against an engine-protocol fake", () => {
     const expiry = BigInt(Math.floor(Date.now() / 1000) + 7 * 86_400);
     const strike = toUnit("110000");
     const subId = encodeOptionSubId({ expiry, strike, isCall: true });
-    const challenge = `sats-options rfq-engine maker auth test ${Date.now()}`;
+    const challenge = `hedge rfq-engine maker auth test ${Date.now()}`;
     const auctionEndsAt = Date.now() + 3000;
 
     const rfq: PublicRfq = {

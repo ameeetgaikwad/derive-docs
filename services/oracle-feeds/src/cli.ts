@@ -4,13 +4,13 @@ import {
   makePublicClient,
   makeWalletClient,
   toUnit,
-} from "@sats-options/shared";
+} from "@hedge/shared";
 import { getDeadlineSec, getFeedSignerAccount } from "./env.js";
 import { FeedPoster, feedAddressesFromDeployments, type SnapshotExpiryParams } from "./poster.js";
 import { priceSourceFromEnv, StaticPriceSource, type PriceSource } from "./priceSource.js";
 import { SettlementRunner, settlementAddressesFromDeployments } from "./settlement.js";
 
-const USAGE = `oracle-feeds — signed feed poster + settlement runner (sats-options)
+const USAGE = `oracle-feeds — signed feed poster + settlement runner (hedge)
 
 Usage:
   oracle-feeds post   [--spot 100000] [--expiry <unix>]... [--forward <price>]

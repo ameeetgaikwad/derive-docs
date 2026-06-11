@@ -131,7 +131,7 @@ export class RfqEngineServer {
     const url = new URL(req.url ?? "/", "http://localhost");
     const path = url.pathname.replace(/\/+$/, "") || "/";
 
-    // CORS: the sats-options frontend calls this API straight from the
+    // CORS: the hedge frontend calls this API straight from the
     // browser. Permissive by design — the API is unauthenticated and every
     // state-changing call is gated by EIP-712 signatures verified on-chain.
     if (req.method === "OPTIONS") {
@@ -224,7 +224,7 @@ export class RfqEngineServer {
   // -------------------------------------------------------------------------
 
   private onMakerConnect(ws: WebSocket): void {
-    const challenge = `sats-options rfq-engine maker auth ${randomUUID()} ${Date.now()}`;
+    const challenge = `hedge rfq-engine maker auth ${randomUUID()} ${Date.now()}`;
     const session: MakerSession = { socket: ws, challenge, address: null };
     this.makers.set(ws, session);
 

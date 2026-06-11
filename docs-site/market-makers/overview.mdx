@@ -4,7 +4,7 @@ description: "What you are buying, how the sealed-bid RFQ auction works, and the
 icon: "telescope"
 ---
 
-This section is for **integration engineers at trading firms** running quoting bots against the sats Options retail covered-call flow.
+This section is for **integration engineers at trading firms** running quoting bots against the Hedge retail covered-call flow.
 
 <Note>
 **Status:** live on BSC testnet (chain ID **97**). Mainnet (BSC, 56) is not yet deployed. Everything in this guide is derived from the running system; where a capability is missing it is marked **not yet implemented** rather than speculated.
@@ -55,7 +55,7 @@ open ──window ends, ≥1 quote──> closed ──taker accepts──> exec
 |---|---|
 | **RFQ engine** | WS/REST auction service + on-chain executor. Your bot connects to its maker WebSocket channel. |
 | **Reference maker bot** | A complete reference implementation (auth, pricing, signing, quoting) — adapt it, or use it as a conformance reference for your own stack. |
-| **TypeScript SDK** (`@sats-options/shared`) | Signing and encoding library: EIP-712 Actions, RFQ order encoding, chain clients. |
+| **TypeScript SDK** (`@hedge/shared`) | Signing and encoding library: EIP-712 Actions, RFQ order encoding, chain clients. |
 | **Protocol contracts** | Matching + RfqModule + SubAccounts + StandardManager + feeds. Addresses in [Contracts & addresses](/reference/contracts). |
 
 ## Reading order

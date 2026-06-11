@@ -1,6 +1,6 @@
-# DEV — local runbook (frontend on sats-options, BSC testnet)
+# DEV — local runbook (frontend on Hedge, BSC testnet)
 
-The frontend is a Next.js app that talks to the **sats-options** protocol on
+The frontend is a Next.js app that talks to the **Hedge** protocol on
 **BSC testnet (chainId 97)** — addresses in `protocol/deployments/97.json`,
 deployment notes in `protocol/TESTNET.md`. The user's EOA does everything:
 regular transactions for setup (subaccount, approve, deposit, faucet mint) and
@@ -49,7 +49,7 @@ One-shot snapshot (spot + forward + flat 60% IV surface + 5% rate per expiry;
 cd services
 source ../protocol/.env
 export CHAIN_ID=97 RPC_URL=$RPC_URL_97_THIRDWEB FEED_SIGNER_KEY
-pnpm --filter @sats-options/oracle-feeds post -- \
+pnpm --filter @hedge/oracle-feeds post -- \
   --spot 62790 --iv 0.6 --rate 0.05 \
   --expiry <fri1> --expiry <fri2> --expiry <fri3> --expiry <fri4>
 ```
@@ -59,7 +59,7 @@ stale spot makes `getSpot` revert and the UI will show "No on-chain spot
 price" and fall back to defaults for IV):
 
 ```sh
-SPOT_PRICE=62790 pnpm --filter @sats-options/oracle-feeds daemon -- \
+SPOT_PRICE=62790 pnpm --filter @hedge/oracle-feeds daemon -- \
   --interval 60 --expiry <fri1> --expiry <fri2> --expiry <fri3> --expiry <fri4>
 ```
 
@@ -69,7 +69,7 @@ for a live BTC/USD price instead of `SPOT_PRICE`.)
 Settlement after an expiry passes (anyone can call it; needs the feed signer):
 
 ```sh
-pnpm --filter @sats-options/oracle-feeds settle -- \
+pnpm --filter @hedge/oracle-feeds settle -- \
   --expiry <epoch> --price <BTC fix> --subaccounts <makerSub>,<takerSub>
 ```
 
@@ -81,7 +81,7 @@ source ../protocol/.env
 CHAIN_ID=97 RPC_URL=$RPC_URL_97_THIRDWEB \
 EXECUTOR_PRIVATE_KEY=$PRIVATE_KEY \
 RFQ_PORT=3030 AUCTION_WINDOW_MS=8000 \
-pnpm --filter @sats-options/rfq-engine dev
+pnpm --filter @hedge/rfq-engine dev
 ```
 
 It refuses to start unless the executor key is registered via
@@ -98,12 +98,12 @@ source ../protocol/.env
 #  recorded in services/maker-bot/maker-state.97.json if you ran setup before;
 #  otherwise:)
 CHAIN_ID=97 RPC_URL=$RPC_URL_97_THIRDWEB PRIVATE_KEY=$TESTNET_MAKER_KEY \
-DEPOSIT_USDT=100000 pnpm --filter @sats-options/maker-bot setup
+DEPOSIT_USDT=100000 pnpm --filter @hedge/maker-bot setup
 
 # run the quoting bot
 CHAIN_ID=97 RPC_URL=$RPC_URL_97_THIRDWEB PRIVATE_KEY=$TESTNET_MAKER_KEY \
 RFQ_ENGINE_WS=ws://127.0.0.1:3030/maker \
-pnpm --filter @sats-options/maker-bot dev
+pnpm --filter @hedge/maker-bot dev
 ```
 
 If you skipped `setup` but the maker already has a subaccount, pass

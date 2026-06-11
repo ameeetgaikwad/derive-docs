@@ -1,8 +1,8 @@
 {
-  "name": "sats-options-services",
+  "name": "hedge-services",
   "private": true,
   "version": "0.1.0",
-  "description": "Off-chain services for the sats-options protocol (BNB on-chain options)",
+  "description": "Off-chain services for the hedge protocol (BNB on-chain options)",
   "engines": {
     "node": ">=22"
   },

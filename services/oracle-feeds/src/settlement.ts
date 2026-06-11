@@ -7,7 +7,7 @@ import {
   requireDeployments,
   standardManagerAbi,
   subAccountsAbi,
-} from "@sats-options/shared";
+} from "@hedge/shared";
 import type { FeedPoster } from "./poster.js";
 
 export interface SettlementAddresses {

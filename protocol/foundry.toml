@@ -1,4 +1,4 @@
-# sats-options deployment workspace
+# hedge deployment workspace
 # Compiles ONLY our deploy scripts in script/ against the vendored, pinned,
 # read-only sources in lib/v2-core and lib/v2-matching.
 

@@ -7,7 +7,7 @@ import {
   hashActionTypedData,
   hashRfqTrades,
   toUnit,
-} from "@sats-options/shared";
+} from "@hedge/shared";
 import { black76Price, yearsToExpiry } from "../src/black76.js";
 import { buildSignedQuote, priceToUint18 } from "../src/quoter.js";
 import { deserializeAction, serializeAction } from "../src/transport.js";

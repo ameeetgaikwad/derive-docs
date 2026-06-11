@@ -1,8 +1,8 @@
 {
-  "name": "@sats-options/oracle-feeds",
+  "name": "@hedge/oracle-feeds",
   "version": "0.1.0",
   "private": true,
-  "description": "Signed oracle feed poster (spot/forward/rate/vol) + option settlement runner for sats-options",
+  "description": "Signed oracle feed poster (spot/forward/rate/vol) + option settlement runner for hedge",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -19,7 +19,7 @@
     "smoke": "pnpm build && vitest run"
   },
   "dependencies": {
-    "@sats-options/shared": "workspace:*",
+    "@hedge/shared": "workspace:*",
     "viem": "^2.21.0"
   },
   "devDependencies": {

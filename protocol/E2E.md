@@ -1,10 +1,10 @@
-# sats-options E2E acceptance run
+# Hedge E2E acceptance run
 
 **Result: PASSED**
 
 - date: 2026-06-11T07:46:47.092Z
 - chain: anvil (chainId 31337) on http://127.0.0.1:8545
-- command: pnpm --filter @sats-options/e2e e2e  (services/e2e/src/run.ts)
+- command: pnpm --filter @hedge/e2e e2e  (services/e2e/src/run.ts)
 - maker EOA: 0x70997970C51812dc3A010C7d01b50e0d17dc79C8 (anvil #1)
 - taker EOA: 0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC (anvil #2)
 - winning premium: 516.405735099544585864 USDT

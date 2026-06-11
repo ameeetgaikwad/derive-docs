@@ -1,4 +1,4 @@
-# sats-options E2E acceptance run
+# Hedge E2E acceptance run
 
 **Result: PASSED**
 

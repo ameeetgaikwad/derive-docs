@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * sats-options E2E acceptance (SPEC.md "E2E acceptance", run on anvil 31337):
+ * hedge E2E acceptance (SPEC.md "E2E acceptance", run on anvil 31337):
  *
  *   fresh anvil -> forge DeployAll -> oracle-feeds posts spot/forward/vol/rate
  *   (+ USDT stable feed) -> maker & taker EOAs funded with mock USDT/BTCB ->
@@ -51,8 +51,8 @@ import {
   toUnit,
   wrappedErc20AssetAbi,
   type DeploymentsFile,
-} from "@sats-options/shared";
-import { FeedPoster, feedAddressesFromDeployments } from "@sats-options/oracle-feeds";
+} from "@hedge/shared";
+import { FeedPoster, feedAddressesFromDeployments } from "@hedge/oracle-feeds";
 import {
   assert,
   assertApprox,
@@ -720,7 +720,7 @@ async function main(): Promise<void> {
   report.meta = {
     date: new Date().toISOString(),
     chain: `anvil (chainId ${CHAIN_ID}) on ${RPC_URL}`,
-    command: "pnpm --filter @sats-options/e2e e2e  (services/e2e/src/run.ts)",
+    command: "pnpm --filter @hedge/e2e e2e  (services/e2e/src/run.ts)",
     "maker EOA": "",
     "taker EOA": "",
   };

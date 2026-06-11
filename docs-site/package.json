@@ -1,5 +1,5 @@
 {
-  "name": "sats-options-docs",
+  "name": "hedge-docs",
   "private": true,
   "scripts": {
     "dev": "mint dev",
