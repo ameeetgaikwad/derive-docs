@@ -1,0 +1,46 @@
+# sats-options deployment workspace
+# Compiles ONLY our deploy scripts in script/ against the vendored, pinned,
+# read-only sources in lib/v2-core and lib/v2-matching.
+
+[profile.default]
+src = 'script'
+script = 'script'
+test = 'script'
+out = 'out'
+libs = ['lib']
+
+optimizer = true
+optimizer_runs = 50
+
+# match the vendored repos (both pin 0.8.20 / shanghai)
+solc_version = '0.8.20'
+evm_version = 'shanghai'
+
+# explicit remappings only — do not let forge guess.
+# A single global openzeppelin mapping is required for type identity across the
+# two repos. We use v2-matching's OZ pin (4.8.3): upstream v2-matching compiles
+# its v2-core submodule (== our lib/v2-core pin) against exactly that copy.
+# lyra-utils is pinned to the same commit in both repos.
+auto_detect_remappings = false
+remappings = [
+    'v2-core/=lib/v2-core/',
+    'v2-matching/=lib/v2-matching/',
+    'forge-std/=lib/v2-core/lib/forge-std/src/',
+    'openzeppelin/=lib/v2-matching/lib/openzeppelin-contracts/contracts/',
+    'openzeppelin-upgradeable/=lib/v2-matching/lib/openzeppelin-contracts-upgradeable/contracts/',
+    'lyra-utils/=lib/v2-core/lib/lyra-utils/src/',
+    'src/decimals/=lib/v2-core/lib/lyra-utils/src/decimals/',
+]
+
+# the deploy script writes deployments/<chainId>.json
+fs_permissions = [{ access = 'read-write', path = './deployments' }]
+
+[rpc_endpoints]
+# anvil (31337) — acceptance target. RPC is always passed explicitly via --rpc-url,
+# these are just convenience aliases.
+anvil = "http://127.0.0.1:8545"
+# BSC testnet (97) config stub. Requires BTCB_ADDRESS / USDT_ADDRESS env vars
+# (real tokens are not mocked outside 31337).
+bsc_testnet = "https://data-seed-prebsc-1-s1.binance.org:8545"
+# BSC mainnet (56) stub for later
+bsc = "https://bsc-dataseed.binance.org"

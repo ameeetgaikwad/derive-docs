@@ -1,0 +1,27 @@
+{
+  "name": "@sats-options/e2e",
+  "version": "0.1.0",
+  "private": true,
+  "description": "End-to-end acceptance harness: anvil -> deploy -> feeds -> RFQ covered-call trade -> settlement (OTM + ITM)",
+  "type": "module",
+  "main": "./dist/run.js",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "e2e": "tsx src/run.ts",
+    "dev": "tsx src/run.ts",
+    "smoke": "pnpm build && tsx src/run.ts"
+  },
+  "dependencies": {
+    "@sats-options/oracle-feeds": "workspace:*",
+    "@sats-options/shared": "workspace:*",
+    "viem": "^2.21.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0"
+  }
+}

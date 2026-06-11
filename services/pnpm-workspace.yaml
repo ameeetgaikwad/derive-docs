@@ -1,0 +1,6 @@
+packages:
+  - shared
+  - rfq-engine
+  - oracle-feeds
+  - maker-bot
+  - e2e

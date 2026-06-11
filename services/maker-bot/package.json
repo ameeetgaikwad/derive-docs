@@ -1,0 +1,33 @@
+{
+  "name": "@sats-options/maker-bot",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Reference market-maker bot: Black-76 pricing, auto-quoting RFQs over the rfq-engine maker WS",
+  "type": "module",
+  "main": "./dist/index.js",
+  "bin": {
+    "maker-bot": "./dist/index.js"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsx src/index.ts",
+    "setup": "tsx src/index.ts --setup",
+    "test": "vitest run",
+    "smoke": "pnpm build && vitest run && node dist/index.js price --forward 100000 --strike 110000 --days 7 --vol 0.6"
+  },
+  "dependencies": {
+    "@sats-options/shared": "workspace:*",
+    "viem": "^2.21.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@types/ws": "^8.18.1",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0",
+    "vitest": "^2.1.0",
+    "ws": "^8.20.1"
+  }
+}

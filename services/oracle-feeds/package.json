@@ -1,0 +1,31 @@
+{
+  "name": "@sats-options/oracle-feeds",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Signed oracle feed poster (spot/forward/rate/vol) + option settlement runner for sats-options",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsx src/cli.ts",
+    "post": "tsx src/cli.ts post",
+    "daemon": "tsx src/cli.ts daemon",
+    "settle": "tsx src/cli.ts settle",
+    "test": "vitest run",
+    "smoke": "pnpm build && vitest run"
+  },
+  "dependencies": {
+    "@sats-options/shared": "workspace:*",
+    "viem": "^2.21.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0",
+    "vitest": "^2.1.0"
+  }
+}
