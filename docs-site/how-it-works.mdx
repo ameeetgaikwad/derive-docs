@@ -39,9 +39,9 @@ Take the first live testnet trade as a concrete example (full details in the [wo
 | If BTC fixes at 65,000 at expiry | option expires worthless — you keep 1 BTCB + 378.59 USDT |
 | If BTC fixes at 72,000 at expiry | you pay 3,000 USDT cash; you still hold 1 BTCB + the premium |
 
-<Warning>
-On testnet the deployed open-interest fee is a **placeholder (10% of notional)** and dominates the economics of small trades. It is under review and will change before mainnet. See [Fees](/reference/fees).
-</Warning>
+<Note>
+The open-interest fee on testnet is **0.1% of notional with a 10 USDT floor, per side** (the floor dominates very small trades). It is governance-settable and read live by the system — see [Fees](/reference/fees).
+</Note>
 
 ## What you give up, what you get
 

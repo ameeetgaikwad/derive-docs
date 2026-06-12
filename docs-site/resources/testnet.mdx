@@ -54,8 +54,21 @@ This is a testnet-only convenience; mainnet will use real BTCB and USDT.
 
 Other testnet-only trust assumptions worth knowing:
 
-- The feed signer is **1-of-1** and the vol surface is a flat 60% IV fit — see [Oracles & feeds](/reference/oracles#testnet-caveats).
-- The deployed OI fee (10% of notional) is a **placeholder under review** — see [Fees](/reference/fees).
+- The signed-feed signer (forward/vol/rate/stable — and therefore settlement) is **1-of-1** and the vol surface is a flat 60% IV fit — see [Oracles & feeds](/reference/oracles#testnet-caveats).
+- The OI fee is **`max(0.1% of forward notional, 10 USDT)` per side** (fixed 2026-06-12 from the original 10% placeholder) and remains governance-settable — see [Fees](/reference/fees).
+
+## Oracle stack (since 2026-06-12)
+
+The BTC market's spot price comes from a **Pyth adapter with a Chainlink circuit breaker** (`PythSpotFeed` at `0xaAc2C29105928A6fe7788956058bcF3B9A3D5E51`): Pyth BTC/USD is primary, and the confidence is zeroed if Chainlink BTC/USD deviates by more than 1%. Forward, vol, rate, and the USDT stable feed remain signed feeds, and **settlement is still the signed forward print**. Details in [Oracles & feeds](/reference/oracles).
+
+<Warning>
+**Pyth staleness bound: 60 s.** Pyth is a pull oracle — quoting/trading requires a recent on-chain push, or the spot feed reverts and trades fail margin checks. Refresh it with:
+
+```sh
+CHAIN_ID=97 RPC_URL=<rpc> FEED_SIGNER_KEY=<any funded key> \
+  pnpm --filter @hedge/oracle-feeds pyth-push
+```
+</Warning>
 
 ## Running the services against testnet
 
@@ -82,7 +95,7 @@ The first end-to-end covered call ran on 2026-06-11 — all six stages of the ac
 | Direction | taker sells 1× (covered call, 1 BTCB collateral), maker buys |
 | Fill tx | [`0x2d5d7c88...d4d9d3`](https://testnet.bscscan.com/tx/0x2d5d7c88ca7ea1c7f8bf46760487c01331525666546903c41dda29d5c2d4d9d3) (`Matching.verifyAndMatch`, block 112792281) |
 | Premium | 378.586807763808053551 USDT (Black-76 theo 398.51 × 0.95 bid ratio) |
-| OI fee | 6,279 USDT per side (placeholder rate) |
+| OI fee | 6,279 USDT per side — at the original 10% placeholder rate, [since fixed to 0.1%](/reference/fees) |
 
 ### Feed posts
 

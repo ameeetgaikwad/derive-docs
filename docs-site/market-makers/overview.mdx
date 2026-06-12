@@ -35,7 +35,7 @@ Every RFQ is a short **sealed-bid, first-price auction**:
     The **highest per-unit premium** wins; ties are broken by earliest arrival. First-price: if you win, you pay exactly the premium you quoted.
   </Step>
   <Step title="Taker accept & atomic execution">
-    When the taker accepts the winning quote, the engine (a registered *trade executor*) submits a single `Matching.verifyAndMatch` transaction pairing your signed maker order with the taker's signed accept. Option and cash legs move atomically inside the `SubAccounts` ledger; margin checks run in the same transaction.
+    The taker has a fixed window to accept the winning quote (`TAKER_ACCEPT_DEADLINE_MS`, default **120 s** after close — the winner is told the deadline). On accept, the engine (a registered *trade executor*) submits a single `Matching.verifyAndMatch` transaction pairing your signed maker order with the taker's signed accept. Option and cash legs move atomically inside the `SubAccounts` ledger; margin checks run in the same transaction. If the taker misses the deadline, the RFQ expires and the winning maker is notified and released.
   </Step>
 </Steps>
 
@@ -45,7 +45,8 @@ There is no off-chain settlement, novation, or counterparty credit — **your si
 
 ```text
 open ──window ends, ≥1 quote──> closed ──taker accepts──> executing ──mined ok──> executed
-  │                                                            └──reverted/error──> failed
+  │                                │                           └──reverted/error──> failed
+  │                                └──accept deadline passes──> expired (maker released, rfq_expired)
   └──window ends, 0 quotes──> expired
 ```
 

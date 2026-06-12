@@ -38,15 +38,21 @@ icon: "file-code"
 | TransferModule | `0xd021F3ac13903A5EA18A35952335014916D70db4` |
 | TradeModule (deployed, dormant) | `0x09dBF4C9dbc4d238861adCB9eCD689609a3A8e08` |
 
-## Feeds
+## Feeds & oracles
 
 | Feed | Address |
 |---|---|
-| BTC spot | `0x69662A47C3C2626EB75a8c861C48a0a87Cb01b2C` |
+| BTC spot — PythSpotFeed (live SRM spot feed) | `0xaAc2C29105928A6fe7788956058bcF3B9A3D5E51` |
+| Pyth contract (BSC testnet) | `0x5744Cbf430D99456a0A8771208b674F27f8EF0Fb` |
+| Pyth BTC/USD price id | `0xe62df6c8b4a85fe1a67db44dc12de5db330f7ac66b72dc658afedf0f4a415b43` |
+| Chainlink BTC/USD aggregator (circuit breaker) | `0x5741306c21795FdCBb9b265Ea0255F499DFe515C` |
+| BTC spot — signed (kept as fallback) | `0x69662A47C3C2626EB75a8c861C48a0a87Cb01b2C` |
 | BTC forward | `0x86b7148B69F3eFad27Af6d0d892d063D6a6C9e05` |
 | BTC vol (SVI surface) | `0x5a892364cFBd8e725eC1e7af25855005C0E0f0aE` |
 | BTC rate | `0x11C394e92592d08B43fE957c1A80f4c1F012d15D` |
 | USDT/USD stable | `0x2Eeb9512F40c1964eCA5dc156D8e2479dA632116` |
+
+See [Oracles & feeds](/reference/oracles) for how the Pyth adapter and the Chainlink breaker work.
 
 ## Tokens (testnet mocks — open mint)
 

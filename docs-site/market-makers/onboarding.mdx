@@ -10,6 +10,9 @@ icon: "key-round"
   <Step title="One EOA private key">
     In v1 this single key does everything: authenticates your WS session, owns your subaccount, and signs quotes. The protocol contracts support session keys (`ActionVerifier.registerSessionKey`), but the RFQ engine **rejects** quotes with `signer != owner` (`v1 requires signer == owner (no session keys)`) — plan for a single hot key for now.
   </Step>
+  <Step title="Allowlist registration">
+    The engine enforces a **maker allowlist** (`MAKER_ALLOWLIST`): register your maker EOA address with the team before connecting. An address that isn't allowlisted fails the WS auth handshake with `auth failed: address not allowlisted` and close code **4003** — see the [wire protocol](/market-makers/wire-protocol#auth-handshake-maker-ws). (Engines run with an empty allowlist — dev/local only — accept any address.)
+  </Step>
   <Step title="tBNB for gas (setup only)">
     Gas is only needed for setup transactions (subaccount creation, approvals, deposits) and any direct withdrawals. **Quoting itself is gasless for you** — trades are submitted on-chain by the engine's executor key. Use any BSC testnet faucet; the full smoke-test setup cost ~0.02 tBNB per participant.
   </Step>
@@ -64,11 +67,18 @@ Manager: StandardManager (SRM) at `0x4d55A929e184fc366664C11526E3B54aB70340B5`.
 
 - A **long call is fully paid-for**: it requires no maintenance margin of its own. Your constraint is that after paying `premium + fees`, your subaccount must still pass the SRM **initial margin** check (≥ 0) in the trade transaction.
 - USDT cash is the natural collateral. A negative cash balance is a borrow against other collateral (the taker side does exactly this — see the [worked example](/market-makers/worked-example)), but as a USDT-only maker you simply need enough cash.
-- The engine additionally pre-checks **off-chain at quote time** that your cash balance covers `price * amount / 1e18 + maxFee`, rejecting otherwise (`insufficient maker cash: ...`).
+- The engine additionally pre-checks **off-chain at quote time** that your cash balance covers the full cost of the quote, **including fees and your other outstanding quotes**:
 
-<Warning>
-The off-chain pre-check does **not** include the on-chain OI fee (see [Pricing, settlement & fees](/market-makers/pricing-settlement-fees#fees-you-pay)) — the on-chain margin check does, so keep a buffer.
-</Warning>
+  ```text
+  price * amount / 1e18  +  maxFee  +  estimated SRM OI fee
+    +  cash already reserved by your other live quotes
+  ```
+
+  rejecting otherwise (`insufficient maker cash: balance X < required Y (incl. OI fee Z) + reserved R across open quotes`).
+
+<Note>
+The OI fee estimate uses the same math as the chain (see [Pricing, settlement & fees](/market-makers/pricing-settlement-fees#fees-you-pay)), with `OIFeeRateBPS`, the forward price, and `minOIFee` read live on every quote — a failed feed read rejects the quote (`cannot estimate SRM OI fee ...`). Reserved cash is tracked per maker subaccount across **all your open auctions plus won-quotes awaiting taker accept**, and is released on cancel/replace/loss/execution/failure/deadline-expiry — concurrent auctions can no longer over-commit your balance at admission time. The pre-check is still a snapshot of your on-chain balance, so keep a buffer.
+</Note>
 
 ### Useful reads for monitoring (all 18dp)
 

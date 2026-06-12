@@ -12,7 +12,7 @@ This is a build plan, not a promise. Scope and order may change; nothing here is
 
 <Steps>
   <Step title="Now — BTC covered calls via RFQ (BSC testnet)" icon="check">
-    Fully collateralized covered calls sold to market makers through sealed-bid RFQ auctions. Live on BSC testnet with a completed end-to-end trade; mainnet deployment follows MM onboarding, fee-parameter finalization (the testnet OI fee is a placeholder), and review of the deployment's changes against the audited base.
+    Fully collateralized covered calls sold to market makers through sealed-bid RFQ auctions. Live on BSC testnet with a completed end-to-end trade, a hardened maker wire protocol, and a Pyth+Chainlink spot oracle; mainnet deployment follows MM onboarding, final fee-parameter review (testnet now runs 0.1% of notional, governance-settable), and review of the deployment's changes against the audited base.
   </Step>
   <Step title="Next — cash-secured puts" icon="circle-dot">
     The mirror product: deposit USDT, sell a put, earn premium — get paid to set a limit-buy on BTC. Same RFQ rail, same fully collateralized model; the engine's maker-sell/put paths are the main lift (today it rejects any direction except taker-sell calls).
@@ -27,7 +27,7 @@ This is a build plan, not a promise. Scope and order may change; nothing here is
 
 ## Cross-cutting work, independent of phases
 
-- **Oracle hardening** — from the testnet 1-of-1 feed signer to N-of-M signers, monitoring, and an external (e.g. Chainlink) anchor.
-- **Public maker endpoint** — a TLS `wss://` maker channel (today external makers connect via a managed tunnel).
+- **Oracle hardening** — BTC spot is now Pyth with a Chainlink circuit breaker ([done on testnet](/reference/oracles)); remaining: N-of-M signers for the signed feeds (forward/vol/rate/stable) and anchoring **settlement** to Pyth/Chainlink (today it is still the signed forward print).
 - **Gasless UX** — sponsored deposits/trades via BNB Chain's MegaFuel paymaster and EIP-7702 batched approvals.
-- **Notification surface for makers** — taker-accept deadlines, fill/fail push messages, and realized-fee reports (today: reconcile from chain events).
+
+Shipped since the first testnet trade (2026-06-12): the **hardened maker wire protocol** — maker allowlist, taker-accept deadlines with `rfq_expired`/`rfq_failed` push messages, realized-fill reports on `rfq_executed`, quote cancel/replace, per-maker connection dedupe, WS heartbeats, durable crash-recovering RFQ store, and a TLS-fronted `wss://` maker endpoint posture — see the [wire protocol](/market-makers/wire-protocol).

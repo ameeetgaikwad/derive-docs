@@ -1,10 +1,10 @@
 ---
 title: "Oracles & feeds"
-description: "The signed-feed system that powers margin, pricing marks, and settlement — and its testnet caveats."
+description: "BTC spot from a Pyth adapter with a Chainlink circuit breaker, signed feeds for forward/vol/rate, and how settlement is priced — with the testnet caveats."
 icon: "radio"
 ---
 
-Margin checks, mark prices, and settlement all read from **on-chain signed feeds**. Feed data is signed off-chain by whitelisted signers and posted on-chain, where any contract or integrator can read it.
+Margin checks, mark prices, and settlement read from on-chain feeds. As of 2026-06-12 the stack is hybrid: **BTC spot comes from a Pyth adapter cross-checked against Chainlink**, while the forward, volatility, rate, and stable feeds remain **signed feeds** posted by whitelisted signers.
 
 ## The feed set (BTC market, chain 97)
 
@@ -12,7 +12,8 @@ All reads return 18dp values plus a confidence value:
 
 | Feed | Address | Read |
 |---|---|---|
-| BTC spot | `0x69662A47C3C2626EB75a8c861C48a0a87Cb01b2C` | `getSpot() -> (uint price, uint conf)` |
+| BTC spot — **PythSpotFeed** (live SRM spot feed) | `0xaAc2C29105928A6fe7788956058bcF3B9A3D5E51` | `getSpot() -> (uint price, uint conf)` |
+| BTC spot — signed (kept deployed as fallback) | `0x69662A47C3C2626EB75a8c861C48a0a87Cb01b2C` | `getSpot() -> (uint, uint)` |
 | BTC forward (per expiry) | `0x86b7148B69F3eFad27Af6d0d892d063D6a6C9e05` | `getForwardPrice(uint64 expiry) -> (uint, uint)` |
 | BTC vol — SVI surface (per expiry) | `0x5a892364cFBd8e725eC1e7af25855005C0E0f0aE` | `getVol(uint128 strike, uint64 expiry) -> (uint, uint)` |
 | BTC interest rate (per expiry) | `0x11C394e92592d08B43fE957c1A80f4c1F012d15D` | `getInterestRate(uint64 expiry) -> (int, uint)` |
@@ -20,7 +21,35 @@ All reads return 18dp values plus a confidence value:
 
 ABIs for all feeds ship in the TypeScript SDK (`@hedge/shared`).
 
-## How the signed-feed model works
+## BTC spot: Pyth primary, Chainlink circuit breaker
+
+The SRM's BTC spot feed is a `PythSpotFeed` adapter (`protocol/src/PythSpotFeed.sol`):
+
+<Steps>
+  <Step title="Pyth primary">
+    The adapter reads **`Crypto.BTC/USD`** (price id `0xe62df6c8b4a85fe1a67db44dc12de5db330f7ac66b72dc658afedf0f4a415b43`) from the official Pyth contract on BSC testnet, `0x5744Cbf430D99456a0A8771208b674F27f8EF0Fb`. `getSpot()` **reverts** if the Pyth price is non-positive or older than `pythStaleness` (default **60 s**) — the same failure mode as a stale signed feed. Pyth's absolute confidence interval is translated into the protocol's `[0, 1e18]` confidence score: `1e18 − conf/price`, floored at 0.
+  </Step>
+  <Step title="Chainlink circuit breaker">
+    The Pyth price is cross-checked against Chainlink BTC/USD on BSC testnet, `0x5741306c21795FdCBb9b265Ea0255F499DFe515C` (8 decimals). If the Chainlink answer is non-positive, older than `chainlinkStaleness` (default 24 h), or deviates from the Pyth price by more than `deviationThreshold` (default **1%** = `0.01e18`), the returned **confidence is zeroed** — tripping the SRM's oracle-contingency margin penalty.
+  </Step>
+</Steps>
+
+All parameters are owner-settable: `setPythStaleness`, `setChainlinkStaleness`, `setDeviationThreshold`, and `setChainlinkAggregator` (`address(0)` disables the breaker).
+
+<Warning>
+**Operational: Pyth is a pull oracle with a 60 s staleness bound.** The on-chain price only updates when someone pushes a signed update, and a stale price makes `getSpot()` revert — failing margin checks and therefore trades. Quoting/trading requires a recent push:
+
+```sh
+CHAIN_ID=97 RPC_URL=<rpc> FEED_SIGNER_KEY=<any funded key> \
+  pnpm --filter @hedge/oracle-feeds pyth-push
+```
+
+The command fetches the latest signed BTC/USD update from Pyth Hermes, submits it via `updatePriceFeeds` (paying the small update fee), and reads `getSpot()` back through the adapter. The sender only needs gas.
+</Warning>
+
+Deployment JSON keys for the oracle pieces: `pyth`, `btcPythPriceId`, `btcPythSpotFeed`, `btcChainlinkAggregator` (in `protocol/deployments/97.json`).
+
+## How the signed-feed model works (forward, vol, rate, stable)
 
 - Feed updates are messages signed by **whitelisted signers** with heartbeats (staleness bounds) and confidence values; anyone can post a correctly signed update on-chain.
 - The volatility surface is stored as **SVI parameters per expiry** — consumers query `getVol(strike, expiry)` and the contract evaluates the surface.
@@ -30,15 +59,19 @@ ABIs for all feeds ship in the TypeScript SDK (`@hedge/shared`).
 
 | Consumer | Uses |
 |---|---|
-| StandardManager (margin) | forward, vol, rate, stable — initial-margin checks inside every trade |
+| StandardManager (margin) | Pyth spot, forward, vol, rate, stable — initial-margin checks inside every trade |
 | OI fee | forward price at the trade's expiry ([fee reference](/reference/fees)) |
 | Settlement | the forward feed's fixed settlement price at expiry ([settlement reference](/reference/settlement)) |
 | Reference maker pricing | Black-76 on forward/vol/rate, spot fallback |
 
+<Note>
+**Settlement is still the signed print.** `LyraForwardFeed` wraps the original signed spot feed, so the settlement fix at expiry comes from the signed feeds, not from Pyth/Chainlink. Anchoring settlement to Pyth/Chainlink is a flagged follow-up.
+</Note>
+
 ## Testnet caveats
 
 <Warning>
-- The testnet feed signer is **1-of-1** (`0xdE50B8E965aD2B8E25f45a19FD87A2d2c737782F`) — a testnet-only trust assumption. Production targets N-of-M whitelisted signers with monitoring, plus an external anchor (e.g. Chainlink) for sanity checks; the first live trade's spot was already cross-checked against Chainlink BTC/USD (within ~0.7%).
-- The vol surface is currently a **flat 60% IV** SVI fit, and feeds update only when posted — do not expect live-market dynamics on testnet.
+- The signed-feed signer is **1-of-1** (`0xdE50B8E965aD2B8E25f45a19FD87A2d2c737782F`) — a testnet-only trust assumption for forward/vol/rate/stable (and therefore for settlement). Production targets N-of-M whitelisted signers with monitoring; the spot leg already has its external anchor (Pyth + Chainlink breaker).
+- The vol surface is currently a **flat 60% IV** SVI fit, and the signed feeds update only when posted — do not expect live-market dynamics on testnet.
 - Settlement fixes come from the forward feed's settlement-window TWAP aggregates posted by the feed signer; there is no external settlement auction yet.
 </Warning>

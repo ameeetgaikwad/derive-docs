@@ -1,6 +1,6 @@
 ---
 title: "Architecture"
-description: "The layered design of Hedge: on-chain settlement contracts, an off-chain RFQ auction layer, and signed price feeds."
+description: "The layered design of Hedge: on-chain settlement contracts, an off-chain RFQ auction layer, and a hybrid oracle stack (Pyth+Chainlink spot, signed feeds)."
 icon: "layers"
 ---
 
@@ -18,7 +18,7 @@ flowchart TB
         SA["SubAccounts ledger (ERC-721)"]
         ASSETS["Assets: CashAsset (USDT) ·<br/>WrappedERC20Asset (BTCB) · OptionAsset (BTC)"]
         SRM["StandardManager (SRM)<br/>risk & margin checks"]
-        F["Signed feeds: spot · forward ·<br/>vol surface · rate · stable"]
+        F["Feeds: Pyth+Chainlink spot ·<br/>signed forward · vol surface · rate · stable"]
     end
     BOT -- "signed quotes" --> RFQ
     RFQ -- "verifyAndMatch(actions, signatures)" --> MATCH
@@ -55,8 +55,8 @@ Everything that holds or moves value is a contract on BNB Chain:
 
     Only registered *trade executors* can call `Matching.verifyAndMatch`, and modules enforce that an executor can never exceed what the signatures authorize.
   </Accordion>
-  <Accordion title="Signed feeds — the protocol's marks" icon="radio">
-    Margin and settlement read from on-chain **signed feeds**: BTC spot, per-expiry forwards, an SVI volatility surface, interest rates, and a USDT/USD stable feed. Feed updates are signed off-chain by whitelisted signers (N-of-M with heartbeats and confidence values) and posted on-chain, where anyone can read them. See [Oracles & feeds](/reference/oracles).
+  <Accordion title="Oracles — the protocol's marks" icon="radio">
+    BTC **spot** comes from a **Pyth adapter with a Chainlink circuit breaker**: Pyth BTC/USD is primary, and a >1% Chainlink deviation zeroes the price's confidence, tripping the margin system's oracle-contingency penalty. Per-expiry forwards, the SVI volatility surface, interest rates, and the USDT/USD stable feed remain on-chain **signed feeds**: updates are signed off-chain by whitelisted signers (with heartbeats and confidence values) and posted on-chain, where anyone can read them. Settlement is still priced off the signed forward print. See [Oracles & feeds](/reference/oracles).
   </Accordion>
 </AccordionGroup>
 
@@ -67,7 +67,7 @@ Three small services coordinate the auction — none of them custody funds:
 | Service | Role |
 |---|---|
 | **RFQ engine** | WebSocket/REST auction service. Broadcasts RFQs to authenticated makers, collects sealed signed quotes, picks the winner, and submits `Matching.verifyAndMatch` on-chain as the registered trade executor. |
-| **Oracle feeds service** | Signs and posts feed data (spot/forward/vol/rate/stable) and runs settlement at expiry. |
+| **Oracle feeds service** | Signs and posts the signed feed data (forward/vol/rate/stable), relays Pyth spot updates on demand (`pyth-push`), and runs settlement at expiry. |
 | **Reference maker bot** | A complete reference market maker: authenticates, prices with Black-76 off the on-chain feeds, signs and submits quotes. Integrators adapt it or treat it as a living spec. |
 
 The deliberate consequence of this split: **a malicious or dead coordinator is an availability problem, not a custody problem.** Signed quotes are bounded by their own price, size, and expiry; users always retain a permissionless path to withdraw their subaccount from Matching (see [Risk & operational notes](/market-makers/risk-ops#self-custody-and-the-escape-hatch)).

@@ -21,12 +21,12 @@ icon: "circle-help"
     One trade: *this* instrument, at *this* price and size, settled into *your* subaccount, executed at most once, before an expiry timestamp you chose. The contracts enforce all of these bounds (`RFQM_SignedAccountMismatch`, `RFQM_InvalidTakerHash`, `RFQM_FeeTooHigh`, nonce invalidation, `OV_ActionExpired`). See the [EIP-712 reference](/reference/eip-712).
   </Accordion>
 
-  <Accordion title="Why was the fee on the testnet trade so large?">
-    The deployed open-interest fee rate on testnet is a **placeholder**: 10% of forward notional per side (min 10 USDT), which produced a 6,279 USDT fee against a 378.59 USDT premium on the first live trade. It is explicitly under review and will change before any real money flows. Read the live values on-chain rather than hard-coding them — see [Fees](/reference/fees).
+  <Accordion title="Why was the fee on the first testnet trade so large?">
+    The original deploy shipped a **placeholder** open-interest fee rate of 10% of forward notional per side, which produced a 6,279 USDT fee against a 378.59 USDT premium on the first live trade. It has since been fixed on-chain: the rate is now **0.1% of notional with a 10 USDT floor, per side** — the same trade today would pay ~62.79 USDT per side. The rate remains governance-settable, so read the live values on-chain rather than hard-coding them — see [Fees](/reference/fees).
   </Accordion>
 
   <Accordion title="Can I close or cancel a position before expiry?">
-    Not in v1. Options are European and there is no buy-back/unwind flow yet — once your covered call is sold, the position runs to expiry. For makers, a signed quote likewise cannot be cancelled; it can only age out at its expiry timestamp. Plan strikes, expiries, and quote TTLs accordingly.
+    Not in v1. Options are European and there is no buy-back/unwind flow yet — once your covered call is sold, the position runs to expiry. For makers, a quote can be [cancelled or replaced](/market-makers/wire-protocol#replace-and-cancel) while its auction is still open, but the underlying signature can only age out at its expiry timestamp, and a won auction is locked in until the taker-accept deadline. Plan strikes, expiries, and quote TTLs accordingly.
   </Accordion>
 
   <Accordion title="What happens if no market maker quotes my RFQ?">
@@ -34,7 +34,7 @@ icon: "circle-help"
   </Accordion>
 
   <Accordion title="Do market makers need permission to participate?">
-    Currently no — there is no allowlist in the engine: any address that completes the signature handshake and has a funded subaccount under Matching can quote. Whitelisting/KYC gating is not yet implemented. The practical gate today is that the maker WebSocket endpoint is not yet publicly exposed; integrators get the current testnet host from the team.
+    Yes — the engine enforces a **maker allowlist**: register your maker address with the team, and you can then authenticate with the signature handshake and quote from a funded subaccount under Matching. Un-allowlisted addresses are refused at WebSocket auth (close code `4003`). On-chain setup itself (subaccount, deposits) is permissionless. See [Onboarding](/market-makers/onboarding).
   </Accordion>
 
   <Accordion title="Are puts, other assets, or buying options supported?">
@@ -42,7 +42,7 @@ icon: "circle-help"
   </Accordion>
 
   <Accordion title="Where do the prices used for margin and settlement come from?">
-    From the protocol's on-chain **signed feeds**: BTC spot, per-expiry forwards, an SVI vol surface, rates, and a USDT/USD feed. On testnet these are posted by a 1-of-1 signer with a flat 60% IV surface — a known, testnet-only trust assumption. Production targets N-of-M signers plus an external anchor like Chainlink. Details in [Oracles & feeds](/reference/oracles).
+    BTC **spot** comes from a **Pyth adapter** (Pyth BTC/USD on BSC testnet) cross-checked against Chainlink — a deviation above 1% zeroes the price's confidence and trips the margin system's oracle-contingency penalty. Per-expiry forwards, the SVI vol surface, rates, and the USDT/USD feed remain on-chain **signed feeds**; on testnet these are posted by a 1-of-1 signer with a flat 60% IV surface — a known, testnet-only trust assumption — and **settlement is still priced off the signed forward print**. Details in [Oracles & feeds](/reference/oracles).
   </Accordion>
 
   <Accordion title="Is the protocol audited?">

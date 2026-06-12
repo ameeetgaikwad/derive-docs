@@ -3,7 +3,8 @@
 **Audience:** integration engineers at trading firms running quoting bots against Hedge retail
 covered-call flow.
 
-**Status:** live on BSC testnet (chainId **97**) as of 2026-06-11. Mainnet (BSC, 56) not yet deployed.
+**Status:** live on BSC testnet (chainId **97**) as of 2026-06-11; wire protocol, fees and oracle
+stack last updated 2026-06-12. Mainnet (BSC, 56) not yet deployed.
 Everything in this document is derived from the code in this repository
 (`services/rfq-engine`, `services/maker-bot`, `services/shared`) and the vendored on-chain settlement
 contracts (`protocol/lib/v2-matching`, `protocol/lib/v2-core`). Where a capability is missing it is
@@ -70,11 +71,16 @@ Components you interact with:
    (`ActionVerifier.registerSessionKey`), but the rfq-engine **rejects** quotes with
    `signer != owner` (`v1 requires signer == owner (no session keys)`), so plan for a single hot key
    for now.
-2. **tBNB for gas** — only needed for setup transactions (subaccount creation, approvals, deposits)
+2. **Allowlist registration.** The engine enforces a maker allowlist (`MAKER_ALLOWLIST` on the
+   engine): **register your maker EOA address with us before connecting**. An address that is not
+   on the allowlist fails the WS auth handshake with
+   `{ "type": "error", "message": "auth failed: address not allowlisted" }` and close code
+   **4003**. (Engines run with an empty allowlist — dev/local only — accept any address.)
+3. **tBNB for gas** — only needed for setup transactions (subaccount creation, approvals, deposits)
    and any direct withdrawals. Quoting itself is gasless for you: trades are submitted on-chain by
    the engine's executor key. Use any BSC testnet faucet; the whole smoke-test setup cost
    ~0.02 tBNB per participant.
-3. **USDT cash collateral** in a Matching subaccount (see below).
+4. **USDT cash collateral** in a Matching subaccount (see below).
 
 ### 2.2 Testnet mocks (free money)
 
@@ -126,9 +132,21 @@ Manager: SRM (StandardManager), address `0x4d55A929e184fc366664C11526E3B54aB7034
   (the taker side does exactly this — see Appendix A), but as a USDT-only maker you simply need
   enough cash.
 - The engine additionally pre-checks **off-chain at quote time** that your cash balance covers
-  `price * amount / 1e18 + maxFee` and rejects the quote otherwise (`insufficient maker cash: ...`).
-  Note this pre-check does **not** include the on-chain OI fee (see [§5.3](#53-fees-you-pay)) — the
-  on-chain margin check does, so keep a buffer.
+  the full cost of the quote **including fees and your other outstanding quotes**:
+
+  ```text
+  price * amount / 1e18  +  maxFee  +  estimated SRM OI fee
+    +  cash already reserved by your other live quotes
+  ```
+
+  and rejects otherwise (`insufficient maker cash: balance X < required Y (incl. OI fee Z) +
+  reserved R across open quotes`). The OI fee estimate uses the same math as the chain
+  (see [§5.3](#53-fees-you-pay)), with `OIFeeRateBPS`, the forward price and `minOIFee` read live
+  on every quote; if the feed read fails the quote is rejected
+  (`cannot estimate SRM OI fee ...`). Reserved cash is tracked per maker subaccount across **all
+  your open auctions plus won-quotes awaiting taker accept**, and is released on
+  cancel/replace/loss/execution/failure/deadline-expiry — concurrent auctions can no longer
+  over-commit your balance at admission time.
 
 Useful reads for monitoring (all 18dp):
 
@@ -154,16 +172,20 @@ bigints travel as decimal strings**; all on-chain quantities are 18dp integers; 
 | Taker WS | `ws://<host>:<port>/taker` | retail frontend |
 | REST | `POST /rfq`, `GET /rfq/:id`, `POST /rfq/:id/accept`, `GET /health` | takers / status polling |
 
-Default port **3030** (`RFQ_PORT`/`PORT` env on the engine). The maker-bot default is
-`RFQ_ENGINE_WS=ws://127.0.0.1:3030/maker`.
+Default port **3030** (`RFQ_PORT`/`PORT` env on the engine); listen address via `HOST`
+(default `127.0.0.1`). The maker-bot default is `RFQ_ENGINE_WS=ws://127.0.0.1:3030/maker`.
 
-> **Deployment caveat (current code):** the server binds `127.0.0.1` by default and the production
-> entrypoint does not expose a host override or TLS. A public `wss://` maker endpoint is **not yet
-> implemented** — external makers currently connect via whatever tunnel/proxy we stand up. Ask us
-> for the current testnet hostname.
+> **Production posture:** the engine deliberately does not terminate TLS in-process. It is
+> deployed bound to loopback (or `0.0.0.0` inside a private segment) behind a **TLS-terminating
+> reverse proxy** — makers connect to `wss://<host>/maker`, takers to `https://<host>/rfq` +
+> `wss://<host>/taker`. Ask us for the current testnet hostname. The plain-HTTP port is never
+> exposed publicly.
 
 `GET /rfq/:id` and `GET /health` are unauthenticated; makers may poll RFQ status over REST too
-(the response shape is in §3.6).
+(the response shape is in §3.6). Taker-side RFQ creation is gated by the engine: `TAKER_OPEN=false`
+rejects all RFQ creation (`403` / taker-WS error), and creations are **rate-limited per IP**
+(`RFQ_RATE_LIMIT_PER_MIN`, default 30/min; over-limit ⇒ `429` /
+`rate limit exceeded — slow down`). Neither gate affects the maker channel.
 
 ### 3.2 Auth handshake (maker WS)
 
@@ -189,17 +211,28 @@ On success:
 ```
 
 …followed immediately by a **replay of every currently-open RFQ** as individual `rfq_open` frames,
-so reconnects never miss live auctions. On failure you get
+so reconnects never miss live auctions. On a bad signature you get
 `{ "type": "error", "message": "auth failed: bad signature" }` and remain unauthenticated (the
 socket is not closed). Sending a quote before authenticating yields
 `{ "type": "error", "message": "authenticate first" }`.
 
-There is **no maker allowlist** in the current code: any address with a valid signature can
-authenticate and quote. Whitelisting/KYC gating is **not yet implemented**.
+**Allowlist.** When `MAKER_ALLOWLIST` is set (it is on the shared testnet engine), an address not
+on it gets `{ "type": "error", "message": "auth failed: address not allowlisted" }` and the socket
+is closed with code **4003**. Register your address with us first (§2.1).
+
+**One live connection per maker address.** When the same address authenticates on a new socket,
+the old socket receives `{ "type": "superseded", "message": "..." }` and is closed with code
+**4000**. A superseded client must **not** auto-reconnect — it would supersede the new session
+right back (the reference client stops on `superseded` for exactly this reason).
+
+**Heartbeat.** The server sends protocol-level WS pings every `WS_HEARTBEAT_MS` (default 30 s) and
+terminates a connection that has neither ponged nor sent any frame for one full interval. Standard
+WS stacks (browsers, Node/undici, `ws`) answer pings automatically — there is no app-level
+keepalive message, and none is needed.
 
 Re-authenticate on every reconnect (new challenge each time). The reference client
-(`services/maker-bot/src/transport.ts`) reconnects with exponential backoff (1 s doubling to 30 s).
-There is no application-level ping/heartbeat — detect dead connections yourself.
+(`services/maker-bot/src/transport.ts`) reconnects with exponential backoff (1 s doubling to 30 s)
+— except after `superseded`, where it stops.
 
 ### 3.3 RFQ broadcast
 
@@ -224,6 +257,7 @@ Every new auction is pushed to all authenticated makers:
     "amount": "1000000000000000000",                 // 18dp option size (1.0)
     "createdAt": 1781770000000,                      // ms epoch
     "auctionEndsAt": 1781770008000,                  // ms epoch — quotes accepted STRICTLY before this
+    "acceptDeadlineAt": null,                        // ms epoch; null until the auction closes with a winner (§3.5)
     "status": "open"                                 // open|closed|expired|executing|executed|failed
   }
 }
@@ -258,6 +292,26 @@ The server replies with exactly one of:
 { "type": "quote_rejected", "rfqId": "501329a3-...", "reason": "<human-readable reason>" }
 ```
 
+**Replace:** a second quote from the same maker on the same RFQ **replaces** the previous one —
+only the latest is kept. The ack then carries the id of the quote it displaced:
+
+```json
+{ "type": "quote_ack", "rfqId": "501329a3-...", "quoteId": "9b3c5d...", "replacedQuoteId": "8a2b4c..." }
+```
+
+**Cancel:** `{"type":"cancel","quoteId":"8a2b4c..."}` withdraws a live quote while its auction is
+still open. The server replies with exactly one of:
+
+```json
+{ "type": "cancel_ack", "rfqId": "501329a3-...", "quoteId": "8a2b4c..." }
+{ "type": "cancel_rejected", "quoteId": "8a2b4c...", "reason": "auction window closed — quote can no longer be cancelled" }
+```
+
+`cancel_rejected` covers unknown/foreign quote ids and the closed-auction case — once the window
+ends, the winning quote is locked in (until the taker-accept deadline or your `action.expiry`,
+whichever comes first). Cancel/replace immediately release the collateral the engine had reserved
+against the quote (§2.4).
+
 **Validation, in the exact order the engine runs it** (`services/rfq-engine/src/quotes.ts` —
 rejection `reason` strings shown):
 
@@ -271,16 +325,20 @@ rejection `reason` strings shown):
    `trade.amount == +rfq.amount` (positive — you receive what the taker sells), `trade.price > 0`.
 4. EIP-712 signature recovers to `action.signer` (`invalid EIP-712 signature`).
 5. On-chain reads: `Matching.subAccountToOwner(action.subaccountId)` must equal your address
-   (`subaccount N is not deposited into Matching by 0x...`), and your cash balance must cover
-   `trade.price * trade.amount / 1e18 + maxFee` (`insufficient maker cash: balance X < required Y`).
+   (`subaccount N is not deposited into Matching by 0x...`), and your cash balance must cover the
+   **fee-aware, reservation-aware** requirement
+   `trade.price * trade.amount / 1e18 + maxFee + estimated SRM OI fee + cash reserved by your
+   other live quotes` (`insufficient maker cash: balance X < required Y (incl. OI fee Z) +
+   reserved R across open quotes`). A failed feed read for the OI fee estimate also rejects
+   (`cannot estimate SRM OI fee (forward feed 0x...): ...`).
 6. After the chain reads, the window is re-checked — a quote that straddles the close is rejected
    with `auction window closed`. Budget your latency: RPC round-trips happen inside the window.
 
 Notes:
 
-- You may submit **multiple quotes** for the same RFQ (e.g. to improve your bid). All admitted
-  quotes are kept and the best wins; there is **no cancel/replace** message — a submitted quote
-  cannot be withdrawn (it dies only with its `action.expiry`). The reference bot quotes once per RFQ.
+- Re-quoting the same RFQ **replaces** your previous quote (only the latest counts; the ack
+  carries `replacedQuoteId`). To withdraw entirely, send `cancel` while the auction is open. The
+  reference bot quotes once per RFQ.
 - Quotes are sealed: nothing about competitor quotes is sent to you while the auction is open.
 
 ### 3.5 Auction close, win/loss, execution
@@ -290,34 +348,50 @@ When the window ends, **every** authenticated maker receives:
 ```jsonc
 { "type": "rfq_closed",
   "rfqId": "501329a3-...",
-  "bestQuoteId": "8a2b4c...",   // null if zero valid quotes arrived (RFQ status -> "expired")
-  "won": true                    // present ONLY on the winning maker's socket; absent otherwise
+  "bestQuoteId": "8a2b4c...",        // null if zero valid quotes arrived (RFQ status -> "expired")
+  "won": true,                       // present ONLY on the winning maker's socket; absent otherwise
+  "acceptDeadlineAt": 1781770128000  // winner only: ms epoch the taker must accept BEFORE
 }
 ```
 
 - Winner selection: highest per-unit `trade.price`; ties broken by earliest `receivedAt`.
 - Losers are **not** told the winning premium, only the winning `quoteId`. There is no explicit
-  `lost` flag — infer loss from the absence of `won`.
-- If your quote won, the RFQ moves to `closed` and waits for the taker to accept. The taker signs a
+  `lost` flag — infer loss from the absence of `won`. Losing quotes stop reserving your collateral
+  immediately.
+- If your quote won, the RFQ moves to `closed` and the **taker-accept deadline** is armed
+  (`TAKER_ACCEPT_DEADLINE_MS` on the engine, default **120 s** after close). The taker signs a
   `TakerOrder{orderHash, maxFee}` over the hash of *your* trades and POSTs it to
-  `/rfq/:id/accept`; the engine then submits `Matching.verifyAndMatch` on-chain. On success all
-  authenticated makers receive:
+  `/rfq/:id/accept`; the engine then submits `Matching.verifyAndMatch` on-chain.
 
-```json
-{ "type": "rfq_executed", "rfqId": "501329a3-...", "txHash": "0x2d5d7c88..." }
-```
+The terminal notifications:
 
-**Gaps in the current notification surface (not yet implemented):**
+- **Executed** — on a successful on-chain fill, **all** authenticated makers receive a
+  `rfq_executed` carrying the realized **fill report**:
 
-- There is **no taker-accept deadline** and **no notification if the taker never accepts**. Your
-  signed quote simply ages out at `action.expiry` (the engine refuses to execute against an expired
-  maker action: `winning maker quote has expired`). Size your quote TTL accordingly (§6.3).
-- If execution **fails on-chain** (revert), the engine emits an internal `rfq_failed` event that is
-  pushed to taker subscribers only — **makers get no message**. Poll `GET /rfq/:id` if you need
-  resolution; a reverted execution does *not* burn your nonce, so the action technically remains
-  valid until expiry.
-- No fill report with realized fees is pushed to the maker; the on-chain
-  `RFQTradeCompleted`/`FeeCharged` events and the REST status response are the records.
+  ```jsonc
+  { "type": "rfq_executed", "rfqId": "501329a3-...", "txHash": "0x2d5d7c88...",
+    "fill": {
+      "quoteId": "8a2b4c...",
+      "instrument": "BTC-20260619-69000-C",
+      "maker": "0x5c9C...",
+      "makerSubaccountId": "5", "takerSubaccountId": "6",
+      "amount": "1000000000000000000",
+      "premium": "378586807763808053551",        // per-unit, 18dp
+      "totalPremium": "378586807763808053551",
+      "makerFee": "0", "takerFee": "0",           // module fees (zero today, §5.3)
+      "blockNumber": "112792281" } }
+  ```
+
+- **Failed** — `{ "type": "rfq_failed", "rfqId": "...", "reason": "..." }` is sent to the
+  **winning maker** when execution reverts or errors after the taker accepted. A reverted
+  execution does *not* burn your nonce, so the action technically remains valid until expiry.
+- **Expired** — `{ "type": "rfq_expired", "rfqId": "...",
+  "reason": "taker did not accept before the deadline" }` is sent to the **winning maker** when
+  the taker fails to accept before `acceptDeadlineAt`. The RFQ moves to `status: "expired"` and
+  your reserved collateral is released; your signed action then just ages out at its `expiry`.
+
+The on-chain `RFQTradeCompleted`/`FeeCharged` events remain the authoritative record — reconcile
+against them, treating the fill report as operational convenience.
 
 ### 3.6 REST status (useful for reconciliation)
 
@@ -325,7 +399,7 @@ When the window ends, **every** authenticated maker receives:
 
 ```jsonc
 {
-  "rfq": { /* PublicRfq as in §3.3, status reflects lifecycle */ },
+  "rfq": { /* PublicRfq as in §3.3; status reflects lifecycle; acceptDeadlineAt set once closed with a winner */ },
   "quoteCount": 1,
   "bestQuote": {                      // null until the window closes with >=1 quote
     "quoteId": "8a2b4c...",
@@ -342,14 +416,18 @@ When the window ends, **every** authenticated maker receives:
 }
 ```
 
-Error codes: `404` unknown RFQ; accept returns `409` on validation failure, `502` on on-chain
-failure, `200` on success.
+Error codes: `404` unknown RFQ; accept returns `409` on validation failure (including a passed
+accept deadline), `502` on on-chain failure, `200` on success. A successful accept returns
+`{ txHash, status, blockNumber, fill }` — the same fill report as the `rfq_executed` push. An
+expired RFQ reads back as `status: "expired"` with
+`error: "taker did not accept before the deadline"`.
 
 ### 3.7 RFQ lifecycle state machine
 
 ```text
 open ──window ends, ≥1 quote──> closed ──taker accepts──> executing ──mined ok──> executed
-  │                                                            └──reverted/error──> failed
+  │                                │                           └──reverted/error──> failed
+  │                                └──accept deadline passes──> expired (maker released, rfq_expired)
   └──window ends, 0 quotes──> expired
 ```
 
@@ -467,11 +545,12 @@ only paired with a taker who signed over the hash of your exact trades.
   on-chain**. Losing quotes never touch the chain, so their nonces stay unused — that is fine, just
   never reuse a nonce you may have outstanding. The SDK default is
   `Date.now() * 1000 + rand(0..999)` (`generateNonce()` in `services/shared/src/actions.ts`).
-- **Expiry is your only kill switch.** There is no on-chain cancel for a signed action and no
-  off-chain quote-cancel message. An admitted losing quote remains executable *in principle* until
-  expiry (in practice the engine only ever executes the winning quote, but treat TTL as your risk
-  bound). Keep it short: the reference bot uses `QUOTE_TTL_SEC=300` and clamps to
-  `max(auctionEnd + 60s, now + TTL)`.
+- **Expiry is your on-chain kill switch.** There is no on-chain cancel for a signed action. The
+  off-chain `cancel` message (§3.4) withdraws a quote from the auction while it is open, but a
+  cancelled/losing quote's signature remains executable *in principle* until expiry (in practice
+  the engine only ever executes the winning quote, and the taker-accept deadline — default 120 s —
+  bounds how long a win can hang; still, treat TTL as your hard risk bound). Keep it short: the
+  reference bot uses `QUOTE_TTL_SEC=300` and clamps to `max(auctionEnd + 60s, now + TTL)`.
 
 ### 4.5 Option subId encoding
 
@@ -630,26 +709,54 @@ signed = acct.sign_message(encode_typed_data(full_message={
 
 ### 5.1 On-chain feeds (the protocol's marks)
 
-The SRM margins and settlement run off Lyra-style signed feeds, posted by our `oracle-feeds`
-service (testnet: 1-of-1 signer `0xdE50B8E965aD2B8E25f45a19FD87A2d2c737782F` — testnet only). You
-can read them directly; all return 18dp values plus a confidence:
+**BTC spot is now a Pyth adapter with a Chainlink circuit breaker**
+(`protocol/src/PythSpotFeed.sol`); the remaining feeds (forward, vol, rate, USDT stable) stay
+Lyra-style signed feeds posted by our `oracle-feeds` service (testnet: 1-of-1 signer
+`0xdE50B8E965aD2B8E25f45a19FD87A2d2c737782F` — testnet only). You can read everything directly;
+all return 18dp values plus a confidence:
 
 | Feed | Address (97) | Read |
 |---|---|---|
-| BTC spot | `0x69662A47C3C2626EB75a8c861C48a0a87Cb01b2C` | `getSpot() -> (uint price, uint conf)` |
+| BTC spot (**PythSpotFeed**, live SRM spot feed) | `0xaAc2C29105928A6fe7788956058bcF3B9A3D5E51` | `getSpot() -> (uint price, uint conf)` |
+| BTC spot (LyraSpotFeed, signed — kept as fallback) | `0x69662A47C3C2626EB75a8c861C48a0a87Cb01b2C` | `getSpot() -> (uint, uint)` |
 | BTC forward | `0x86b7148B69F3eFad27Af6d0d892d063D6a6C9e05` | `getForwardPrice(uint64 expiry) -> (uint, uint)` |
 | BTC vol (SVI surface) | `0x5a892364cFBd8e725eC1e7af25855005C0E0f0aE` | `getVol(uint128 strike, uint64 expiry) -> (uint, uint)` |
 | BTC rate | `0x11C394e92592d08B43fE957c1A80f4c1F012d15D` | `getInterestRate(uint64 expiry) -> (int, uint)` |
 | USDT/USD stable | `0x2Eeb9512F40c1964eCA5dc156D8e2479dA632116` | `getSpot() -> (uint, uint)` |
 
+How the spot adapter works (verified against `PythSpotFeed.sol`):
+
+- **Pyth primary.** Reads `Crypto.BTC/USD` (price id
+  `0xe62df6c8b4a85fe1a67db44dc12de5db330f7ac66b72dc658afedf0f4a415b43`) from the official Pyth
+  contract on BSC testnet (`0x5744Cbf430D99456a0A8771208b674F27f8EF0Fb`). `getSpot()` **reverts**
+  if the Pyth price is older than `pythStaleness` (default **60 s**) — see the staleness note
+  below. Pyth's confidence interval maps to the protocol's `[0, 1e18]` confidence as
+  `1e18 − conf/price`, floored at 0.
+- **Chainlink circuit breaker.** Cross-checks Chainlink BTC/USD on BSC testnet
+  (`0x5741306c21795FdCBb9b265Ea0255F499DFe515C`, 8 decimals). If the Chainlink answer is
+  non-positive, older than `chainlinkStaleness` (default 24 h), or deviates from the Pyth price by
+  more than `deviationThreshold` (default **1%** = `0.01e18`), the returned **confidence is
+  zeroed**, tripping the SRM's oracle-contingency margin penalty. All parameters are owner-settable
+  (`setPythStaleness`, `setChainlinkStaleness`, `setDeviationThreshold`,
+  `setChainlinkAggregator` — `address(0)` disables the breaker).
+- **Settlement is still the signed forward print** — `LyraForwardFeed` wraps the original signed
+  `LyraSpotFeed`; anchoring settlement to Pyth/Chainlink is a flagged follow-up.
+
+> **Operational: Pyth staleness (60 s).** Pyth is a pull oracle — the on-chain price only updates
+> when someone pushes a signed update. Quoting/trading requires a recent push: run
+> `pnpm --filter @hedge/oracle-feeds pyth-push` (fetches the latest signed update from Pyth
+> Hermes, submits it via `updatePriceFeeds`, then reads `getSpot()` back through the adapter)
+> whenever the price is more than 60 s stale. The sender key only needs gas. See §7.
+
 The reference bot (`services/maker-bot/src/pricing.ts`) prices Black-76 on
 `forward`/`vol`/`rate` exactly from these reads, falling back to `getSpot()` when an expiry has no
 forward data yet. Price with your own marks by all means — but note margin and the OI fee are
 computed from *these* feeds, and the engine's cash pre-check uses your quoted premium. On testnet
-the surface is currently a flat 60% IV SVI fit and feeds update only when posted, so don't expect
-live-market dynamics.
+the surface is currently a flat 60% IV SVI fit and the signed feeds update only when posted, so
+don't expect live-market dynamics.
 
-ABIs for all feeds ship in `services/shared/src/abis/`.
+ABIs for all feeds ship in `services/shared/src/abis/`. Deployment JSON keys for the new oracle
+pieces: `pyth`, `btcPythPriceId`, `btcPythSpotFeed`, `btcChainlinkAggregator`.
 
 ### 5.2 Settlement at expiry
 
@@ -684,18 +791,19 @@ Two layers exist; only one is non-zero today:
    charged = max(fee, minOIFee)        per participant, only if subId OI increased
    ```
 
-   **As currently deployed on testnet** (`protocol/script/DeployAll.s.sol`):
-   `OIFeeRateBPS = 0.1e18` and `minOIFee = 10e18`, i.e.
-   **`max(0.10 × forward notional, 10 USDT)` per side**. Despite the parameter's "BPS" name it is a
-   plain 18dp decimal multiplier — the deployed value is **10% of forward notional**, which on the
-   live smoke trade meant a 6,279 USDT fee against a 378.59 USDT premium (see Appendix A). **Be
-   aware: this rate is a placeholder and is under review** — it is obviously not an economic rate
-   and will change before any real money flows; do not hard-code it. Read the current values
-   on-chain: `SRMPortfolioViewer.OIFeeRateBPS(btcOptionAsset)` (viewer:
+   **As currently deployed on testnet** (fixed on-chain 2026-06-12, see `protocol/TESTNET.md`):
+   `OIFeeRateBPS = 0.001e18` and `minOIFee = 10e18`, i.e.
+   **`max(0.1% of forward notional, 10 USDT)` per side**. Despite the parameter's "BPS" name it is
+   a plain 18dp decimal multiplier. (The original deploy shipped a `0.1e18` = 10% placeholder —
+   that is the 6,279 USDT fee visible in the historical smoke trade in Appendix A; it was changed
+   via the owner setter `SRMPortfolioViewer.setOIFeeRateBPS` and the deploy-script default is
+   fixed for future deploys.) The rate remains **governance-settable** — do not hard-code it. Read
+   the live values on-chain: `SRMPortfolioViewer.OIFeeRateBPS(btcOptionAsset)` (viewer:
    `0xbC9ae813B45Fa950AabE2E82eAB023Dd45a36486`) and `StandardManager.minOIFee()`.
 
-   The OI fee is **not** included in the engine's off-chain cash pre-check, but it *is* part of the
-   on-chain margin transaction — your subaccount must absorb `premium + OI fee` and still pass IM.
+   The OI fee **is included** in the engine's off-chain cash pre-check (estimated live from the
+   same on-chain reads on every quote, §2.4) and it is charged in the on-chain margin
+   transaction — your subaccount must absorb `premium + OI fee` and still pass IM.
 
 Gas: zero for quoting and fills (the executor pays); you pay gas only for your own
 deposits/withdrawals.
@@ -736,20 +844,25 @@ escape hatch above is the trust-minimized path.)
 ### 6.3 Quote TTLs
 
 - Engine constraint: `action.expiry >= ceil(auctionEndsAt / 1000)` or the quote is rejected.
-- Your constraint: expiry is the only thing that kills a signed quote (no cancel). The taker-accept
-  step has **no deadline**, so a winning quote can be accepted any time before your expiry —
-  including after the market has moved. The reference bot uses
-  `expiry = max(auctionEnd + 60 s, now + QUOTE_TTL_SEC)` with `QUOTE_TTL_SEC = 300`. Treat the TTL
-  as a free option you are short to the taker and price it accordingly (or keep it tight).
+- The taker-accept step is bounded by the engine's **accept deadline**
+  (`TAKER_ACCEPT_DEADLINE_MS`, default **120 s** after the auction closes) — past it you receive
+  `rfq_expired` and your reserved collateral is released (§3.5). Your signature itself, though, is
+  only killed by `action.expiry` (cancel is an off-chain courtesy, §4.4), so a winning quote can be
+  accepted any time inside the deadline — including after the market has moved. The reference bot
+  uses `expiry = max(auctionEnd + 60 s, now + QUOTE_TTL_SEC)` with `QUOTE_TTL_SEC = 300`. Treat
+  the accept window as a free option you are short to the taker and price it accordingly (or keep
+  TTL and deadline tight).
 
 ### 6.4 Margin monitoring
 
 Keep your subaccount's cash comfortably above your worst-case
 `Σ(open quotes: premium + OI fee)`. Monitor with the reads in §2.4. Long-only call buying cannot be
 liquidated in v1 economics (no negative exposure), but a failed IM check makes your *fills revert*,
-which burns goodwill and shows up as `rfq_failed` on our side. Remember the engine validates your
-cash **at quote time** against premium+maxFee only — concurrent wins across simultaneous auctions
-can over-commit your balance; the engine does not reserve balances across open quotes.
+which burns goodwill and shows up as `rfq_failed`. The engine now **reserves cash per maker
+subaccount across all your live quotes** (open auctions plus won-awaiting-accept) and includes the
+estimated OI fee in the pre-check (§2.4), so concurrent auctions cannot over-commit your balance
+*at admission time* — but the check is still a snapshot of your on-chain balance: withdrawals or
+fills landing between quote and execution can still fail IM on-chain. Keep a buffer.
 
 ### 6.5 BSC-testnet legacy-gas quirk
 
@@ -767,19 +880,27 @@ chain 97 must be a legacy transaction with an explicit gasPrice of 0.2 gwei** (`
 
 ### 6.6 Engine availability semantics
 
-- The RFQ store is **in-memory**: if the engine restarts, open auctions and historical RFQ state
-  are gone (the WS replay after `auth_ok` covers only RFQs the current process knows). Reconcile
-  fills from chain events (`RFQTradeCompleted` on RfqModule), not from the engine.
-- Auth is per-connection; always re-run the handshake after reconnect.
-- One WS connection per maker process is the supported pattern; multiple connections from the same
-  address are not deduplicated (each gets every broadcast — guard against double-quoting; note
-  duplicate quotes are *both* admitted).
+- The RFQ store is **durable in production** (`STORE_PATH` switches the engine to an append-only
+  JSONL log; the shared testnet engine runs with it set). On restart the engine replays the log
+  and recovers: open auctions whose window is still running are re-armed (close timers + your
+  collateral reservations rebuilt); windows that elapsed while down are closed normally; closed
+  auctions past their accept deadline are expired; RFQs caught mid-execution are marked `failed`
+  (the engine never blindly resubmits — verify on-chain). Executed/failed/expired RFQs are kept as
+  trade history. Still reconcile fills from chain events (`RFQTradeCompleted` on RfqModule) as the
+  authoritative record. (Without `STORE_PATH` — dev/tests — the store is in-memory and restart
+  loses state.)
+- Auth is per-connection; always re-run the handshake after reconnect. Dead connections are
+  detected by the server-side WS heartbeat (§3.2).
+- The engine keeps **one live connection per maker address** — a newer authenticated connection
+  supersedes the older one (close code 4000). Run one WS connection per maker key.
 
 ---
 
 ## 7. Runbook: get quoting on testnet in 30 minutes
 
-Prereqs: Node 22, pnpm, foundry's `cast`, a fresh EOA key, ~0.05 tBNB from a faucet.
+Prereqs: Node 22, pnpm, foundry's `cast`, a fresh EOA key, ~0.05 tBNB from a faucet — and your
+maker address **registered on the engine allowlist** (send it to us; un-allowlisted addresses are
+refused at WS auth with close code 4003, §2.1).
 
 ```sh
 # 0. Clone + install (5 min)
@@ -792,7 +913,8 @@ pnpm --filter @hedge/maker-bot build
 export CHAIN_ID=97
 export RPC_URL=https://bsc-testnet.bnbchain.org     # or your thirdweb endpoint
 export PRIVATE_KEY=0x<your maker key>
-export RFQ_ENGINE_WS=ws://<engine-host>:3030/maker   # ask us for the current testnet host
+export RFQ_ENGINE_WS=wss://<engine-host>/maker       # ask us for the current testnet host
+                                                     # (ws://127.0.0.1:3030/maker against a local engine)
 
 # 2. Mint yourself collateral (mocks are open-mint) (2 min)
 cast send 0x9896AF08d261E52a629EF58cBebd32E8e0AA8eA9 \
@@ -808,14 +930,21 @@ pnpm --filter @hedge/maker-bot exec maker-bot price \
   --forward 62790 --strike 69000 --days 8 --vol 0.6 --rate 0.05
 # -> { theo: ~398, bid: ~378 (0.95x), ask: ~418 (1.05x) }
 
-# 5. Run the bot
+# 5. Freshen the Pyth BTC spot price (required when it is >60s stale — see §5.1).
+#    The SRM spot feed reverts on a stale Pyth price, which fails margin checks
+#    and therefore fills. Any funded key can push; it only pays gas.
+FEED_SIGNER_KEY=$PRIVATE_KEY pnpm --filter @hedge/oracle-feeds pyth-push
+# (ops keep this fresh on the shared testnet engine, but run it yourself before
+#  triggering test auctions)
+
+# 6. Run the bot
 pnpm --filter @hedge/maker-bot dev
 # [maker-bot] chain=97 owner=0x... subaccount=N
 # [transport] authenticated as 0x...
 # ...waits for rfq_open, prices off the on-chain feeds, quotes automatically
 
-# 6. (optional) Trigger a test auction yourself from a second, taker-side subaccount:
-curl -s -X POST http://<engine-host>:3030/rfq -H 'content-type: application/json' -d '{
+# 7. (optional) Trigger a test auction yourself from a second, taker-side subaccount:
+curl -s -X POST https://<engine-host>/rfq -H 'content-type: application/json' -d '{
   "subaccountId": "<takerSubId>",
   "instrument": { "asset": "BTC", "expiry": 1781856000, "strike": "69000", "isCall": true },
   "amount": "1", "direction": "sell" }'
@@ -826,6 +955,22 @@ Tuning knobs (env): `MAKER_BID_RATIO` (default 0.95 × theo), `MAKER_ASK_RATIO` 
 maker-sell flow ships), `MAKER_MAX_FEE` (default `"0"`), `QUOTE_TTL_SEC` (300), and pricing
 overrides `FORWARD_PRICE`/`SPOT_PRICE`/`IV`/`RATE` (when forward-or-spot **and** IV are set, the
 chain feeds are not queried at all — handy for dry runs).
+
+**Running your own engine** (local dev / conformance testing) — the rfq-engine env surface
+(`services/rfq-engine/README.md` is canonical):
+
+| Var | Default | Meaning |
+|---|---|---|
+| `HOST` | `127.0.0.1` | listen address; keep loopback in dev, `0.0.0.0` only behind a reverse proxy |
+| `RFQ_PORT` / `PORT` | `3030` | HTTP + WS listen port |
+| `AUCTION_WINDOW_MS` | `3000` | quote-collection window per RFQ |
+| `TAKER_ACCEPT_DEADLINE_MS` | `120000` | taker-accept deadline after close; past it ⇒ `rfq_expired` |
+| `WS_HEARTBEAT_MS` | `30000` | WS ping interval; `0` disables |
+| `MAKER_ALLOWLIST` | empty (open/dev) | comma-separated maker EOAs; others refused with close 4003 |
+| `TAKER_OPEN` | `true` | `false` rejects all RFQ creation (`403` / taker-WS error) |
+| `RFQ_RATE_LIMIT_PER_MIN` | `30` | RFQ creations per IP per minute; `0` disables |
+| `STORE_PATH` | unset (in-memory) | JSONL file for durable auctions + trade history |
+| `EXECUTOR_PRIVATE_KEY` | anvil key #0 (31337 only) | must be the registered trade executor |
 
 **Adapting it:** the only protocol-shaped code in the bot is `src/transport.ts` (WS framing + auth)
 and `src/quoter.ts` (order encoding + signing). Replace `src/pricing.ts`/`src/black76.ts` with your
@@ -838,7 +983,9 @@ prints your quote) as a conformance test for your client.
 ## Appendix A: worked example — the live testnet trade
 
 The first end-to-end covered-call on BSC testnet (2026-06-11), exactly as recorded in
-`protocol/TESTNET.md` and asserted on-chain. Fill tx:
+`protocol/TESTNET.md` and asserted on-chain. **Historical note:** this trade ran before two
+2026-06-12 changes — it paid the since-fixed 10% placeholder OI fee (now 0.1%, §5.3) and priced
+off the signed spot feed (BTC spot now comes from the Pyth adapter, §5.1). Fill tx:
 [`0x2d5d7c88ca7ea1c7f8bf46760487c01331525666546903c41dda29d5c2d4d9d3`](https://testnet.bscscan.com/tx/0x2d5d7c88ca7ea1c7f8bf46760487c01331525666546903c41dda29d5c2d4d9d3)
 (`Matching.verifyAndMatch`, block 112792281).
 
@@ -884,11 +1031,11 @@ managerData: 0x })` as a legacy tx at 0.2 gwei.
 |---|---|
 | Option `subId 3961…` taker → maker | 1.0 (taker −1, maker +1) |
 | Cash maker → taker (premium) | 378.586807763808053551 USDT |
-| OI fee, **each side** → fee-recipient subaccount 3 | `max(0.1 × 62,790, 10)` = **6,279 USDT** (12,558 total) |
+| OI fee, **each side** → fee-recipient subaccount 3 | `max(0.1 × 62,790, 10)` = **6,279 USDT** (12,558 total) — at the since-fixed 10% placeholder rate; the same trade today would pay `max(0.001 × 62,790, 10)` = **62.79 USDT** per side |
 
 Resulting balances: maker cash `150,000 − 378.5868… − 6,279 = 143,342.413192236191946449`;
 taker cash `+378.5868… − 6,279 = −5,900.413192236191946449` (a borrow against their 1 BTCB —
-exactly why the OI fee rate is flagged as a placeholder in §5.3). SRM initial margin passed for
+exactly why the placeholder OI fee rate was replaced, §5.3). SRM initial margin passed for
 both: taker IM 29,333.99 ≥ 0, maker IM 143,342.41 ≥ 0.
 
 **Step 5 — Settlement (scheduled).** At expiry (2026-06-19 08:00 UTC) the ops side runs
@@ -916,7 +1063,10 @@ Canonical source: `protocol/deployments/97.json`. RPC: `https://bsc-testnet.bnbc
 | Mock BTCB (open mint) | `0x32fCF6a260Cdd2A3dc79cD0d4aD6B6c46bF6798A` |
 | Mock USDT (open mint) | `0x9896AF08d261E52a629EF58cBebd32E8e0AA8eA9` |
 | DepositModule / WithdrawalModule | `0x955E509aAe4e39A97B1E4Fe7FAa1f52182827Fc0` / `0x99179e96af7E7691Fc723da83Fabc15f61a724D4` |
-| BTC spot / forward / vol / rate feeds | `0x69662A47…01b2C` / `0x86b7148B…9e05` / `0x5a892364…f0aE` / `0x11C394e9…d15D` (full addresses in §5.1) |
+| BTC spot — PythSpotFeed (live SRM spot feed) | `0xaAc2C29105928A6fe7788956058bcF3B9A3D5E51` |
+| Pyth contract (BSC testnet) / BTC/USD price id | `0x5744Cbf430D99456a0A8771208b674F27f8EF0Fb` / `0xe62df6c8b4a85fe1a67db44dc12de5db330f7ac66b72dc658afedf0f4a415b43` |
+| Chainlink BTC/USD aggregator (circuit breaker) | `0x5741306c21795FdCBb9b265Ea0255F499DFe515C` |
+| BTC spot (signed, fallback) / forward / vol / rate feeds | `0x69662A47…01b2C` / `0x86b7148B…9e05` / `0x5a892364…f0aE` / `0x11C394e9…d15D` (full addresses in §5.1) |
 | Stable (USDT/USD) feed | `0x2Eeb9512F40c1964eCA5dc156D8e2479dA632116` |
 | Trade executor / deployer / feed poster | `0x6e154BEA64a1808dbAD715d87226e104Ad1EE9eB` |
 | Feed signer (testnet 1-of-1) | `0xdE50B8E965aD2B8E25f45a19FD87A2d2c737782F` |
