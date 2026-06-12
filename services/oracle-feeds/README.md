@@ -66,6 +66,25 @@ Reposts the snapshot every `--interval` seconds. Swap in the Chainlink-on-BSC
 source with `PRICE_SOURCE=chainlink CHAINLINK_AGGREGATOR=0x...` (stubbed behind
 the `PriceSource` interface for the testnet/mainnet rollout).
 
+## Pyth push (`pyth-push`)
+
+The BTC market on BSC testnet uses a `PythSpotFeed` adapter (`protocol/src/PythSpotFeed.sol`)
+as the SRM spot feed: Pyth primary, Chainlink BTC/USD circuit breaker. Pyth is a pull
+oracle — someone must land a signed Hermes update on-chain before `getSpot()` is fresh
+(default staleness bound: 60s):
+
+```sh
+CHAIN_ID=97 RPC_URL=<rpc> FEED_SIGNER_KEY=<any funded key> \
+  pnpm --filter @hedge/oracle-feeds pyth-push
+```
+
+Fetches the latest `Crypto.BTC/USD` update from Hermes (`HERMES_URL` env, default
+`https://hermes.pyth.network`), quotes `IPyth.getUpdateFee`, submits
+`updatePriceFeeds` with the fee attached, then reads `getSpot()` back through the
+adapter. Defaults come from the deployments JSON keys `pyth`, `btcPythPriceId` and
+`btcPythSpotFeed`; override with `--pyth`, `--price-id`, `--adapter`, `--hermes`.
+The sender key only needs gas (no feed-signer whitelist involved).
+
 ## Settlement runner
 
 After chain time passes the expiry (e2e warps anvil):

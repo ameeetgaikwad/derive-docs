@@ -4,7 +4,7 @@ import { makeViemChain } from "./chain.js";
 import { loadConfig } from "./config.js";
 import { Executor } from "./executor.js";
 import { RfqEngineServer } from "./server.js";
-import { InMemoryRfqStore } from "./store.js";
+import { InMemoryRfqStore, JsonlRfqStore } from "./store.js";
 
 export * from "./types.js";
 export * from "./store.js";
@@ -27,6 +27,8 @@ async function main(): Promise<void> {
       matching: config.matching,
       subAccounts: config.subAccounts,
       cashAsset: config.cashAsset,
+      srmViewer: config.srmViewer,
+      standardManager: config.standardManager,
     },
   });
 
@@ -41,25 +43,50 @@ async function main(): Promise<void> {
     );
   }
 
+  const store = config.storePath ? new JsonlRfqStore(config.storePath) : new InMemoryRfqStore();
+
   const engine = new AuctionEngine({
-    store: new InMemoryRfqStore(),
+    store,
     chainReader: reader,
     executor: new Executor(submitter),
     chainId: config.chainId,
     matching: config.matching,
     rfqModule: config.rfqModule,
     optionAssets: config.optionAssets,
+    forwardFeeds: config.forwardFeeds,
     auctionWindowMs: config.auctionWindowMs,
+    acceptDeadlineMs: config.takerAcceptDeadlineMs,
   });
 
-  const server = new RfqEngineServer({ engine, port: config.port });
+  if (config.storePath) {
+    const recovered = await engine.recover();
+    // eslint-disable-next-line no-console
+    console.log(
+      `rfq-engine store ${config.storePath}: recovered ` +
+        `${recovered.rearmed} re-armed, ${recovered.closed} closed, ` +
+        `${recovered.expired} expired, ${recovered.failed} failed-in-flight`,
+    );
+  }
+
+  const server = new RfqEngineServer({
+    engine,
+    host: config.host,
+    port: config.port,
+    makerAllowlist: config.makerAllowlist,
+    takerOpen: config.takerOpen,
+    rfqRateLimitPerMin: config.rfqRateLimitPerMin,
+    heartbeatMs: config.heartbeatMs,
+  });
   const { port } = await server.start();
 
   // eslint-disable-next-line no-console
   console.log(
-    `rfq-engine listening on :${port} ` +
+    `rfq-engine listening on ${config.host}:${port} ` +
       `(chain ${config.chainId}, rpc ${config.rpcUrl}, executor ${account.address}, ` +
-      `auction window ${config.auctionWindowMs}ms)\n` +
+      `auction window ${config.auctionWindowMs}ms, accept deadline ${config.takerAcceptDeadlineMs}ms, ` +
+      `heartbeat ${config.heartbeatMs}ms, ` +
+      `makers ${config.makerAllowlist.length > 0 ? `allowlist[${config.makerAllowlist.length}]` : "open"}, ` +
+      `store ${config.storePath ?? "in-memory"})\n` +
       `  REST: POST /rfq | GET /rfq/:id | POST /rfq/:id/accept | GET /health\n` +
       `  WS:   /maker (auth handshake -> RFQ stream + quotes) | /taker`,
   );

@@ -99,6 +99,46 @@ export interface QuoteValidationContext {
   chainReader: ChainReader;
   /** unix ms clock, injectable for tests */
   now?: () => number;
+  /**
+   * Forward feed for the RFQ instrument's currency — used to estimate the SRM
+   * OI fee. When absent the OI fee is treated as 0 (e.g. unit fixtures).
+   */
+  forwardFeed?: Address | null;
+  /**
+   * 18dp cash already reserved against the maker subaccount by other live
+   * quotes (open auctions + won-awaiting-accept). Default 0.
+   */
+  reservedCash?: bigint;
+}
+
+/**
+ * Estimate the SRM open-interest fee for a single option trade exactly the way
+ * the chain computes it (StandardManager._chargeAllOIFee ->
+ * BasePortfolioViewer.getAssetOIFee):
+ *
+ *   fee = |amount| * forwardPrice / 1e18 * OIFeeRateBPS[asset] / 1e18
+ *   fee = max(fee, minOIFee) when fee > 0
+ *
+ * Conservative: assumes OI increases (the on-chain fee is 0 when it doesn't).
+ * All inputs are read live — OIFeeRateBPS is governance-settable.
+ */
+export async function estimateOIFee(params: {
+  chainReader: ChainReader;
+  optionAsset: Address;
+  forwardFeed: Address;
+  expiry: bigint;
+  amount: bigint;
+}): Promise<bigint> {
+  const rate = await params.chainReader.getOIFeeRateBPS(params.optionAsset);
+  if (rate === 0n) return 0n;
+  const forwardPrice = await params.chainReader.getForwardPrice(params.forwardFeed, params.expiry);
+  const abs = params.amount < 0n ? -params.amount : params.amount;
+  let fee = (((abs * forwardPrice) / ONE) * rate) / ONE;
+  if (fee > 0n) {
+    const minOIFee = await params.chainReader.getMinOIFee();
+    if (fee < minOIFee) fee = minOIFee;
+  }
+  return fee;
 }
 
 /**
@@ -196,13 +236,36 @@ export async function validateQuote(params: {
       `subaccount ${action.subaccountId} is not deposited into Matching by ${maker}`,
     );
   }
-  // RfqModule cash leg: maker pays price * amount / 1e18 (+ fees up to maxFee)
+  // RfqModule cash leg: maker pays price * amount / 1e18, plus the matching
+  // fee (capped by the signed maxFee) plus the SRM OI fee (charged by the
+  // manager on OI-increasing trades — estimated live, never hardcoded).
   const totalPremium = (trade.price * trade.amount) / ONE;
-  const required = totalPremium + order.maxFee;
+  let oiFee = 0n;
+  if (ctx.forwardFeed) {
+    try {
+      oiFee = await estimateOIFee({
+        chainReader: ctx.chainReader,
+        optionAsset: rfq.instrument.optionAsset,
+        forwardFeed: ctx.forwardFeed,
+        expiry: rfq.instrument.expiry,
+        amount: trade.amount,
+      });
+    } catch (err) {
+      throw new QuoteValidationError(
+        `cannot estimate SRM OI fee (forward feed ${ctx.forwardFeed}): ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+    }
+  }
+  const required = totalPremium + order.maxFee + oiFee;
+  const reserved = ctx.reservedCash ?? 0n;
   const cash = await ctx.chainReader.getCashBalance(action.subaccountId);
-  if (cash < required) {
+  if (cash < reserved + required) {
     throw new QuoteValidationError(
-      `insufficient maker cash: balance ${cash} < required ${required}`,
+      `insufficient maker cash: balance ${cash} < required ${required}` +
+        ` (incl. OI fee ${oiFee})` +
+        (reserved > 0n ? ` + reserved ${reserved} across open quotes` : ""),
     );
   }
 
@@ -218,6 +281,7 @@ export async function validateQuote(params: {
     action,
     signature,
     receivedAt: now(),
+    reservedCash: required,
   };
 }
 

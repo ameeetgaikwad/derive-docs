@@ -52,6 +52,11 @@ const FAKE_TX = ("0x" + "ab".repeat(32)) as Hex;
 class FakeChainReader implements ChainReader {
   owners = new Map<bigint, Address>();
   balances = new Map<bigint, bigint>();
+  /** 18dp OI fee rate per option asset (BasePortfolioViewer.OIFeeRateBPS) */
+  oiFeeRates = new Map<string, bigint>();
+  /** 18dp forward price per feed address */
+  forwardPrices = new Map<string, bigint>();
+  minOIFee = 0n;
   async getMatchingSubaccountOwner(id: bigint): Promise<Address> {
     return this.owners.get(id) ?? zeroAddress;
   }
@@ -60,6 +65,17 @@ class FakeChainReader implements ChainReader {
   }
   async isTradeExecutor(): Promise<boolean> {
     return true;
+  }
+  async getOIFeeRateBPS(asset: Address): Promise<bigint> {
+    return this.oiFeeRates.get(asset.toLowerCase()) ?? 0n;
+  }
+  async getForwardPrice(feed: Address): Promise<bigint> {
+    const price = this.forwardPrices.get(feed.toLowerCase());
+    if (price === undefined) throw new Error(`no forward price for feed ${feed}`);
+    return price;
+  }
+  async getMinOIFee(): Promise<bigint> {
+    return this.minOIFee;
   }
 }
 

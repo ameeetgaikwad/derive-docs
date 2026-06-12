@@ -127,6 +127,7 @@ async function buildFixture() {
     direction: "sell",
     createdAt: 0,
     auctionEndsAt: 0,
+    acceptDeadlineAt: null,
     status: "closed",
     bestQuoteId: "quote-fixture",
     execution: null,
@@ -144,6 +145,7 @@ async function buildFixture() {
     action: makerAction,
     signature: makerSignature,
     receivedAt: 0,
+    reservedCash: (PREMIUM * AMOUNT) / 10n ** 18n,
   };
 
   return { rfq, quote, makerAction, makerSignature, takerAction, takerSignature, orderHash };

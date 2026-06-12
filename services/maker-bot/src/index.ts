@@ -166,19 +166,48 @@ async function cmdRun(): Promise<void> {
     onEvent: (msg) => {
       switch (msg.type) {
         case "quote_ack":
-          console.log(`[maker-bot] quote accepted: rfq=${msg.rfqId} quote=${msg.quoteId}`);
+          console.log(
+            `[maker-bot] quote accepted: rfq=${msg.rfqId} quote=${msg.quoteId}` +
+              (msg.replacedQuoteId ? ` (replaced ${msg.replacedQuoteId})` : ""),
+          );
           break;
         case "quote_rejected":
           console.warn(`[maker-bot] quote rejected: rfq=${msg.rfqId} reason=${msg.reason}`);
           break;
         case "rfq_closed":
           console.log(
-            `[maker-bot] auction closed: rfq=${msg.rfqId} ${msg.won ? "WON" : `best=${msg.bestQuoteId}`}`,
+            `[maker-bot] auction closed: rfq=${msg.rfqId} ${msg.won ? "WON" : `best=${msg.bestQuoteId}`}` +
+              (msg.won && msg.acceptDeadlineAt
+                ? ` (taker must accept by ${new Date(msg.acceptDeadlineAt).toISOString()})`
+                : ""),
           );
           quoted.delete(msg.rfqId);
           break;
-        case "rfq_executed":
-          console.log(`[maker-bot] executed on-chain: rfq=${msg.rfqId} tx=${msg.txHash}`);
+        case "rfq_executed": {
+          const fill = msg.fill
+            ? ` fill: ${fromUnit(BigInt(msg.fill.amount))}x ${msg.fill.instrument} @ ${fromUnit(
+                BigInt(msg.fill.premium),
+              )} (premium paid ${fromUnit(BigInt(msg.fill.totalPremium))}, makerFee ${fromUnit(
+                BigInt(msg.fill.makerFee),
+              )})`
+            : "";
+          console.log(`[maker-bot] executed on-chain: rfq=${msg.rfqId} tx=${msg.txHash}${fill}`);
+          break;
+        }
+        case "rfq_failed":
+          console.warn(`[maker-bot] execution FAILED: rfq=${msg.rfqId} reason=${msg.reason}`);
+          break;
+        case "rfq_expired":
+          console.log(`[maker-bot] won auction expired unaccepted: rfq=${msg.rfqId} (${msg.reason})`);
+          break;
+        case "cancel_ack":
+          console.log(`[maker-bot] quote cancelled: rfq=${msg.rfqId} quote=${msg.quoteId}`);
+          break;
+        case "cancel_rejected":
+          console.warn(`[maker-bot] cancel rejected: quote=${msg.quoteId} reason=${msg.reason}`);
+          break;
+        case "superseded":
+          console.warn(`[maker-bot] connection superseded: ${msg.message}`);
           break;
         case "error":
           console.warn(`[maker-bot] engine error: ${msg.message}`);

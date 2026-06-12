@@ -2,6 +2,7 @@ import {
   encodeFunctionData,
   http,
   createPublicClient,
+  parseAbi,
   type Address,
   type Hex,
   type PublicClient,
@@ -9,7 +10,9 @@ import {
   type Account,
 } from "viem";
 import {
+  lyraForwardFeedAbi,
   matchingAbi,
+  standardManagerAbi,
   subAccountsAbi,
   getChain,
   makeWalletClient,
@@ -26,7 +29,21 @@ export interface ChainReader {
   getCashBalance(subaccountId: bigint): Promise<bigint>;
   /** Matching.tradeExecutors(address) */
   isTradeExecutor(address: Address): Promise<boolean>;
+  /**
+   * SRMPortfolioViewer.OIFeeRateBPS(asset) — 18dp rate the SRM charges on
+   * OI-increasing trades. Read live: governance can change it at any time.
+   */
+  getOIFeeRateBPS(asset: Address): Promise<bigint>;
+  /** LyraForwardFeed.getForwardPrice(expiry) — 18dp forward price */
+  getForwardPrice(forwardFeed: Address, expiry: bigint): Promise<bigint>;
+  /** StandardManager.minOIFee() — 18dp floor applied when an OI fee is charged */
+  getMinOIFee(): Promise<bigint>;
 }
+
+/** BasePortfolioViewer surface the engine needs (no full ABI in shared yet). */
+const srmViewerAbi = parseAbi([
+  "function OIFeeRateBPS(address asset) view returns (uint256)",
+]);
 
 export interface SubmitResult {
   txHash: Hex;
@@ -68,6 +85,10 @@ export interface ChainAddresses {
   matching: Address;
   subAccounts: Address;
   cashAsset: Address;
+  /** SRMPortfolioViewer (deployments key "srmViewer") — OI fee rate reads */
+  srmViewer: Address;
+  /** StandardManager — minOIFee reads */
+  standardManager: Address;
 }
 
 export class ViemChainReader implements ChainReader {
@@ -100,6 +121,34 @@ export class ViemChainReader implements ChainReader {
       abi: matchingAbi,
       functionName: "tradeExecutors",
       args: [address],
+    });
+  }
+
+  async getOIFeeRateBPS(asset: Address): Promise<bigint> {
+    return this.client.readContract({
+      address: this.addresses.srmViewer,
+      abi: srmViewerAbi,
+      functionName: "OIFeeRateBPS",
+      args: [asset],
+    });
+  }
+
+  async getForwardPrice(forwardFeed: Address, expiry: bigint): Promise<bigint> {
+    const [forwardPrice] = await this.client.readContract({
+      address: forwardFeed,
+      abi: lyraForwardFeedAbi,
+      functionName: "getForwardPrice",
+      args: [expiry],
+    });
+    return forwardPrice;
+  }
+
+  async getMinOIFee(): Promise<bigint> {
+    return this.client.readContract({
+      address: this.addresses.standardManager,
+      abi: standardManagerAbi,
+      functionName: "minOIFee",
+      args: [],
     });
   }
 }

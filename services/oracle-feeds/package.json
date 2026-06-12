@@ -15,6 +15,7 @@
     "post": "tsx src/cli.ts post",
     "daemon": "tsx src/cli.ts daemon",
     "settle": "tsx src/cli.ts settle",
+    "pyth-push": "tsx src/cli.ts pyth-push",
     "test": "vitest run",
     "smoke": "pnpm build && vitest run"
   },

@@ -39,6 +39,7 @@ import {ISubAccounts} from "v2-core/src/interfaces/ISubAccounts.sol";
 import {IERC20Metadata} from "openzeppelin/token/ERC20/extensions/IERC20Metadata.sol";
 
 import {MockERC20} from "./mocks/MockERC20.sol";
+import {MarketDeployerBase} from "./MarketDeployerBase.sol";
 
 /**
  * @title DeployAll
@@ -68,13 +69,13 @@ import {MockERC20} from "./mocks/MockERC20.sol";
  * Env (required when chainId != 31337, e.g. BSC testnet 97):
  *   BTCB_ADDRESS, USDT_ADDRESS   real 18-decimal token addresses (mocks are anvil-only)
  */
-contract DeployAll is Script {
-  // anvil well-known account #0 — dev default only
-  uint internal constant ANVIL_KEY_0 = 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80;
-
+contract DeployAll is MarketDeployerBase {
   // ---------------------------------------------------------------------------
-  // Parameters — copied from lib/v2-core/scripts/config-mainnet.sol ("Config"),
-  // the same values Derive uses for integration tests / anvil state generation.
+  // Core (market-independent) parameters — copied from
+  // lib/v2-core/scripts/config-mainnet.sol ("Config"), the same values Derive uses
+  // for integration tests / anvil state generation. Per-market config (token, Pyth
+  // feed id, Chainlink aggregator, caps, margin params) lives in MarketDeployerBase
+  // .getMarketConfig — BTC is entry 0.
   // ---------------------------------------------------------------------------
 
   // Config.getDefaultInterestRateModel()
@@ -88,28 +89,12 @@ contract DeployAll is Script {
   uint internal constant MAX_ACCOUNT_SIZE_SRM = 48; // Config.MAX_ACCOUNT_SIZE_SRM
   bool internal constant BORROW_ENABLED = true; // Config.BORROW_ENABLED
 
-  // Config feed heartbeats
-  uint64 internal constant SPOT_HEARTBEAT = 3 minutes;
-  uint64 internal constant VOL_HEARTBEAT = 20 minutes;
-  uint64 internal constant FORWARD_HEARTBEAT = 60 minutes;
-  uint64 internal constant SETTLEMENT_HEARTBEAT = 3 minutes;
-  uint64 internal constant STABLE_HEARTBEAT = 60 minutes;
-  uint64 internal constant RATE_HEARTBEAT = 60 minutes; // signed rate feed (not in Config; matches stable)
-  uint64 internal constant FWD_MAX_EXPIRY = 400 days;
-
-  // Config.getSRMCaps("BTC") (option/base only — no perp in v1)
-  uint internal constant BTC_OPTION_CAP = 100_000e18;
-  uint internal constant BTC_BASE_CAP = 5e18;
-
-  // fees — per lib/v2-core/scripts/deploy-srm-option-only-market.s.sol
-  uint internal constant OI_FEE_BPS = 0.1e18;
-  uint internal constant MIN_OI_FEE = 10e18;
+  // (feed heartbeats + OI fee constants live in MarketDeployerBase)
 
   // ---------------------------------------------------------------------------
   // Deployed contracts (state vars to keep run() shallow / avoid stack issues)
   // ---------------------------------------------------------------------------
   address internal deployer;
-  address internal feedSigner;
   address internal tradeExecutor;
 
   address internal btcb;
@@ -158,8 +143,7 @@ contract DeployAll is Script {
 
     _setupTokens();
     _deployCore();
-    _deployBtcMarket();
-    _registerBtcMarketOnSrm();
+    _deployBtcMarket(getMarketConfig(0)); // BTC = market config entry 0
     _deployMatchingStack();
 
     vm.stopBroadcast();
@@ -170,18 +154,15 @@ contract DeployAll is Script {
   /// @dev 18-decimal mocks on anvil (BTCB & USDT are both 18 decimals on BNB chain);
   ///      real token addresses from env elsewhere.
   function _setupTokens() internal {
+    btcb = _resolveUnderlying(getMarketConfig(0)); // mock on anvil, BTCB_ADDRESS elsewhere
     if (block.chainid == 31337) {
-      MockERC20 mockBtcb = new MockERC20("Mock BTCB", "BTCB", 18);
       MockERC20 mockUsdt = new MockERC20("Mock USDT", "USDT", 18);
       // seed the deployer so local tooling has funds out of the box
-      mockBtcb.mint(deployer, 1_000e18);
+      MockERC20(btcb).mint(deployer, 1_000e18);
       mockUsdt.mint(deployer, 100_000_000e18);
-      btcb = address(mockBtcb);
       usdt = address(mockUsdt);
     } else {
-      btcb = vm.envAddress("BTCB_ADDRESS");
       usdt = vm.envAddress("USDT_ADDRESS");
-      require(IERC20Metadata(btcb).decimals() == 18, "BTCB must be 18 decimals");
       require(IERC20Metadata(usdt).decimals() == 18, "USDT must be 18 decimals");
     }
   }
@@ -251,75 +232,20 @@ contract DeployAll is Script {
     srm.setWhitelistedCallee(address(optionSettlementHelper), true);
   }
 
-  /// @dev mirrors lib/v2-core/scripts/deploy-srm-option-only-market.s.sol (_deployMarketContracts),
-  ///      plus the signed LyraRateFeed required by the spec.
-  function _deployBtcMarket() internal {
-    btcSpotFeed = new LyraSpotFeed();
-    btcForwardFeed = new LyraForwardFeed(btcSpotFeed);
-    btcVolFeed = new LyraVolFeed();
-    btcRateFeed = new LyraRateFeed();
+  /// @dev market deploy + SRM registration logic is shared with AddMarket.s.sol —
+  ///      see MarketDeployerBase._deployAndRegisterMarket.
+  function _deployBtcMarket(MarketConfig memory cfg) internal {
+    MarketDeployment memory m = _deployAndRegisterMarket(subAccounts, srm, srmViewer, btcb, cfg);
+    btcSpotFeed = m.spotFeed;
+    btcForwardFeed = m.forwardFeed;
+    btcVolFeed = m.volFeed;
+    btcRateFeed = m.rateFeed;
+    btcOption = m.option;
+    btcBase = m.base;
+    btcMarketId = m.marketId;
 
-    _configureFeed(BaseLyraFeed(address(btcSpotFeed)), SPOT_HEARTBEAT);
-    _configureFeed(BaseLyraFeed(address(btcVolFeed)), VOL_HEARTBEAT);
-    _configureFeed(BaseLyraFeed(address(btcRateFeed)), RATE_HEARTBEAT);
-    _configureFeed(BaseLyraFeed(address(btcForwardFeed)), FORWARD_HEARTBEAT);
-    btcForwardFeed.setSettlementHeartbeat(SETTLEMENT_HEARTBEAT);
-    btcForwardFeed.setMaxExpiry(FWD_MAX_EXPIRY);
-
-    // option settles against the forward feed (ISettlementFeed)
-    btcOption = new OptionAsset(subAccounts, address(btcForwardFeed));
-    btcBase = new WrappedERC20Asset(subAccounts, IERC20Metadata(btcb));
-  }
-
-  /// @dev mirrors deploy-srm-option-only-market (_setPermissionAndCaps + _registerMarketToSRM)
-  function _registerBtcMarketOnSrm() internal {
-    // asset-side whitelisting + caps, Config.getSRMCaps("BTC")
-    btcOption.setWhitelistManager(address(srm), true);
-    btcBase.setWhitelistManager(address(srm), true);
-    btcOption.setTotalPositionCap(IManager(address(srm)), BTC_OPTION_CAP);
-    btcBase.setTotalPositionCap(IManager(address(srm)), BTC_BASE_CAP);
-
-    btcMarketId = srm.createMarket("BTC");
-
-    srm.whitelistAsset(btcOption, btcMarketId, IStandardManager.AssetType.Option);
-    srm.whitelistAsset(btcBase, btcMarketId, IStandardManager.AssetType.Base);
-
-    srm.setOraclesForMarket(btcMarketId, btcSpotFeed, btcForwardFeed, btcVolFeed);
-
-    // Config.getSRMParams("BTC")
-    srm.setOptionMarginParams(
-      btcMarketId,
-      IStandardManager.OptionMarginParams({
-        maxSpotReq: 0.15e18,
-        minSpotReq: 0.13e18,
-        mmCallSpotReq: 0.09e18,
-        mmPutSpotReq: 0.09e18,
-        MMPutMtMReq: 0.09e18,
-        unpairedIMScale: 1.2e18,
-        unpairedMMScale: 1.1e18,
-        mmOffsetScale: 1.05e18
-      })
-    );
-    srm.setOracleContingencyParams(
-      btcMarketId,
-      IStandardManager.OracleContingencyParams({
-        perpThreshold: 0.55e18,
-        optionThreshold: 0.55e18,
-        baseThreshold: 0.55e18,
-        OCFactor: 1e18
-      })
-    );
-    srm.setBaseAssetMarginFactor(btcMarketId, 0.75e18, 0.93e18);
-
-    srmViewer.setOIFeeRateBPS(address(btcOption), OI_FEE_BPS);
-    srmViewer.setOIFeeRateBPS(address(btcBase), OI_FEE_BPS);
+    // global minimum OI fee (per-trade floor, cash decimals) — not per-market
     srm.setMinOIFee(MIN_OI_FEE);
-
-    // allow feed data to be pushed through manager during trades (BaseManager whitelisted callees)
-    srm.setWhitelistedCallee(address(btcSpotFeed), true);
-    srm.setWhitelistedCallee(address(btcForwardFeed), true);
-    srm.setWhitelistedCallee(address(btcVolFeed), true);
-    srm.setWhitelistedCallee(address(btcRateFeed), true);
   }
 
   /// @dev mirrors lib/v2-matching/scripts/deploy-all.s.sol — minus the UNLICENSED LiquidateModule.
@@ -349,13 +275,6 @@ contract DeployAll is Script {
 
     subAccountCreator = new SubAccountCreator(ISubAccounts(address(subAccounts)), matching);
     settlementUtils = new LyraSettlementUtils();
-  }
-
-  /// @dev 1-of-1 signer set for anvil; signer/threshold are env-configurable for other chains
-  function _configureFeed(BaseLyraFeed feed, uint64 heartbeat) internal {
-    feed.setHeartbeat(heartbeat);
-    feed.addSigner(feedSigner, true);
-    feed.setRequiredSigners(1);
   }
 
   function _writeDeploymentsJson() internal {

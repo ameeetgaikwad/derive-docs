@@ -93,17 +93,35 @@ as decimal strings.
               "expiry": "..", "owner": "0x..", "signer": "0x.." },
   "signature": "0x.." }
 
+// maker -> engine: withdraw a live quote while its auction is open.
+// Re-sending a quote for the same rfq REPLACES the previous one instead.
+{ "type": "cancel", "quoteId": ".." }
+
 // engine -> maker results:
-//   {"type":"quote_ack","rfqId":"..","quoteId":".."}
+//   {"type":"quote_ack","rfqId":"..","quoteId":"..","replacedQuoteId":".."}  (replacedQuoteId on replace)
 //   {"type":"quote_rejected","rfqId":"..","reason":".."}
-//   {"type":"rfq_closed","rfqId":"..","bestQuoteId":"..","won":true}   (won only on winner's socket)
-//   {"type":"rfq_executed","rfqId":"..","txHash":"0x.."}
+//   {"type":"cancel_ack","rfqId":"..","quoteId":".."} | {"type":"cancel_rejected","quoteId":"..","reason":".."}
+//   {"type":"rfq_closed","rfqId":"..","bestQuoteId":"..","won":true,"acceptDeadlineAt":1781712123456}
+//       (won/acceptDeadlineAt only on the winner's socket)
+//   {"type":"rfq_executed","rfqId":"..","txHash":"0x..","fill":{quoteId,instrument,amount,premium,totalPremium,makerFee,takerFee,blockNumber,..}}
+//   {"type":"rfq_failed","rfqId":"..","reason":".."}      (winner only: execution reverted/errored)
+//   {"type":"rfq_expired","rfqId":"..","reason":".."}     (winner only: taker missed the accept deadline)
+//   {"type":"superseded","message":".."}                  (a newer connection authed for this address;
+//                                                          socket then closes with code 4000 — do NOT reconnect)
 ```
 
+Liveness: the engine sends protocol-level WS pings (default every 30 s) and
+drops connections that miss a pong for a full interval. Node's global
+WebSocket answers pings automatically, so the bot needs no explicit keepalive.
+The engine may also enforce a maker address allowlist (`MAKER_ALLOWLIST`):
+non-allowlisted addresses get an auth error and close code 4003.
+
 A one-shot fake engine for manual / e2e testing lives at
-`scripts/fake-engine.mjs`: it runs the auth handshake, broadcasts a single
-covered-call RFQ (default: 1x BTC call, strike 110000, 7 days, asset from
-`protocol/deployments/31337.json`), prints the received quote and exits 0.
+`scripts/fake-engine.mjs`: it runs the auth handshake, verifies the
+heartbeat pong, broadcasts a single covered-call RFQ (default: 1x BTC call,
+strike 110000, 7 days, asset from `protocol/deployments/31337.json`), prints
+the received quote, replies `quote_ack` + `rfq_closed{won,acceptDeadlineAt}` +
+`rfq_executed{fill}` and exits 0.
 
 ```sh
 node scripts/fake-engine.mjs &                          # PORT=3030 by default

@@ -43,10 +43,15 @@ export interface Rfq {
   createdAt: number;
   /** ms epoch — quotes accepted strictly before this */
   auctionEndsAt: number;
+  /**
+   * ms epoch — set when the auction closes with a winner; the taker must
+   * accept strictly before this or the RFQ expires and the maker is released.
+   */
+  acceptDeadlineAt: number | null;
   status: RfqStatus;
   bestQuoteId: string | null;
   execution: ExecutionResult | null;
-  /** set when status === "failed" */
+  /** set when status === "failed" (or "expired" past the accept deadline) */
   error: string | null;
 }
 
@@ -67,6 +72,11 @@ export interface Quote {
   action: Action;
   signature: Hex;
   receivedAt: number;
+  /**
+   * 18dp cash reserved against the maker subaccount while this quote is live:
+   * totalPremium + signed maxFee + estimated SRM OI fee.
+   */
+  reservedCash: bigint;
 }
 
 export interface ExecutionResult {
@@ -157,7 +167,26 @@ export interface PublicRfq {
   amount: string;
   createdAt: number;
   auctionEndsAt: number;
+  /** ms epoch taker-accept deadline; null until the auction closes with a winner */
+  acceptDeadlineAt: number | null;
   status: RfqStatus;
+}
+
+/** Fill report attached to rfq_executed (all 18dp decimal strings). */
+export interface WireFill {
+  quoteId: string;
+  instrument: string;
+  maker: string;
+  makerSubaccountId: string;
+  takerSubaccountId: string;
+  amount: string;
+  /** per-unit premium */
+  premium: string;
+  /** realized cash maker -> taker */
+  totalPremium: string;
+  makerFee: string;
+  takerFee: string;
+  blockNumber: string | null;
 }
 
 export interface PublicBestQuote {
@@ -198,16 +227,24 @@ export type MakerServerMessage =
       bestQuoteId: string | null;
       /** set on the winning maker's socket only */
       won?: boolean;
+      /** ms epoch taker-accept deadline; sent on the winning maker's socket only */
+      acceptDeadlineAt?: number;
     }
-  | { type: "rfq_executed"; rfqId: string; txHash: Hex }
-  | { type: "quote_ack"; rfqId: string; quoteId: string }
+  | { type: "rfq_executed"; rfqId: string; txHash: Hex; fill: WireFill }
+  | { type: "rfq_failed"; rfqId: string; reason: string }
+  | { type: "rfq_expired"; rfqId: string; reason: string }
+  | { type: "quote_ack"; rfqId: string; quoteId: string; replacedQuoteId?: string }
   | { type: "quote_rejected"; rfqId: string; reason: string }
+  | { type: "cancel_ack"; rfqId: string; quoteId: string }
+  | { type: "cancel_rejected"; quoteId: string; reason: string }
+  | { type: "superseded"; message: string }
   | { type: "error"; message: string };
 
 // Maker WS protocol (maker -> server)
 export type MakerClientMessage =
   | { type: "auth"; address: string; signature: string }
-  | { type: "quote"; rfqId: string; action: SerializedAction; signature: string };
+  | { type: "quote"; rfqId: string; action: SerializedAction; signature: string }
+  | { type: "cancel"; quoteId: string };
 
 // Taker WS protocol
 export type TakerClientMessage =
@@ -303,7 +340,24 @@ export function publicRfq(rfq: Rfq): PublicRfq {
     amount: rfq.amount.toString(),
     createdAt: rfq.createdAt,
     auctionEndsAt: rfq.auctionEndsAt,
+    acceptDeadlineAt: rfq.acceptDeadlineAt,
     status: rfq.status,
+  };
+}
+
+export function wireFill(fill: FillSummary, blockNumber: bigint | null): WireFill {
+  return {
+    quoteId: fill.quoteId,
+    instrument: fill.instrument,
+    maker: fill.maker,
+    makerSubaccountId: fill.makerSubaccountId.toString(),
+    takerSubaccountId: fill.takerSubaccountId.toString(),
+    amount: fill.amount.toString(),
+    premium: fill.premium.toString(),
+    totalPremium: fill.totalPremium.toString(),
+    makerFee: fill.makerFee.toString(),
+    takerFee: fill.takerFee.toString(),
+    blockNumber: blockNumber?.toString() ?? null,
   };
 }
 

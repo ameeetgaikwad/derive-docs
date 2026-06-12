@@ -9,6 +9,7 @@ import { getDeadlineSec, getFeedSignerAccount } from "./env.js";
 import { FeedPoster, feedAddressesFromDeployments, type SnapshotExpiryParams } from "./poster.js";
 import { priceSourceFromEnv, StaticPriceSource, type PriceSource } from "./priceSource.js";
 import { SettlementRunner, settlementAddressesFromDeployments } from "./settlement.js";
+import { pushPythUpdate, pythAddressesFromDeployments, type PythAddresses } from "./pyth.js";
 
 const USAGE = `oracle-feeds — signed feed poster + settlement runner (hedge)
 
@@ -20,6 +21,13 @@ Usage:
 
   oracle-feeds daemon [--interval 15] [--spot ...] [--expiry <unix>]... [--iv 0.6] [--rate 0.05]
       Repost the same snapshot every --interval seconds (default 15).
+
+  oracle-feeds pyth-push [--pyth 0x..] [--price-id 0x..] [--adapter 0x..] [--hermes <url>]
+      Fetch the latest signed BTC/USD update from Pyth Hermes and submit it to the
+      on-chain Pyth contract via updatePriceFeeds (paying the update fee), then read
+      getSpot() back through the PythSpotFeed adapter. Defaults come from the
+      deployments JSON (keys: pyth, btcPythPriceId, btcPythSpotFeed); HERMES_URL env
+      overrides the Hermes endpoint. The sender (FEED_SIGNER_KEY) only needs gas.
 
   oracle-feeds settle --expiry <unix> --price <settlement price>
                       --subaccounts 4,5 [--skip-feed]
@@ -133,6 +141,39 @@ async function cmdDaemon(args: Args): Promise<void> {
   }
 }
 
+async function cmdPythPush(args: Args): Promise<void> {
+  const chainId = getChainId();
+  const account = getFeedSignerAccount(chainId);
+  const publicClient = makePublicClient({ chainId });
+  const walletClient = makeWalletClient(account, { chainId });
+
+  let addresses: PythAddresses;
+  const pythArg = one(args, "pyth");
+  const priceIdArg = one(args, "price-id");
+  if (pythArg && priceIdArg) {
+    addresses = {
+      pyth: pythArg as PythAddresses["pyth"],
+      priceId: priceIdArg as PythAddresses["priceId"],
+      adapter: one(args, "adapter") as PythAddresses["adapter"],
+    };
+  } else {
+    addresses = pythAddressesFromDeployments(chainId);
+    if (pythArg) addresses.pyth = pythArg as PythAddresses["pyth"];
+    if (priceIdArg) addresses.priceId = priceIdArg as PythAddresses["priceId"];
+    const adapterArg = one(args, "adapter");
+    if (adapterArg) addresses.adapter = adapterArg as PythAddresses["adapter"];
+  }
+
+  console.log(`[oracle-feeds] pyth-push chain=${chainId} sender=${account.address}`);
+  await pushPythUpdate({
+    publicClient,
+    walletClient,
+    account,
+    addresses,
+    hermesUrl: one(args, "hermes"),
+  });
+}
+
 async function cmdSettle(args: Args): Promise<void> {
   const expiry = one(args, "expiry");
   const price = one(args, "price");
@@ -168,6 +209,8 @@ async function main(): Promise<void> {
       return cmdPost(args);
     case "daemon":
       return cmdDaemon(args);
+    case "pyth-push":
+      return cmdPythPush(args);
     case "settle":
       return cmdSettle(args);
     default:

@@ -20,26 +20,67 @@ import {
   type RfqStatusResponse,
   type TakerClientMessage,
   type TakerServerMessage,
+  wireFill,
 } from "./types.js";
 
 const MAX_BODY_BYTES = 1024 * 1024;
+const DEFAULT_HEARTBEAT_MS = 30_000;
+const DEFAULT_RFQ_RATE_LIMIT_PER_MIN = 30;
+
+/** WS close codes (4000-4999 = application-defined). */
+export const WS_CLOSE_SUPERSEDED = 4000;
+export const WS_CLOSE_NOT_ALLOWLISTED = 4003;
 
 interface MakerSession {
   socket: WebSocket;
   challenge: string;
   address: Address | null;
+  isAlive: boolean;
 }
 
 interface TakerSession {
   socket: WebSocket;
   subscriptions: Set<string>;
+  ip: string;
+  isAlive: boolean;
 }
 
 export interface RfqEngineServerOptions {
   engine: AuctionEngine;
   /** 0 = ephemeral (tests) */
   port: number;
+  /** listen address; default 127.0.0.1 — front with a TLS-terminating proxy in prod */
   host?: string;
+  /** lowercase-insensitive maker address allowlist; empty/undefined = open (dev) */
+  makerAllowlist?: string[];
+  /** accept RFQ creation from any IP (default true); false = 403 every create */
+  takerOpen?: boolean;
+  /** RFQ creations allowed per IP per minute (REST + taker WS). 0 disables. */
+  rfqRateLimitPerMin?: number;
+  /** WS ping interval; a connection missing a pong for one full interval is dropped. 0 disables. */
+  heartbeatMs?: number;
+}
+
+/** Fixed-window-ish per-key rate limiter (sliding 60s window of timestamps). */
+class RateLimiter {
+  private readonly hits = new Map<string, number[]>();
+  constructor(
+    private readonly limitPerMin: number,
+    private readonly now: () => number = Date.now,
+  ) {}
+
+  allow(key: string): boolean {
+    if (this.limitPerMin <= 0) return true;
+    const cutoff = this.now() - 60_000;
+    const recent = (this.hits.get(key) ?? []).filter((t) => t > cutoff);
+    if (recent.length >= this.limitPerMin) {
+      this.hits.set(key, recent);
+      return false;
+    }
+    recent.push(this.now());
+    this.hits.set(key, recent);
+    return true;
+  }
 }
 
 /**
@@ -64,11 +105,23 @@ export class RfqEngineServer {
   private readonly engine: AuctionEngine;
   private readonly port: number;
   private readonly host: string;
+  private readonly allowlist: Set<string> | null;
+  private readonly takerOpen: boolean;
+  private readonly rfqLimiter: RateLimiter;
+  private readonly heartbeatMs: number;
+  private heartbeatTimer: NodeJS.Timeout | null = null;
 
   constructor(opts: RfqEngineServerOptions) {
     this.engine = opts.engine;
     this.port = opts.port;
     this.host = opts.host ?? "127.0.0.1";
+    this.allowlist =
+      opts.makerAllowlist && opts.makerAllowlist.length > 0
+        ? new Set(opts.makerAllowlist.map((a) => a.toLowerCase()))
+        : null;
+    this.takerOpen = opts.takerOpen ?? true;
+    this.rfqLimiter = new RateLimiter(opts.rfqRateLimitPerMin ?? DEFAULT_RFQ_RATE_LIMIT_PER_MIN);
+    this.heartbeatMs = opts.heartbeatMs ?? DEFAULT_HEARTBEAT_MS;
 
     this.httpServer = createServer((req, res) => {
       this.handleHttp(req, res).catch((err) => {
@@ -81,10 +134,11 @@ export class RfqEngineServer {
 
     this.httpServer.on("upgrade", (req, socket, head) => {
       const pathname = new URL(req.url ?? "/", "http://localhost").pathname;
+      const ip = req.socket.remoteAddress ?? "unknown";
       if (pathname === "/maker") {
         this.makerWss.handleUpgrade(req, socket, head, (ws) => this.onMakerConnect(ws));
       } else if (pathname === "/taker") {
-        this.takerWss.handleUpgrade(req, socket, head, (ws) => this.onTakerConnect(ws));
+        this.takerWss.handleUpgrade(req, socket, head, (ws) => this.onTakerConnect(ws, ip));
       } else {
         socket.destroy();
       }
@@ -97,10 +151,28 @@ export class RfqEngineServer {
       void this.pushTakerUpdate(rfq);
     });
     this.engine.on("rfq_executed", (rfq, result) => {
-      this.broadcastToMakers({ type: "rfq_executed", rfqId: rfq.id, txHash: result.txHash });
+      this.broadcastToMakers({
+        type: "rfq_executed",
+        rfqId: rfq.id,
+        txHash: result.txHash,
+        fill: wireFill(result.fill, result.blockNumber),
+      });
       void this.pushTakerUpdate(rfq);
     });
-    this.engine.on("rfq_failed", (rfq) => void this.pushTakerUpdate(rfq));
+    this.engine.on("rfq_failed", (rfq, error) => {
+      void this.notifyWinningMaker(rfq, { type: "rfq_failed", rfqId: rfq.id, reason: error });
+      void this.pushTakerUpdate(rfq);
+    });
+    this.engine.on("rfq_accept_expired", (rfq, winningQuote) => {
+      if (winningQuote) {
+        this.sendToMakerAddress(winningQuote.maker, {
+          type: "rfq_expired",
+          rfqId: rfq.id,
+          reason: "taker did not accept before the deadline",
+        });
+      }
+      void this.pushTakerUpdate(rfq);
+    });
   }
 
   async start(): Promise<{ port: number }> {
@@ -108,6 +180,10 @@ export class RfqEngineServer {
       this.httpServer.once("error", reject);
       this.httpServer.listen(this.port, this.host, () => resolve());
     });
+    if (this.heartbeatMs > 0) {
+      this.heartbeatTimer = setInterval(() => this.heartbeat(), this.heartbeatMs);
+      this.heartbeatTimer.unref?.();
+    }
     const address = this.httpServer.address();
     const port = typeof address === "object" && address !== null ? address.port : this.port;
     return { port };
@@ -115,12 +191,39 @@ export class RfqEngineServer {
 
   async stop(): Promise<void> {
     this.engine.stop();
+    if (this.heartbeatTimer) {
+      clearInterval(this.heartbeatTimer);
+      this.heartbeatTimer = null;
+    }
     for (const ws of [...this.makers.keys(), ...this.takers.keys()]) ws.terminate();
     this.makerWss.close();
     this.takerWss.close();
     await new Promise<void>((resolve, reject) =>
       this.httpServer.close((err) => (err ? reject(err) : resolve())),
     );
+  }
+
+  /**
+   * WS liveness: every heartbeatMs we ping each connection; one that hasn't
+   * ponged (or sent anything) since the previous round is terminated.
+   */
+  private heartbeat(): void {
+    const sessions: { socket: WebSocket; session: { isAlive: boolean } }[] = [
+      ...[...this.makers.values()].map((s) => ({ socket: s.socket, session: s })),
+      ...[...this.takers.values()].map((s) => ({ socket: s.socket, session: s })),
+    ];
+    for (const { socket, session } of sessions) {
+      if (!session.isAlive) {
+        socket.terminate();
+        continue;
+      }
+      session.isAlive = false;
+      try {
+        socket.ping();
+      } catch {
+        socket.terminate();
+      }
+    }
   }
 
   // -------------------------------------------------------------------------
@@ -145,6 +248,13 @@ export class RfqEngineServer {
     }
 
     if (req.method === "POST" && path === "/rfq") {
+      if (!this.takerOpen) {
+        return sendJson(res, 403, { error: "rfq creation is disabled (TAKER_OPEN=false)" });
+      }
+      const ip = req.socket.remoteAddress ?? "unknown";
+      if (!this.rfqLimiter.allow(ip)) {
+        return sendJson(res, 429, { error: "rate limit exceeded — slow down" });
+      }
       const body = (await readJsonBody(req)) as CreateRfqRequest;
       try {
         const rfq = await this.engine.openRfq(body);
@@ -225,12 +335,16 @@ export class RfqEngineServer {
 
   private onMakerConnect(ws: WebSocket): void {
     const challenge = `hedge rfq-engine maker auth ${randomUUID()} ${Date.now()}`;
-    const session: MakerSession = { socket: ws, challenge, address: null };
+    const session: MakerSession = { socket: ws, challenge, address: null, isAlive: true };
     this.makers.set(ws, session);
 
     sendWs(ws, { type: "auth_challenge", challenge } satisfies MakerServerMessage);
 
+    ws.on("pong", () => {
+      session.isAlive = true;
+    });
     ws.on("message", (raw) => {
+      session.isAlive = true;
       this.onMakerMessage(session, raw.toString()).catch((err) => {
         sendWs(ws, { type: "error", message: errMessage(err) });
       });
@@ -258,6 +372,25 @@ export class RfqEngineServer {
       if (!ok) {
         return sendWs(session.socket, { type: "error", message: "auth failed: bad signature" });
       }
+      if (this.allowlist && !this.allowlist.has(address.toLowerCase())) {
+        sendWs(session.socket, {
+          type: "error",
+          message: "auth failed: address not allowlisted",
+        });
+        session.socket.close(WS_CLOSE_NOT_ALLOWLISTED, "not allowlisted");
+        return;
+      }
+      // one live connection per maker address: the newest wins
+      for (const [otherWs, other] of this.makers) {
+        if (other !== session && other.address && addressEq(other.address, address)) {
+          sendWs(otherWs, {
+            type: "superseded",
+            message: "a newer connection authenticated for this maker address",
+          } satisfies MakerServerMessage);
+          this.makers.delete(otherWs);
+          otherWs.close(WS_CLOSE_SUPERSEDED, "superseded");
+        }
+      }
       session.address = address;
       sendWs(session.socket, { type: "auth_ok", address } satisfies MakerServerMessage);
       // replay currently-open RFQs to the late joiner
@@ -275,13 +408,18 @@ export class RfqEngineServer {
       try {
         const action = parseAction(msg.action);
         const signature = asHex(msg.signature, "quote.signature");
-        const quote = await this.engine.submitQuote({
+        const { quote, replacedQuoteId } = await this.engine.submitQuote({
           rfqId,
           maker: session.address,
           action,
           signature,
         });
-        return sendWs(session.socket, { type: "quote_ack", rfqId, quoteId: quote.id });
+        return sendWs(session.socket, {
+          type: "quote_ack",
+          rfqId,
+          quoteId: quote.id,
+          ...(replacedQuoteId ? { replacedQuoteId } : {}),
+        } satisfies MakerServerMessage);
       } catch (err) {
         return sendWs(session.socket, {
           type: "quote_rejected",
@@ -291,7 +429,45 @@ export class RfqEngineServer {
       }
     }
 
+    if (msg.type === "cancel") {
+      if (!session.address) {
+        return sendWs(session.socket, { type: "error", message: "authenticate first" });
+      }
+      const quoteId = String(msg.quoteId ?? "");
+      try {
+        const quote = await this.engine.cancelQuote({ quoteId, maker: session.address });
+        return sendWs(session.socket, {
+          type: "cancel_ack",
+          rfqId: quote.rfqId,
+          quoteId,
+        } satisfies MakerServerMessage);
+      } catch (err) {
+        return sendWs(session.socket, {
+          type: "cancel_rejected",
+          quoteId,
+          reason: errMessage(err),
+        } satisfies MakerServerMessage);
+      }
+    }
+
     sendWs(session.socket, { type: "error", message: `unknown message type` });
+  }
+
+  private sendToMakerAddress(address: string, msg: MakerServerMessage): void {
+    for (const session of this.makers.values()) {
+      if (
+        session.address &&
+        addressEq(session.address, address) &&
+        session.socket.readyState === WebSocket.OPEN
+      ) {
+        sendWs(session.socket, msg);
+      }
+    }
+  }
+
+  private async notifyWinningMaker(rfq: Rfq, msg: MakerServerMessage): Promise<void> {
+    const best = await this.engine.getBestQuote(rfq).catch(() => null);
+    if (best) this.sendToMakerAddress(best.maker, msg);
   }
 
   private broadcastToMakers(msg: MakerServerMessage): void {
@@ -309,11 +485,13 @@ export class RfqEngineServer {
   private broadcastRfqClosed(rfq: Rfq, best: Quote | null): void {
     for (const session of this.makers.values()) {
       if (!session.address || session.socket.readyState !== WebSocket.OPEN) continue;
+      const won = best !== null && addressEq(best.maker, session.address);
       const msg: MakerServerMessage = {
         type: "rfq_closed",
         rfqId: rfq.id,
         bestQuoteId: best?.id ?? null,
-        ...(best && addressEq(best.maker, session.address) ? { won: true } : {}),
+        ...(won ? { won: true } : {}),
+        ...(won && rfq.acceptDeadlineAt !== null ? { acceptDeadlineAt: rfq.acceptDeadlineAt } : {}),
       };
       sendWs(session.socket, msg);
     }
@@ -323,10 +501,14 @@ export class RfqEngineServer {
   // Taker WS channel
   // -------------------------------------------------------------------------
 
-  private onTakerConnect(ws: WebSocket): void {
-    const session: TakerSession = { socket: ws, subscriptions: new Set() };
+  private onTakerConnect(ws: WebSocket, ip: string): void {
+    const session: TakerSession = { socket: ws, subscriptions: new Set(), ip, isAlive: true };
     this.takers.set(ws, session);
+    ws.on("pong", () => {
+      session.isAlive = true;
+    });
     ws.on("message", (raw) => {
+      session.isAlive = true;
       this.onTakerMessage(session, raw.toString()).catch((err) => {
         sendWs(ws, { type: "error", message: errMessage(err) } satisfies TakerServerMessage);
       });
@@ -344,6 +526,18 @@ export class RfqEngineServer {
     }
 
     if (msg.type === "create_rfq") {
+      if (!this.takerOpen) {
+        return sendWs(session.socket, {
+          type: "error",
+          message: "rfq creation is disabled (TAKER_OPEN=false)",
+        });
+      }
+      if (!this.rfqLimiter.allow(session.ip)) {
+        return sendWs(session.socket, {
+          type: "error",
+          message: "rate limit exceeded — slow down",
+        });
+      }
       try {
         const rfq = await this.engine.openRfq(msg.request);
         session.subscriptions.add(rfq.id);

@@ -13,6 +13,8 @@ Deployed 2026-06-11. All addresses in [`deployments/97.json`](deployments/97.jso
 | BTCB base asset | `0xc17EbE645aca587d7D2077097D797133FE2a633e` |
 | Mock BTCB (18 dec, open mint) | `0x32fCF6a260Cdd2A3dc79cD0d4aD6B6c46bF6798A` |
 | Mock USDT (18 dec, open mint) | `0x9896AF08d261E52a629EF58cBebd32E8e0AA8eA9` |
+| PythSpotFeed (BTC, live SRM spot feed) | `0xaAc2C29105928A6fe7788956058bcF3B9A3D5E51` |
+| LyraSpotFeed (BTC, signed — kept as fallback) | `0x69662A47C3C2626EB75a8c861C48a0a87Cb01b2C` |
 
 - EIP-712 domain separator: `0x4cc5ab9a5a9e3993fe20da61e691a365b4b67a1339557e5b0437ba83097c84b5` (verified on-chain)
 - Feed signer: `0xdE50B8E965aD2B8E25f45a19FD87A2d2c737782F` (1-of-1, testnet only)
@@ -30,6 +32,100 @@ Known testnet quirks:
 - BSC testnet nodes mishandle EIP-1559 fee fields from forge — always broadcast with
   `--legacy --with-gas-price 200000000` (0.2 gwei).
 - Public RPCs are flaky; prefer the thirdweb endpoint with `--retries 12 --delay 5`.
+
+## OI fee fix (2026-06-12)
+
+`SRMPortfolioViewer.OIFeeRateBPS` is — despite the name — a plain 18-decimal multiplier:
+`fee = abs(delta) * forwardPrice * OIFeeRateBPS` (`BasePortfolioViewer.getAssetOIFee`),
+floored by `BaseManager.minOIFee`. The deployed value `0.1e18` (taken from the vendored
+`deploy-srm-option-only-market.s.sol`) therefore charged **10% of forward notional per
+side** — that is the 6,279-USDT-per-side fee visible in the smoke trade below.
+
+Changed on-chain via the owner setter `SRMPortfolioViewer.setOIFeeRateBPS(asset, rate)`:
+
+| Asset | Old | New | Tx |
+|---|---|---|---|
+| BTC OptionAsset `0xD0dD...c6eD` | `0.1e18` (10%) | `0.001e18` (0.1%) | [`0xc15b5239...`](https://testnet.bscscan.com/tx/0xc15b5239f0c0fd70fd67c4657354a48cb5d1a11110823278b37188198249106f) |
+| BTCB base asset `0xc17E...633e` | `0.1e18` (10%) | `0.001e18` (0.1%) | [`0xf889c1ea...`](https://testnet.bscscan.com/tx/0xf889c1ea3e9761065e757c496b9005c4cf186fb35dc7e4ad9f0739ac2dc212fc) |
+
+Both read back as `1e15`. `minOIFee` stays `10e18` (10 USDT floor). The default in
+`script/DeployAll.s.sol` (now `script/MarketDeployerBase.sol`) is fixed to `0.001e18`
+for future deploys. Per-side fee is now `max(0.001 x forward notional, 10 USDT)`.
+
+## Oracle stack (2026-06-12)
+
+The BTC market's SRM **spot feed** is now a Pyth adapter with a Chainlink circuit
+breaker (`protocol/src/PythSpotFeed.sol`, GPL-3.0-or-later):
+
+- **Pyth primary**: reads `Crypto.BTC/USD`
+  (`0xe62df6c8b4a85fe1a67db44dc12de5db330f7ac66b72dc658afedf0f4a415b43`) from the
+  official Pyth contract on BSC testnet `0x5744Cbf430D99456a0A8771208b674F27f8EF0Fb`
+  (docs.pyth.network). Reverts if the Pyth price is older than `pythStaleness`
+  (default **60s**) — push a fresh update before trading (see below). Pyth's
+  confidence interval is translated to the protocol's `[0, 1e18]` confidence:
+  `1e18 - conf/price`, floored at 0.
+- **Chainlink circuit breaker**: cross-checks Chainlink BTC/USD on BSC testnet
+  `0x5741306c21795FdCBb9b265Ea0255F499DFe515C` (8 decimals). If the Chainlink answer
+  is non-positive, older than `chainlinkStaleness` (default 24h), or deviates from
+  the Pyth price by more than `deviationThreshold` (default **1%** = `0.01e18`),
+  the returned confidence is **zeroed**, tripping the SRM's oracle-contingency
+  margin penalty. All params owner-settable (`setPythStaleness`,
+  `setChainlinkStaleness`, `setDeviationThreshold`, `setChainlinkAggregator` —
+  `address(0)` disables the breaker).
+- **Signed feeds unchanged**: forward, vol, rate and the USDT stable feed remain the
+  Lyra signed feeds (posted by `oracle-feeds`). `LyraForwardFeed` still wraps the
+  original `LyraSpotFeed`, so **settlement is still the signed print** — anchoring
+  settlement to Pyth/Chainlink is a follow-up.
+
+Deploy/wire txs:
+
+| Step | Tx |
+|---|---|
+| Deploy PythSpotFeed `0xaAc2C29105928A6fe7788956058bcF3B9A3D5E51` | [`0x360ebd0a...`](https://testnet.bscscan.com/tx/0x360ebd0a75b49a57d18180d5d7cdbac34323734e9a9d7fe609cfbeb0477295a3) |
+| First Pyth push (`oracle-feeds pyth-push`, BTC = 62,944.82) | [`0xc8f487d1...`](https://testnet.bscscan.com/tx/0xc8f487d1279652681f464da116ca986e03f8fc3a588a83d6ff2a117bb23ae2e2) |
+| SRM spot-feed swap (`setOraclesForMarket(1, pyth, fwd, vol)`) | [`0x92bb856e...`](https://testnet.bscscan.com/tx/0x92bb856ef6df366ac9927de473a4fbb2fac9837580ba2015beab2b574dda5bbf) |
+
+Post-swap `getSpot()` through the adapter returned `62,944.820134510` with confidence
+`0.99935e18` (Chainlink was 62,886.56 — 0.09% away, breaker quiet).
+
+Refresh the Pyth price (required before trades whenever it is >60s stale):
+
+```sh
+CHAIN_ID=97 RPC_URL=<rpc> FEED_SIGNER_KEY=<any funded key> \
+  pnpm --filter @hedge/oracle-feeds pyth-push
+```
+
+Swap back to the signed LyraSpotFeed (kept deployed/configured as fallback):
+
+```sh
+cast send 0x4d55A929e184fc366664C11526E3B54aB70340B5 \
+  "setOraclesForMarket(uint256,address,address,address)" 1 \
+  0x69662A47C3C2626EB75a8c861C48a0a87Cb01b2C \
+  0x86b7148B69F3eFad27Af6d0d892d063D6a6C9e05 \
+  0x5a892364cFBd8e725eC1e7af25855005C0E0f0aE \
+  --private-key $PRIVATE_KEY --legacy --gas-price 200000000 --rpc-url $RPC_URL_97_THIRDWEB
+```
+
+New `deployments/97.json` keys: `pyth`, `btcPythPriceId`, `btcPythSpotFeed`,
+`btcChainlinkAggregator`.
+
+## Multi-market deploy scripts (2026-06-12)
+
+Per-market config (underlying token, name, Pyth feed id, Chainlink aggregator, caps,
+margin params) now lives in `script/MarketDeployerBase.sol` — `getMarketConfig(0)` = BTC
+(the live market), `getMarketConfig(1)` = ETH (example). `DeployAll.s.sol` consumes
+entry 0; `script/AddMarket.s.sol` deploys + registers one additional market against an
+existing deployment (reads `deployments/<chainId>.json`, requires the SRM owner key):
+
+```sh
+MARKET_INDEX=1 WETH_ADDRESS=0x... forge script script/AddMarket.s.sol \
+  --rpc-url $RPC_URL_97_THIRDWEB --broadcast --legacy --with-gas-price 200000000 \
+  --retries 12 --delay 5
+```
+
+New market addresses are written to `deployments/<chainId>-<NAME>.json` (sidecar — the
+main JSON is never rewritten). Validated on a fresh anvil deploy (ETH market id 2);
+the live testnet stack was NOT redeployed.
 
 ## Live smoke trade (2026-06-11)
 

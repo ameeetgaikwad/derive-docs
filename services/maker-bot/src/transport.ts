@@ -12,13 +12,26 @@
  *   maker  -> engine {type:"auth", address, signature}   // EIP-191 personal-sign of challenge
  *   engine -> maker  {type:"auth_ok", address}           // then replays open RFQs
  *   engine -> maker  {type:"rfq_open", rfq: PublicRfq}
- *   maker  -> engine {type:"quote", rfqId, action, signature}
- *   engine -> maker  {type:"quote_ack"|"quote_rejected"|"rfq_closed"|"rfq_executed"|"error", ...}
+ *   maker  -> engine {type:"quote", rfqId, action, signature}   // re-quote same rfq = replace
+ *   maker  -> engine {type:"cancel", quoteId}
+ *   engine -> maker  {type:"quote_ack"|"quote_rejected"|"cancel_ack"|"cancel_rejected"
+ *                     |"rfq_closed"|"rfq_executed"|"rfq_failed"|"rfq_expired"
+ *                     |"superseded"|"error", ...}
  *
  * The quote carries only the fully-signed maker RfqModule Action — the engine
  * decodes RfqOrder{maxFee,trades[]} from action.data, validates it against
- * the RFQ (asset/subId/amount/price/cash) and uses it as actions[0] in
- * Matching.verifyAndMatch.
+ * the RFQ (asset/subId/amount/price/cash incl. SRM OI fee) and uses it as
+ * actions[0] in Matching.verifyAndMatch.
+ *
+ * Liveness: the engine sends protocol-level WS pings (default every 30s) and
+ * drops connections that miss a pong for a full interval. Node's global
+ * WebSocket (undici) answers pings automatically — no app-level keepalive is
+ * required here.
+ *
+ * Connection dedupe: the engine keeps ONE live connection per maker address.
+ * When a newer connection authenticates, the older one receives
+ * {type:"superseded"} and close code 4000 — this client then stops without
+ * reconnecting (reconnecting would supersede the newer session in a loop).
  */
 import type { Address, Hex } from "viem";
 import type { Action } from "@hedge/shared";
@@ -58,22 +71,52 @@ export interface PublicRfq {
   createdAt: number;
   /** ms epoch — quotes accepted strictly before this */
   auctionEndsAt: number;
+  /** ms epoch taker-accept deadline; null until the auction closes with a winner */
+  acceptDeadlineAt?: number | null;
   status: string;
+}
+
+/** Fill report attached to rfq_executed (18dp decimal strings). */
+export interface WireFill {
+  quoteId: string;
+  instrument: string;
+  maker: string;
+  makerSubaccountId: string;
+  takerSubaccountId: string;
+  amount: string;
+  premium: string;
+  totalPremium: string;
+  makerFee: string;
+  takerFee: string;
+  blockNumber: string | null;
 }
 
 export type MakerServerMessage =
   | { type: "auth_challenge"; challenge: string }
   | { type: "auth_ok"; address: string }
   | { type: "rfq_open"; rfq: PublicRfq }
-  | { type: "rfq_closed"; rfqId: string; bestQuoteId: string | null; won?: boolean }
-  | { type: "rfq_executed"; rfqId: string; txHash: Hex }
-  | { type: "quote_ack"; rfqId: string; quoteId: string }
+  | {
+      type: "rfq_closed";
+      rfqId: string;
+      bestQuoteId: string | null;
+      won?: boolean;
+      /** winner only: accept-by deadline (ms epoch) */
+      acceptDeadlineAt?: number;
+    }
+  | { type: "rfq_executed"; rfqId: string; txHash: Hex; fill?: WireFill }
+  | { type: "rfq_failed"; rfqId: string; reason: string }
+  | { type: "rfq_expired"; rfqId: string; reason: string }
+  | { type: "quote_ack"; rfqId: string; quoteId: string; replacedQuoteId?: string }
   | { type: "quote_rejected"; rfqId: string; reason: string }
+  | { type: "cancel_ack"; rfqId: string; quoteId: string }
+  | { type: "cancel_rejected"; quoteId: string; reason: string }
+  | { type: "superseded"; message: string }
   | { type: "error"; message: string };
 
 export type MakerClientMessage =
   | { type: "auth"; address: string; signature: string }
-  | { type: "quote"; rfqId: string; action: SerializedAction; signature: string };
+  | { type: "quote"; rfqId: string; action: SerializedAction; signature: string }
+  | { type: "cancel"; quoteId: string };
 
 export function serializeAction(action: Action): SerializedAction {
   return {
@@ -160,6 +203,11 @@ export class MakerWsClient {
     this.send({ type: "quote", rfqId, action: serializeAction(action), signature });
   }
 
+  /** Cancel a previously-acked quote (only valid while its auction is open). */
+  sendCancel(quoteId: string): void {
+    this.send({ type: "cancel", quoteId });
+  }
+
   private send(msg: MakerClientMessage): void {
     if (!this.connected) throw new Error("WS not connected");
     this.ws!.send(JSON.stringify(msg));
@@ -211,6 +259,13 @@ export class MakerWsClient {
         return;
       case "rfq_open":
         await this.opts.onRfq(msg.rfq);
+        return;
+      case "superseded":
+        // A newer connection for this maker address took over. Do NOT
+        // reconnect — that would supersede the new session right back.
+        this.log("superseded by a newer connection for this address — stopping");
+        this.opts.onEvent?.(msg);
+        this.stop();
         return;
       default:
         this.opts.onEvent?.(msg);

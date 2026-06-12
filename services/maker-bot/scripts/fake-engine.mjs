@@ -2,8 +2,10 @@
 /**
  * Dev utility: a one-shot fake rfq-engine maker channel speaking the real
  * protocol (services/rfq-engine/src/server.ts): auth_challenge -> auth
- * (EIP-191 verified) -> auth_ok -> rfq_open -> waits for one quote, prints
- * it, replies quote_ack + rfq_closed{won}, then exits 0. Exits 1 on timeout.
+ * (EIP-191 verified) -> auth_ok -> protocol-level WS ping (expects the
+ * client's automatic pong) -> rfq_open -> waits for one quote, prints it,
+ * replies quote_ack + rfq_closed{won, acceptDeadlineAt} + rfq_executed{fill},
+ * then exits 0. Exits 1 on timeout or missing pong.
  *
  * Usage:
  *   node scripts/fake-engine.mjs [--asset 0x<optionAsset>] [--strike 110000] [--days 7]
@@ -48,6 +50,14 @@ wss.on("connection", (sock) => {
   const challenge = `hedge rfq-engine maker auth ${randomUUID()} ${Date.now()}`;
   sock.send(JSON.stringify({ type: "auth_challenge", challenge }));
 
+  // heartbeat conformance: the real engine pings every WS_HEARTBEAT_MS and
+  // drops peers that miss a pong; verify the client's stack auto-pongs.
+  let ponged = false;
+  sock.on("pong", () => {
+    ponged = true;
+    console.log("[fake-engine] pong received (heartbeat OK)");
+  });
+
   sock.on("message", (raw) => {
     void (async () => {
       const msg = JSON.parse(raw.toString());
@@ -63,6 +73,7 @@ wss.on("connection", (sock) => {
         }
         console.log(`[fake-engine] maker authenticated: ${msg.address}`);
         sock.send(JSON.stringify({ type: "auth_ok", address: msg.address }));
+        sock.ping();
 
         const rfq = {
           id: `rfq-${Date.now()}`,
@@ -80,6 +91,7 @@ wss.on("connection", (sock) => {
           amount: (10n ** 18n).toString(),
           createdAt: Date.now(),
           auctionEndsAt: Date.now() + 10_000,
+          acceptDeadlineAt: null,
           status: "open",
         };
         console.log(`[fake-engine] broadcasting RFQ: taker sells 1x call subId=${subId}`);
@@ -88,11 +100,50 @@ wss.on("connection", (sock) => {
         clearTimeout(timeout);
         console.log("[fake-engine] received quote:");
         console.log(JSON.stringify(msg, null, 2));
-        sock.send(JSON.stringify({ type: "quote_ack", rfqId: msg.rfqId, quoteId: randomUUID() }));
+        const quoteId = randomUUID();
+        sock.send(JSON.stringify({ type: "quote_ack", rfqId: msg.rfqId, quoteId }));
         sock.send(
-          JSON.stringify({ type: "rfq_closed", rfqId: msg.rfqId, bestQuoteId: "fake", won: true }),
+          JSON.stringify({
+            type: "rfq_closed",
+            rfqId: msg.rfqId,
+            bestQuoteId: quoteId,
+            won: true,
+            acceptDeadlineAt: Date.now() + 120_000,
+          }),
         );
-        setTimeout(() => process.exit(0), 200);
+        // fill report, exactly as the real engine shapes rfq_executed
+        const premium = "1500000000000000000000";
+        sock.send(
+          JSON.stringify({
+            type: "rfq_executed",
+            rfqId: msg.rfqId,
+            txHash: `0x${"ab".repeat(32)}`,
+            fill: {
+              quoteId,
+              instrument: `BTC-${days}d-${strike / 10n ** 18n}-C`,
+              maker: msg.action.owner,
+              makerSubaccountId: msg.action.subaccountId,
+              takerSubaccountId: "2",
+              amount: (10n ** 18n).toString(),
+              premium,
+              totalPremium: premium,
+              makerFee: "0",
+              takerFee: "0",
+              blockNumber: "1",
+            },
+          }),
+        );
+        setTimeout(() => {
+          if (!ponged) {
+            console.error("[fake-engine] client never answered the WS ping");
+            process.exit(1);
+          }
+          process.exit(0);
+        }, 200);
+      } else if (msg.type === "cancel") {
+        // cancel conformance: ack like the real engine
+        console.log(`[fake-engine] cancel received for quote=${msg.quoteId}`);
+        sock.send(JSON.stringify({ type: "cancel_ack", rfqId: "rfq-unknown", quoteId: msg.quoteId }));
       }
     })().catch((err) => {
       console.error("[fake-engine] error:", err);

@@ -178,4 +178,36 @@ describe("MakerWsClient against an engine-protocol fake", () => {
       client.stop();
     }
   }, 10_000);
+
+  it("stops (does not reconnect) when the engine supersedes the connection", async () => {
+    let connections = 0;
+    server.on("connection", (sock: WsSocket) => {
+      connections += 1;
+      // engine dedupes connections per maker: newest wins, old one is told
+      sock.send(JSON.stringify({ type: "superseded", message: "newer connection authenticated" }));
+      sock.close(4000, "superseded");
+    });
+
+    const events: string[] = [];
+    const client = new MakerWsClient({
+      url: `ws://127.0.0.1:${port}/maker`,
+      address: account.address,
+      signMessage: (message) => account.signMessage({ message }),
+      log: () => {},
+      reconnectMs: 50,
+      onRfq: () => {},
+      onEvent: (msg) => events.push(msg.type),
+    });
+    client.start();
+    try {
+      // give a reconnecting client several reconnect windows to misbehave
+      await new Promise((r) => setTimeout(r, 400));
+      expect(events).toContain("superseded");
+      expect(connections).toBe(1); // no reconnect after superseded
+      expect(client.connected).toBe(false);
+    } finally {
+      client.stop();
+      server.removeAllListeners("connection");
+    }
+  }, 10_000);
 });

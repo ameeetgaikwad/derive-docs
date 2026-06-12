@@ -11,7 +11,9 @@ Everything protocol-facing is verified against the vendored pinned Solidity
 `Matching.sol` (verifyAndMatch, trade-executor gating), `ActionVerifier.sol`
 (EIP-712 domain `Matching`/`1.0`, Action typehash), `RfqModule.sol` /
 `IRfqModule.sol` (RfqOrder / TakerOrder / FillData encodings, action ordering,
-`orderHash = keccak256(abi.encode(trades))`).
+`orderHash = keccak256(abi.encode(trades))`), and
+`StandardManager.sol` / `BasePortfolioViewer.sol` (SRM OI fee math used by the
+maker collateral pre-check).
 
 ## Run
 
@@ -36,10 +38,36 @@ script) and verifies on-chain that the executor key is registered via
 | --- | --- | --- |
 | `RPC_URL` | `http://127.0.0.1:8545` | JSON-RPC endpoint |
 | `CHAIN_ID` | `31337` | 31337 / 97 / 56 |
+| `HOST` | `127.0.0.1` | listen address; keep loopback in dev, `0.0.0.0` only behind a reverse proxy |
 | `RFQ_PORT` (or `PORT`) | `3030` | HTTP + WS listen port |
 | `AUCTION_WINDOW_MS` | `3000` | quote-collection window per RFQ |
+| `TAKER_ACCEPT_DEADLINE_MS` | `120000` | how long the taker has to accept after the auction closes with a winner; past it the RFQ expires and the maker is released |
+| `WS_HEARTBEAT_MS` | `30000` | WS ping interval (maker + taker channels); a connection that misses a pong for one full interval is dropped. `0` disables |
+| `MAKER_ALLOWLIST` | empty (open/dev) | comma-separated maker EOA addresses; when set, WS auth is refused (close code `4003`) for any other address |
+| `TAKER_OPEN` | `true` | `false` rejects all RFQ creation (REST `403` / taker-WS error) |
+| `RFQ_RATE_LIMIT_PER_MIN` | `30` | RFQ creations allowed per IP per minute (REST `POST /rfq` **and** taker-WS `create_rfq`); over-limit ⇒ `429` / WS error. `0` disables |
+| `STORE_PATH` | unset (in-memory) | path to a JSONL file for durable auctions + trade history (see Persistence) |
 | `EXECUTOR_PRIVATE_KEY` | anvil key #0 (31337 only) | must be the registered trade executor (`tradeExecutor` in the deployments JSON) |
 | `SATS_DEPLOYMENTS_DIR` | auto-discovered | override deployments dir |
+
+### Production posture (TLS / exposure)
+
+The engine deliberately does **not** terminate TLS in-process. Deploy it
+bound to loopback (the default `HOST=127.0.0.1`) and front it with a
+TLS-terminating reverse proxy (nginx / caddy / cloud LB):
+
+- makers connect to `wss://rfq.example.com/maker`, takers to
+  `https://rfq.example.com/rfq` + `wss://…/taker`; the proxy forwards to
+  `http://127.0.0.1:3030` (remember to enable WebSocket upgrade forwarding,
+  e.g. nginx `proxy_set_header Upgrade/Connection` + `proxy_read_timeout`
+  above the heartbeat interval).
+- only set `HOST=0.0.0.0` when the engine runs in a private network segment
+  behind the proxy; never expose the plain-HTTP port publicly.
+- per-IP rate limiting in the engine assumes it sees real client addresses —
+  when behind a proxy either rate-limit at the proxy (preferred) or run the
+  proxy on the same host so the source IP is still meaningful.
+- set `MAKER_ALLOWLIST` to the onboarded maker addresses and `STORE_PATH`
+  to a persistent volume.
 
 ### Smoke check
 
@@ -52,6 +80,9 @@ makers over WS (full signature handshake), runs a competing-quote auction to
 best-quote selection and accept/execution with chain calls mocked, and pins
 the exact `verifyAndMatch` calldata (including a frozen keccak256 of a fully
 deterministic submission) against encodings re-derived from `RfqModule.sol`.
+`test/hardening.test.ts` additionally covers the allowlist, cancel/replace,
+connection dedupe, accept-deadline expiry, heartbeat drops, the fee-aware
+collateral pre-check, rate limiting and JSONL restart recovery.
 
 ## API
 
@@ -71,12 +102,13 @@ deterministic submission) against encodings re-derived from `RfqModule.sol`.
   `amount`/`strike` are human decimals; responses use 18dp integer strings.
   Returns `201 { rfq }` with `rfq.id`, `instrument.subId` (lyra-utils
   OptionEncoding) and `auctionEndsAt` (ms epoch). v1 is sell-only.
+  `403` when `TAKER_OPEN=false`; `429` past the per-IP rate limit.
 
 - `GET /rfq/:id` — auction state. After the window closes:
 
   ```json
   {
-    "rfq": { "status": "closed", ... },
+    "rfq": { "status": "closed", "acceptDeadlineAt": 1781712123456, ... },
     "quoteCount": 2,
     "bestQuote": {
       "maker": "0x…", "premium": "1500000000000000000000",
@@ -87,6 +119,10 @@ deterministic submission) against encodings re-derived from `RfqModule.sol`.
     "execution": null
   }
   ```
+
+  `rfq.acceptDeadlineAt` (ms epoch, nullable) is set when the auction closes
+  with a winner; accept before it or the RFQ expires (`status: "expired"`,
+  `error: "taker did not accept before the deadline"`).
 
 - `POST /rfq/:id/accept` — execute against the winning quote. Body is the
   taker's signed EIP-712 Action (domain `Matching`/`1.0` at the Matching
@@ -100,39 +136,137 @@ deterministic submission) against encodings re-derived from `RfqModule.sol`.
 
   Returns `200 { txHash, status, blockNumber, fill }` after the receipt, where
   `fill` summarizes maker/taker subaccounts, amount, premium and fees.
-  `409` on validation failure, `502` on execution failure.
+  `409` on validation failure (including a passed accept deadline), `502` on
+  execution failure.
 
 - `GET /health`
 
 ### Taker — WS `/taker`
 
 `{"type":"create_rfq","request":{…same as POST /rfq…}}` → `rfq_created`, then
-`rfq_update` pushes on close/execution. `{"type":"subscribe","rfqId":"…"}` to
-follow an existing RFQ.
+`rfq_update` pushes on close/execution/failure/expiry. `{"type":"subscribe","rfqId":"…"}`
+to follow an existing RFQ. `create_rfq` is subject to the same `TAKER_OPEN` /
+per-IP rate-limit gating as REST (refusals come back as `{"type":"error"}`).
 
 ### Maker — WS `/maker` (Rysk-V12-style MM interface)
+
+All frames are JSON discriminated by `type`; bigints are 18dp decimal strings.
+
+#### Session
 
 1. On connect the server sends `{"type":"auth_challenge","challenge":"…"}`.
 2. Maker replies `{"type":"auth","address":"0x…","signature":"0x…"}` where the
    signature is a personal-message (EIP-191) signature of the challenge string
    by `address`. Server answers `auth_ok` and replays all open RFQs.
-3. Every new RFQ is broadcast as `{"type":"rfq_open","rfq":{…}}` with the
-   instrument (`optionAsset`, `subId`, 18dp `strike`/`amount`) and
-   `auctionEndsAt`.
-4. Maker submits `{"type":"quote","rfqId":"…","action":{…},"signature":"0x…"}`
+   - If `MAKER_ALLOWLIST` is set and the address is not on it, the server
+     sends `{"type":"error","message":"auth failed: address not allowlisted"}`
+     and closes with code **4003**.
+   - **One live connection per maker address**: when the same address
+     authenticates on a new socket, the old socket receives
+     `{"type":"superseded","message":"…"}` and is closed with code **4000**.
+     A superseded client must NOT auto-reconnect (it would supersede the new
+     session right back).
+3. **Heartbeat**: the server sends protocol-level WS pings every
+   `WS_HEARTBEAT_MS` (default 30 s) and terminates a connection that has
+   neither ponged nor sent any frame for one full interval. Standard WS
+   stacks (browsers, Node/undici, `ws`) answer pings automatically — no
+   app-level keepalive message exists or is needed.
+
+#### Quoting
+
+4. Every new RFQ is broadcast as `{"type":"rfq_open","rfq":{…}}` with the
+   instrument (`optionAsset`, `subId`, 18dp `strike`/`amount`),
+   `auctionEndsAt` and `acceptDeadlineAt` (null while open).
+5. Maker submits `{"type":"quote","rfqId":"…","action":{…},"signature":"0x…"}`
    — a fully signed Action targeting `RfqModule` whose `data` is
    `abi.encode(RfqOrder{ maxFee, trades })` with exactly one trade:
    `{ asset: optionAsset, subId, price: premium (18dp), amount: +rfqAmount }`
    (the maker buys what the taker sells; cash `price*amount` flows maker → taker).
-5. Server replies `quote_ack` or `quote_rejected` (reason included), then
-   `rfq_closed` (with `won: true` on the winner's socket) and `rfq_executed`.
+   - Server replies `{"type":"quote_ack","rfqId","quoteId"}` or
+     `{"type":"quote_rejected","rfqId","reason"}`.
+   - **Replace**: a second quote from the same maker on the same RFQ replaces
+     the previous one (only the latest is kept). The ack then carries
+     `replacedQuoteId`: `{"type":"quote_ack","rfqId","quoteId","replacedQuoteId"}`.
+6. **Cancel**: `{"type":"cancel","quoteId":"…"}` withdraws a live quote while
+   its auction is still open. Server replies
+   `{"type":"cancel_ack","rfqId","quoteId"}` or
+   `{"type":"cancel_rejected","quoteId","reason"}` (unknown/foreign quote, or
+   the auction already closed — the winning quote is locked in).
 
-Quote admission checks (in order): auction open; module/owner/signer shape
-(v1: `signer == owner`, no session keys); action expiry outlives the window;
-RfqOrder decodes and matches the RFQ instrument exactly; EIP-712 signature
-recovers to the signer; on-chain that the maker subaccount is deposited into
-Matching under the maker address and its cash balance covers
-`premium*amount + maxFee`.
+#### Auction results
+
+7. `{"type":"rfq_closed","rfqId","bestQuoteId"}` to every maker when the
+   window ends. The winner's socket additionally gets `won: true` and
+   `acceptDeadlineAt` (ms epoch — the taker must accept before it).
+8. `{"type":"rfq_executed","rfqId","txHash","fill":{…}}` after a successful
+   on-chain execution. `fill` is the realized fill report:
+
+   ```json
+   { "quoteId": "…", "instrument": "BTC-20260619-110000-C", "maker": "0x…",
+     "makerSubaccountId": "11", "takerSubaccountId": "4",
+     "amount": "1000000000000000000", "premium": "1500000000000000000000",
+     "totalPremium": "1500000000000000000000", "makerFee": "0", "takerFee": "0",
+     "blockNumber": "12345678" }
+   ```
+
+9. `{"type":"rfq_failed","rfqId","reason"}` — sent to the **winning maker**
+   when execution reverts or errors after the taker accepted.
+10. `{"type":"rfq_expired","rfqId","reason"}` — sent to the **winning maker**
+    when the taker fails to accept before `acceptDeadlineAt`; the RFQ moves to
+    `status: "expired"` and the maker's reserved collateral is released.
+
+#### Quote admission checks (in order)
+
+auction open; module/owner/signer shape (v1: `signer == owner`, no session
+keys); action expiry outlives the window; RfqOrder decodes and matches the
+RFQ instrument exactly; EIP-712 signature recovers to the signer; on-chain
+that the maker subaccount is deposited into Matching under the maker address
+and its cash balance covers
+
+```
+premium*amount + maxFee + estimated SRM OI fee + cash already reserved by the
+maker's other live quotes
+```
+
+The OI fee is computed exactly like `StandardManager._chargeAllOIFee` →
+`BasePortfolioViewer.getAssetOIFee`:
+`|amount| * forwardPrice / 1e18 * OIFeeRateBPS[optionAsset] / 1e18`, floored
+at `StandardManager.minOIFee()` when non-zero. `OIFeeRateBPS` (from the
+deployed `srmViewer`), the forward price (per-currency forward feed) and
+`minOIFee` are **read live on every quote** — governance can change them at
+any time. A quote is rejected (`quote_rejected`) when the feed read fails
+("cannot estimate SRM OI fee …"). Reserved cash is tracked per maker
+subaccount across all open auctions plus won-awaiting-accept quotes and is
+released on cancel/replace/loss/execution/failure/deadline-expiry.
+
+## RFQ lifecycle
+
+```
+open ──window ends──▶ closed (winner, acceptDeadlineAt set) ──accept──▶ executing ──▶ executed
+  │                      │                                                     └────▶ failed
+  └─ no quotes ─▶ expired└─ deadline passes ─▶ expired (maker released, rfq_expired)
+```
+
+## Persistence (`STORE_PATH`)
+
+`STORE_PATH=/var/lib/hedge/rfq.jsonl` switches the store from in-memory to an
+append-only JSONL log + in-memory index (no native deps; safe against torn
+final lines). Every RFQ/quote mutation is appended; on boot the engine
+replays the log and then `recover()`s:
+
+- open auctions whose window is still running are re-armed (close timer +
+  maker collateral reservations rebuilt);
+- open auctions whose window elapsed while down are closed normally (best
+  quote selected, accept deadline armed);
+- closed auctions past their accept deadline are expired; still-live ones get
+  their deadline timer re-armed;
+- RFQs caught in `executing` are marked `failed` with
+  "engine restarted during execution — verify on-chain state manually" (the
+  engine never blindly resubmits);
+- executed/failed/expired RFQs are kept as durable trade history.
+
+The in-memory store remains the default (tests, dev). The log is never
+compacted in v1 — rotate the file offline if it grows.
 
 ## Execution path
 
@@ -144,9 +278,14 @@ the executor key, waiting for the receipt.
 
 ## Architecture / swappability
 
-- `store.ts` — `RfqStore` interface; v1 ships `InMemoryRfqStore`.
-- `chain.ts` — `ChainReader` (collateral/ownership reads) and `TxSubmitter`
-  (verifyAndMatch) interfaces with viem implementations; tests inject fakes.
-- `auction.ts` — transport-agnostic `AuctionEngine` (event emitter).
-- `server.ts` — HTTP/WS front-end only.
+- `store.ts` — `RfqStore` interface; `InMemoryRfqStore` (default) and
+  `JsonlRfqStore` (durable, `STORE_PATH`).
+- `chain.ts` — `ChainReader` (collateral/ownership/OI-fee reads) and
+  `TxSubmitter` (verifyAndMatch) interfaces with viem implementations; tests
+  inject fakes.
+- `auction.ts` — transport-agnostic `AuctionEngine` (event emitter): windows,
+  best-quote selection, cancel/replace, accept deadlines, collateral
+  reservations, restart recovery.
+- `server.ts` — HTTP/WS front-end only: auth/allowlist, heartbeats,
+  connection dedupe, rate limiting, fan-out.
 - `executor.ts` — pure `buildRfqExecution` (calldata) + `Executor` (submit).
