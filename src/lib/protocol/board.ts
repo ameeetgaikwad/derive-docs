@@ -4,7 +4,7 @@
  * There is no instruments API in sats-options v1 — any strike/expiry that
  * encodes to a valid subId is tradeable on-chain. The frontend generates a
  * board locally: weekly expiries at 08:00 UTC on the next Fridays, and a
- * strike grid at standard OTM distances above spot (covered calls only).
+ * strike grid at standard OTM distances above or below spot.
  */
 
 import { toUnit } from "./units";
@@ -15,8 +15,13 @@ export const EXPIRY_HOUR_UTC = 8;
 /** Minimum time before expiry for it to be sellable (avoid sub-24h boards). */
 const MIN_TIME_TO_EXPIRY_SEC = 24 * 3600;
 
-/** OTM distances (% above spot) for the suggested covered-call strikes. */
-export const OTM_TARGETS_PCT = [2, 5, 8, 10, 15, 20, 25, 30];
+/** OTM distances (% above spot) for the suggested paid sell targets. */
+export const SELL_TARGETS_PCT = [2, 5, 8, 10, 15, 20, 25, 30];
+
+/** OTM distances (% below spot) for the suggested paid buy targets. */
+export const BUY_TARGETS_PCT = [2, 5, 8, 10, 15, 20];
+
+export type TargetDirection = "sell_high" | "buy_low";
 
 /** Round a strike to the BTC board increment. */
 export function roundStrike(value: number): number {
@@ -56,7 +61,7 @@ export interface BoardStrike {
   strike18: bigint;
   /** unix seconds */
   expiry: number;
-  isCall: true;
+  isCall: boolean;
   /** lyra-utils OptionEncoding subId */
   subId: bigint;
   /** e.g. BTC-20260619-69000-C */
@@ -66,16 +71,26 @@ export interface BoardStrike {
 }
 
 /**
- * Strike grid for one expiry: OTM_TARGETS_PCT above spot, rounded to the
- * board increment, deduplicated, strictly above spot.
+ * Strike grid for one expiry: sell targets are OTM calls above spot; buy
+ * targets are OTM puts below spot. Strikes are rounded to the board increment,
+ * deduplicated, and encoded into tradeable option subIds.
  */
-export function strikesForExpiry(spot: number, expiry: number): BoardStrike[] {
+export function strikesForExpiry(
+  spot: number,
+  expiry: number,
+  direction: TargetDirection = "sell_high"
+): BoardStrike[] {
   if (!(spot > 0)) return [];
   const seen = new Set<number>();
   const out: BoardStrike[] = [];
-  for (const pct of OTM_TARGETS_PCT) {
-    const strike = roundStrike(spot * (1 + pct / 100));
-    if (strike <= spot || seen.has(strike)) continue;
+  const isCall = direction === "sell_high";
+  const targets = isCall ? SELL_TARGETS_PCT : BUY_TARGETS_PCT;
+
+  for (const pct of targets) {
+    const strike = roundStrike(spot * (isCall ? 1 + pct / 100 : 1 - pct / 100));
+    if (strike <= 0 || seen.has(strike)) continue;
+    if (isCall && strike <= spot) continue;
+    if (!isCall && strike >= spot) continue;
     seen.add(strike);
     const strike18 = toUnit(strike);
     const expiryBig = BigInt(expiry);
@@ -83,13 +98,13 @@ export function strikesForExpiry(spot: number, expiry: number): BoardStrike[] {
       strike,
       strike18,
       expiry,
-      isCall: true,
-      subId: encodeOptionSubId({ expiry: expiryBig, strike: strike18, isCall: true }),
-      instrumentName: instrumentName({ expiry: expiryBig, strike: strike18, isCall: true }),
-      otmPercent: ((strike - spot) / spot) * 100,
+      isCall,
+      subId: encodeOptionSubId({ expiry: expiryBig, strike: strike18, isCall }),
+      instrumentName: instrumentName({ expiry: expiryBig, strike: strike18, isCall }),
+      otmPercent: (Math.abs(strike - spot) / spot) * 100,
     });
   }
-  return out.sort((a, b) => a.strike - b.strike);
+  return out.sort((a, b) => (isCall ? a.strike - b.strike : b.strike - a.strike));
 }
 
 export function formatExpiryLabel(expiryEpochSec: number): string {

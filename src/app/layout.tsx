@@ -26,9 +26,9 @@ const schibstedGrotesk = Schibsted_Grotesk({
 });
 
 export const metadata: Metadata = {
-  title: "hedge — BTC Covered Calls",
+  title: "Hedge — Paid BTC Targets",
   description:
-    "Earn yield on your BTC with covered calls sold to market makers via RFQ, fully on-chain on BNB Chain.",
+    "Get paid for BTC buy and sell targets. Buy BTC cheaper or sell BTC higher through simple paid target orders.",
 };
 
 export default function RootLayout({

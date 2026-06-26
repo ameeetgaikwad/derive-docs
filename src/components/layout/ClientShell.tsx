@@ -1,11 +1,14 @@
 "use client";
 
 import { useSyncExternalStore, type ReactNode } from "react";
-import { Providers } from "@/providers";
-import { Header } from "@/components/layout/Header";
+import dynamic from "next/dynamic";
+import Navbar from "@/components/root/navbar";
 import { Toaster } from "sonner";
 
 const emptySubscribe = () => () => {};
+const Providers = dynamic(() => import("@/providers").then((mod) => mod.Providers), {
+  ssr: false,
+});
 
 export function ClientShell({ children }: { children: ReactNode }) {
   // true on the client after hydration, false during SSR/prerender
@@ -23,18 +26,18 @@ export function ClientShell({ children }: { children: ReactNode }) {
 
   return (
     <Providers>
-      <Header />
+      <Navbar />
       <main>{children}</main>
       <Toaster
-        theme="dark"
+        theme="light"
         position="bottom-right"
         toastOptions={{
           style: {
-            background: "#18181b",
-            border: "0.5px solid #3f3f46",
-            color: "#fafafa",
+            background: "#ffffff",
+            border: "0.5px solid #e4e4e7",
+            color: "#09090b",
             fontFamily: "var(--font-dm-sans), 'DM Sans', sans-serif",
-            borderRadius: "10px",
+            borderRadius: "8px",
           },
         }}
       />

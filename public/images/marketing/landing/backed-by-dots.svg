@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1312 78" preserveAspectRatio="xMidYMax slice" aria-hidden="true">
+  <defs>
+    <pattern id="backedByDotsTop" x="0" y="0" width="10" height="10" patternUnits="userSpaceOnUse">
+      <circle cx="1" cy="1" r="1" fill="rgb(212 212 216)" fill-opacity="0.35" />
+    </pattern>
+    <pattern id="backedByDotsMid" x="0" y="0" width="10" height="10" patternUnits="userSpaceOnUse">
+      <circle cx="1" cy="1" r="1" fill="rgb(212 212 216)" fill-opacity="0.7" />
+    </pattern>
+    <pattern id="backedByDotsBot" x="0" y="0" width="10" height="10" patternUnits="userSpaceOnUse">
+      <circle cx="1" cy="1" r="1" fill="rgb(161 161 170)" />
+    </pattern>
+  </defs>
+  <rect x="0" y="0" width="1312" height="26" fill="url(#backedByDotsTop)" />
+  <rect x="0" y="26" width="1312" height="26" fill="url(#backedByDotsMid)" />
+  <rect x="0" y="52" width="1312" height="26" fill="url(#backedByDotsBot)" />
+</svg>

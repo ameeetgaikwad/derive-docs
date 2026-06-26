@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Image from "next/image";
 import { cn } from "@/lib/utils";
 
 /**
@@ -68,7 +69,7 @@ export function TokenIcon({ symbol, size = 24, className }: TokenIconProps) {
   }
 
   return (
-    <img
+    <Image
       src={url}
       alt={upper}
       width={size}

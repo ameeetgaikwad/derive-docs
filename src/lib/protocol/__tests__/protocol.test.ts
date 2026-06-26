@@ -78,6 +78,18 @@ describe("board generation", () => {
       expect(s.subId).toBeGreaterThan(0n);
     }
   });
+
+  it("buy target strikes are puts below spot", () => {
+    const expiry = weeklyExpiries(1)[0];
+    const strikes = strikesForExpiry(62790, expiry, "buy_low");
+    expect(strikes.length).toBeGreaterThan(3);
+    for (const s of strikes) {
+      expect(s.strike).toBeLessThan(62790);
+      expect(s.isCall).toBe(false);
+      expect(s.instrumentName.endsWith("-P")).toBe(true);
+      expect(s.subId).toBeGreaterThan(0n);
+    }
+  });
 });
 
 describe("black76", () => {

@@ -1,13 +1,5 @@
-"use client";
+import { MarketingLanding } from "@/app/(app)/[locale]/(landing)/_components/marketing-landing";
 
-import { CoveredCallFlow } from "@/components/earn/CoveredCallFlow";
-import { CoveredCallPositions } from "@/components/earn/CoveredCallPositions";
-
-export default function Home() {
-  return (
-    <>
-      <CoveredCallFlow />
-      <CoveredCallPositions />
-    </>
-  );
+export default async function Home() {
+  return <MarketingLanding />;
 }

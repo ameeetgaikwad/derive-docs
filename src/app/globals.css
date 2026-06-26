@@ -1,24 +1,24 @@
 @import "tailwindcss";
 
 :root {
-  --background: #121212;
-  --foreground: #fafafa;
-  --card: #18181b;
-  --card-foreground: #fafafa;
-  --card-elevated: #27272a;
-  --border: #3f3f46;
-  --input: #3f3f46;
-  --primary: #fafafa;
-  --primary-foreground: #121212;
-  --secondary: #27272a;
-  --secondary-foreground: #a1a1aa;
-  --muted: #27272a;
+  --background: #ffffff;
+  --foreground: #09090b;
+  --card: #ffffff;
+  --card-foreground: #09090b;
+  --card-elevated: #f4f4f5;
+  --border: #e4e4e7;
+  --input: #e4e4e7;
+  --primary: #09090b;
+  --primary-foreground: #ffffff;
+  --secondary: #f4f4f5;
+  --secondary-foreground: #3f3f46;
+  --muted: #f4f4f5;
   --muted-foreground: #71717a;
-  --accent: #fb923c;
+  --accent: #f97316;
   --destructive: #ef4444;
-  --success: #22c55e;
-  --warning: #eab308;
-  --ring: #fb923c;
+  --success: #16a34a;
+  --warning: #d97706;
+  --ring: #f97316;
   --radius: 0.625rem;
 }
 
@@ -51,6 +51,60 @@ body {
   background: var(--background);
   color: var(--foreground);
   font-family: var(--font-dm-sans), "DM Sans", sans-serif;
+}
+
+.hedge-target-slider {
+  --hedge-slider-progress: 0%;
+  --hedge-slider-start: #16a34a;
+  --hedge-slider-end: #fed7aa;
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 24px;
+  background: transparent;
+}
+
+.hedge-target-slider::-webkit-slider-runnable-track {
+  height: 5px;
+  border-radius: 999px;
+  background: linear-gradient(
+    90deg,
+    var(--hedge-slider-start) 0%,
+    #facc15 50%,
+    var(--hedge-slider-end) 100%
+  );
+}
+
+.hedge-target-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 20px;
+  height: 20px;
+  margin-top: -7.5px;
+  border: 4px solid #ffffff;
+  border-radius: 999px;
+  background: #09090b;
+  box-shadow: 0 8px 20px rgba(9, 9, 11, 0.18);
+}
+
+.hedge-target-slider::-moz-range-track {
+  height: 5px;
+  border-radius: 999px;
+  background: linear-gradient(
+    90deg,
+    var(--hedge-slider-start) 0%,
+    #facc15 50%,
+    var(--hedge-slider-end) 100%
+  );
+}
+
+.hedge-target-slider::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border: 4px solid #ffffff;
+  border-radius: 999px;
+  background: #09090b;
+  box-shadow: 0 8px 20px rgba(9, 9, 11, 0.18);
 }
 
 /* Remove default focus outlines */
@@ -93,7 +147,7 @@ select {
 }
 
 ::-webkit-scrollbar-track {
-  background: var(--background);
+  background: #fafafa;
 }
 
 ::-webkit-scrollbar-thumb {
@@ -135,7 +189,7 @@ select {
 }
 
 [data-rk] [aria-hidden="true"][style*="position: fixed"] {
-  background: rgba(0, 0, 0, 0.6) !important;
+  background: rgba(9, 9, 11, 0.35) !important;
   backdrop-filter: blur(4px) !important;
 }
 

@@ -14,6 +14,7 @@ import {
   strikesForExpiry,
   weeklyExpiries,
   type BoardStrike,
+  type TargetDirection,
 } from "@/lib/protocol/board";
 import { black76Price, yearsToExpiry } from "@/lib/protocol/black76";
 import { calculateAPR, daysToExpiry } from "@/lib/protocol/apr";
@@ -23,6 +24,7 @@ import { useSpotPrice } from "./useSpotPrice";
 /** Fallbacks when an expiry has no posted feed data yet (testnet reality). */
 const DEFAULT_IV = 0.6;
 const DEFAULT_RATE = 0.05;
+const DEFAULT_SPOT_PRICE = 60_000;
 
 export interface ExpiryInfo {
   epoch: number;
@@ -48,8 +50,13 @@ export interface StrikeOption extends BoardStrike {
  * the reference maker-bot quotes with. Executable pricing always comes from
  * the RFQ auction.
  */
-export function useAvailableStrikes(selectedExpiry: number | null) {
-  const { spotPrice, isLoading: spotLoading } = useSpotPrice();
+export function useAvailableStrikes(
+  selectedExpiry: number | null,
+  direction: TargetDirection = "sell_high"
+) {
+  const { spotPrice: oracleSpotPrice, isLoading: spotLoading, isStale } = useSpotPrice();
+  const spotPrice = oracleSpotPrice > 0 ? oracleSpotPrice : DEFAULT_SPOT_PRICE;
+  const usedSpotFallback = oracleSpotPrice <= 0;
 
   const expiries = useMemo<ExpiryInfo[]>(
     () =>
@@ -60,29 +67,36 @@ export function useAvailableStrikes(selectedExpiry: number | null) {
     []
   );
 
+  const effectiveExpiry = useMemo(() => {
+    if (selectedExpiry !== null && expiries.some((e) => e.epoch === selectedExpiry)) {
+      return selectedExpiry;
+    }
+    return expiries[0]?.epoch ?? null;
+  }, [expiries, selectedExpiry]);
+
   const boardStrikes = useMemo(
     () =>
-      selectedExpiry && spotPrice > 0
-        ? strikesForExpiry(spotPrice, selectedExpiry)
+      effectiveExpiry && spotPrice > 0
+        ? strikesForExpiry(spotPrice, effectiveExpiry, direction)
         : [],
-    [selectedExpiry, spotPrice]
+    [direction, effectiveExpiry, spotPrice]
   );
 
   // Heterogeneous batch (multicall): [forward, rate, vol per strike].
   const feedContracts = useMemo<ContractFunctionParameters[]>(() => {
-    if (selectedExpiry === null || boardStrikes.length === 0) return [];
+    if (effectiveExpiry === null || boardStrikes.length === 0) return [];
     return [
       {
         abi: lyraForwardFeedAbi,
         address: ADDRESSES.btcForwardFeed,
         functionName: "getForwardPrice",
-        args: [BigInt(selectedExpiry)],
+        args: [BigInt(effectiveExpiry)],
       },
       {
         abi: lyraRateFeedAbi,
         address: ADDRESSES.btcRateFeed,
         functionName: "getInterestRate",
-        args: [BigInt(selectedExpiry)],
+        args: [BigInt(effectiveExpiry)],
       },
       ...boardStrikes.map((s) => ({
         abi: lyraVolFeedAbi,
@@ -91,7 +105,7 @@ export function useAvailableStrikes(selectedExpiry: number | null) {
         args: [s.strike18, BigInt(s.expiry)],
       })),
     ];
-  }, [selectedExpiry, boardStrikes]);
+  }, [effectiveExpiry, boardStrikes]);
 
   const feedReads = useReadContracts({
     contracts: feedContracts,
@@ -102,8 +116,8 @@ export function useAvailableStrikes(selectedExpiry: number | null) {
   });
 
   const strikes = useMemo<StrikeOption[]>(() => {
-    if (!selectedExpiry || boardStrikes.length === 0 || spotPrice <= 0) return [];
-    const dte = daysToExpiry(selectedExpiry);
+    if (!effectiveExpiry || boardStrikes.length === 0 || spotPrice <= 0) return [];
+    const dte = daysToExpiry(effectiveExpiry);
     if (dte <= 0) return [];
 
     const results = feedReads.data;
@@ -119,7 +133,7 @@ export function useAvailableStrikes(selectedExpiry: number | null) {
         ? unitToNumber((rateRes.result as readonly [bigint, bigint])[0])
         : DEFAULT_RATE;
 
-    const T = yearsToExpiry(selectedExpiry);
+    const T = yearsToExpiry(effectiveExpiry);
 
     return boardStrikes.map((s, i) => {
       const volRes = results?.[2 + i];
@@ -134,23 +148,28 @@ export function useAvailableStrikes(selectedExpiry: number | null) {
         timeToExpiryYears: T,
         vol: vol > 0 ? vol : DEFAULT_IV,
         rate,
-        isCall: true,
+        isCall: s.isCall,
       });
 
       return {
         ...s,
         premium,
-        apr: calculateAPR(premium, spotPrice, dte),
+        apr: calculateAPR(premium, s.isCall ? spotPrice : s.strike, dte),
         vol,
         usedFallback: !volOk || forwardRes?.status !== "success",
       };
     });
-  }, [boardStrikes, feedReads.data, selectedExpiry, spotPrice]);
+  }, [boardStrikes, effectiveExpiry, feedReads.data, spotPrice]);
 
   return {
     expiries,
+    selectedExpiry: effectiveExpiry,
     strikes,
     spotPrice,
-    isLoading: spotLoading || (boardStrikes.length > 0 && feedReads.isLoading),
+    usedSpotFallback,
+    spotError: isStale,
+    isLoading:
+      (spotLoading && !usedSpotFallback) ||
+      (boardStrikes.length > 0 && feedReads.isLoading),
   };
 }
