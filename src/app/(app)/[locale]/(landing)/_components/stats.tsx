@@ -10,14 +10,14 @@ const steps = [
     numberClassName: 'text-orange-500',
     title: 'Choose your side.',
     description:
-      "Use cash to wait for a lower BTC entry, or use BTC you would be happy selling above today's price.",
+      "Use cash for a lower BTC entry, or commit the BTC slice you would sell above today's price.",
   },
   {
     number: '02',
     numberClassName: 'text-blue-500',
-    title: 'Set the price and date.',
+    title: 'Set the target.',
     description:
-      'Move the target, pick the expiry, and see the reward and effective price before anything is signed.',
+      'Pick the price and expiry. Hedge shows the option-powered reward and effective BTC price before anything is signed.',
   },
   {
     number: '03',
@@ -34,11 +34,11 @@ export function Stats({ t }: { t: (value: string) => string }) {
       <div className="flex flex-col gap-6 sm:gap-8 lg:min-h-[120px] lg:flex-row lg:items-end lg:justify-between">
         <div>
           <Text as="h2" variant="h2" className="max-w-[690px] text-zinc-950">
-            {t('Pick a BTC price. Know the reward before you commit.')}
+            {t('Pick a BTC price. See what it pays.')}
           </Text>
           <Text variant="body-large" className="mt-5 max-w-[560px] text-zinc-500">
             {t(
-              'Hedge makes paid BTC targets feel like a simple calculator, not a trading terminal.',
+              'Under the hood, Hedge uses cash-secured puts and covered calls. In the app, they become two simple target orders: buy lower or sell higher.',
             )}
           </Text>
         </div>

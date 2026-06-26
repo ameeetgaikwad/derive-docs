@@ -43,7 +43,7 @@ export function Hero({
                 className="max-w-[503px] text-black/50"
               >
                 {t(
-                  'Set the BTC price you already want, see the reward upfront, and review both outcomes before you sign. Built for people who want to buy lower or sell higher without trading screens.',
+                  'Options made simple for people who think in BTC prices. Choose where you would buy or sell anyway, see the reward, and review both outcomes before you sign.',
                 )}
               </Text>
             </div>

@@ -28,7 +28,7 @@ const schibstedGrotesk = Schibsted_Grotesk({
 export const metadata: Metadata = {
   title: "Hedge — Paid BTC Targets",
   description:
-    "Get paid for BTC buy and sell targets. Buy BTC cheaper or sell BTC higher through simple paid target orders.",
+    "Options made simple for BTC targets. Buy BTC cheaper or sell BTC higher through paid target orders.",
 };
 
 export default function RootLayout({

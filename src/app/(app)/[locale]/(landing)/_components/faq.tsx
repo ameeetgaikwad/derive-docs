@@ -8,7 +8,12 @@ const faqs = [
   {
     question: 'What is Hedge?',
     answer:
-      'Hedge is a paid BTC target order. You choose a price where you would already buy or sell BTC, and the app shows the reward for waiting at that target.',
+      'Hedge is options made simple for BTC targets. You choose a price where you would already buy or sell BTC, and the app shows the reward for making that commitment.',
+  },
+  {
+    question: 'Is this options trading?',
+    answer:
+      'Yes, under the hood. Buy cheaper maps to a cash-secured put, and sell higher maps to a covered call. Hedge keeps the interface focused on BTC price, reward, and outcomes instead of options jargon.',
   },
   {
     question: 'How does buying BTC cheaper work?',
@@ -28,12 +33,7 @@ const faqs = [
   {
     question: 'Is this just a limit order?',
     answer:
-      'The UX feels like a limit order, but the difference is the reward. Hedge shows the effective price after the reward, so users can reason in normal buy and sell terms.',
-  },
-  {
-    question: 'What is live in the prototype?',
-    answer:
-      'The sell target path uses the existing testnet matching flow. Buy targets are priced as an MVP preview until USDC reservation and put-side matching are wired.',
+      'It feels like a limit order, but the difference is the reward. Hedge shows the effective price after the reward, so users can reason in normal buy and sell terms.',
   },
 ] as const
 

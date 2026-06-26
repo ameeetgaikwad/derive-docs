@@ -14,7 +14,7 @@ const trustItems = [
   },
   {
     icon: `${ASSET_BASE}/trust-speed.svg`,
-    label: 'Live BTC rewards.',
+    label: 'Options-powered rewards.',
   },
 ] as const
 
