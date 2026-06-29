@@ -123,6 +123,7 @@ const DEFAULT_AMOUNT: Record<TargetMode, string> = {
   buy_low: "1000",
   sell_high: "0.05",
 };
+const INITIAL_MODE: TargetMode = "sell_high";
 
 const STEP_LABEL: Record<Exclude<FlowStep, "select" | "done">, string> = {
   subaccount: "Creating target account",
@@ -168,7 +169,7 @@ function expiryLabel(epoch: number | null): string {
   });
 }
 
-export default function LoanComposer({
+export default function TargetComposer({
   variant = "landing",
   onReviewModeChange,
 }: {
@@ -178,8 +179,8 @@ export default function LoanComposer({
   const { isConnected, address } = useAccount();
   const { openConnectModal } = useConnectModal();
   const [view, setView] = useState<ComposerView>("compose");
-  const [mode, setMode] = useState<TargetMode>("buy_low");
-  const [amount, setAmount] = useState(DEFAULT_AMOUNT.buy_low);
+  const [mode, setMode] = useState<TargetMode>(INITIAL_MODE);
+  const [amount, setAmount] = useState(DEFAULT_AMOUNT[INITIAL_MODE]);
   const [selectedExpiry, setSelectedExpiry] = useState<number | null>(null);
   const [selectedStrike, setSelectedStrike] = useState<number | null>(null);
   const [step, setStep] = useState<FlowStep>("select");

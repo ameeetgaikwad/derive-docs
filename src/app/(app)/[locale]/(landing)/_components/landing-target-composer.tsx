@@ -1,9 +1,9 @@
 'use client'
 
-import LoanComposer from '@/components/shared/loan-composer'
+import TargetComposer from '@/components/shared/target-composer'
 import { cn } from '@/lib/utils'
 
-export function LandingLoanComposer({
+export function LandingTargetComposer({
   reviewMode,
   onReviewModeChange,
 }: {
@@ -18,7 +18,7 @@ export function LandingLoanComposer({
         reviewMode && 'w-full',
       )}
     >
-      <LoanComposer onReviewModeChange={onReviewModeChange} />
+      <TargetComposer onReviewModeChange={onReviewModeChange} />
     </div>
   )
 }

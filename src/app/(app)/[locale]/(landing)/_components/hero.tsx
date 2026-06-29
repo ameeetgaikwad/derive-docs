@@ -7,7 +7,7 @@ import { Link } from '@/i18n/navigation'
 import { cn } from '@/lib/utils'
 
 import { BestRateWave } from './best-rate-wave'
-import { LandingLoanComposer } from './landing-loan-composer'
+import { LandingTargetComposer } from './landing-target-composer'
 
 const ASSET_BASE = '/images/marketing/landing'
 
@@ -58,7 +58,7 @@ export function Hero({
           <BestRateWave />
         </div>
       )}
-      <LandingLoanComposer
+      <LandingTargetComposer
         reviewMode={reviewMode}
         onReviewModeChange={onReviewModeChange}
       />
