@@ -6,15 +6,15 @@ const ASSET_BASE = '/images/marketing/landing'
 const trustItems = [
   {
     icon: `${ASSET_BASE}/trust-key.svg`,
-    label: 'Wallet-signed targets.',
+    label: 'Wallet-signed orders.',
   },
   {
     icon: `${ASSET_BASE}/trust-privacy.svg`,
-    label: 'Clear outcomes first.',
+    label: 'Decentralized execution.',
   },
   {
     icon: `${ASSET_BASE}/trust-speed.svg`,
-    label: 'Options-powered rewards.',
+    label: 'Live premium quotes.',
   },
 ] as const
 

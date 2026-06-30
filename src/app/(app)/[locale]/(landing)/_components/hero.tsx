@@ -43,7 +43,7 @@ export function Hero({
                 className="max-w-[503px] text-black/50"
               >
                 {t(
-                  'Options made simple for people who think in BTC prices. Choose where you would buy or sell anyway, see the reward, and review both outcomes before you sign.',
+                  'Set the strike where you would buy or sell BTC, choose an expiry, and see the premium before you sign. Covered calls and cash-secured puts, wrapped as paid BTC targets.',
                 )}
               </Text>
             </div>

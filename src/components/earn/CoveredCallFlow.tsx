@@ -395,13 +395,13 @@ export function CoveredCallFlow() {
                 />
                 {isConnected && amountNum > btcBalance && (
                   <div className="mt-2 flex items-center gap-3 text-[10px] text-muted-foreground">
-                    <span>Need test BTCB?</span>
+                    <span>Need BTCB?</span>
                     <button
                       onClick={() => mintBtcb.mutate()}
                       disabled={mintBtcb.isPending}
                       className="rounded-md border border-accent/30 bg-accent/10 px-2 py-1 font-semibold text-accent transition-colors hover:bg-accent/20 disabled:opacity-50"
                     >
-                      {mintBtcb.isPending ? "Minting…" : "Mint 1 BTCB"}
+                      {mintBtcb.isPending ? "Adding…" : "Add 1 BTCB"}
                     </button>
                     <a
                       href={TBNB_FAUCET_URL}
@@ -409,7 +409,7 @@ export function CoveredCallFlow() {
                       rel="noopener noreferrer"
                       className="text-accent underline-offset-2 hover:underline"
                     >
-                      tBNB faucet (gas)
+                      Gas faucet
                     </a>
                   </div>
                 )}

@@ -27,7 +27,7 @@ export function Header() {
             />
           </Link>
           <span className="rounded-sm border-[0.5px] border-orange-200 bg-orange-50 px-2 py-1 font-mono text-[10px] font-medium uppercase text-orange-700">
-            BSC testnet
+            Testnet
           </span>
         </div>
 
@@ -43,19 +43,19 @@ export function Header() {
               <button
                 onClick={() => mintBtcb.mutate()}
                 disabled={mintBtcb.isPending}
-                title="Mint 1 mock BTCB to your wallet (testnet faucet)"
+                title="Add 1 BTCB to your wallet"
                 className="rounded-sm border-[0.5px] border-orange-200 bg-orange-50 px-3 py-1.5 text-xs font-semibold text-orange-700 transition-colors hover:bg-orange-100 disabled:opacity-50"
               >
-                {mintBtcb.isPending ? "Minting..." : "Get test BTCB"}
+                {mintBtcb.isPending ? "Adding..." : "Get BTCB"}
               </button>
               <a
                 href={TBNB_FAUCET_URL}
                 target="_blank"
                 rel="noopener noreferrer"
-                title="BNB Chain testnet faucet for gas (tBNB)"
+                title="Add gas for BNB Chain transactions"
                 className="hidden rounded-md border-[0.5px] border-border bg-background px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground sm:inline"
               >
-                tBNB faucet
+                Gas faucet
               </a>
             </>
           )}

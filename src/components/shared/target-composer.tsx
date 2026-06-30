@@ -6,7 +6,7 @@ import {
   useMemo,
   useRef,
   useState,
-  type CSSProperties,
+  type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from "react";
 import { useConnectModal } from "@rainbow-me/rainbowkit";
@@ -43,6 +43,10 @@ import {
   useAvailableStrikes,
   type StrikeOption,
 } from "@/hooks/protocol/useAvailableStrikes";
+import {
+  useBitcoinPriceHistory,
+  type BitcoinPriceHistoryPoint,
+} from "@/hooks/useBitcoinPrice";
 import { useBtcbBalance } from "@/hooks/protocol/useBtcb";
 import { usePositionMonitor } from "@/hooks/protocol/usePositionMonitor";
 import { useSellCall } from "@/hooks/protocol/useSellCall";
@@ -59,12 +63,10 @@ type ModeCopy = {
   title: string;
   plainTitle: string;
   shortLabel: string;
-  description: string;
   amountLabel: string;
   amountPrefix: string;
   amountSuffix: string;
   targetLabel: string;
-  metricAmountLabel: string;
   effectivePriceLabel: string;
   reviewTitle: string;
   hitTitle: string;
@@ -77,11 +79,11 @@ type SummaryData = {
   strike: StrikeOption;
   expiryLabelText: string;
   rewardUsd: number;
+  apr: number;
   effectivePrice: number;
   contracts: number;
   spotPrice: number;
   capitalUsd: number;
-  targetDistance: number;
 };
 
 const MODE_COPY: Record<TargetMode, ModeCopy> = {
@@ -89,33 +91,27 @@ const MODE_COPY: Record<TargetMode, ModeCopy> = {
     title: "Buy BTC cheaper",
     plainTitle: "Buy cheaper",
     shortLabel: "Buy lower",
-    description:
-      "Reserve cash at the price you already want. If BTC trades down to your target, you buy. If it does not, you keep the reward.",
-    amountLabel: "How much cash do you want to reserve?",
+    amountLabel: "How much cash would you set aside?",
     amountPrefix: "$",
     amountSuffix: "USDC",
-    targetLabel: "Buy target",
-    metricAmountLabel: "BTC if filled",
-    effectivePriceLabel: "Effective buy price",
-    reviewTitle: "Review buy target",
-    hitTitle: "If BTC reaches your buy price",
-    missTitle: "If BTC stays above your price",
+    targetLabel: "Buy strike",
+    effectivePriceLabel: "Effective entry",
+    reviewTitle: "Review cash-secured put",
+    hitTitle: "If BTC settles below your strike",
+    missTitle: "If BTC stays above your strike",
   },
   sell_high: {
     title: "Sell BTC higher",
     plainTitle: "Sell higher",
     shortLabel: "Sell higher",
-    description:
-      "Put a BTC slice to work at a higher price. If BTC reaches your target, that slice sells. If it does not, you keep the BTC and the reward.",
     amountLabel: "How much BTC would you sell higher?",
     amountPrefix: "",
     amountSuffix: "BTCB",
-    targetLabel: "Sell target",
-    metricAmountLabel: "BTC committed",
-    effectivePriceLabel: "Effective sell price",
-    reviewTitle: "Review sell target",
-    hitTitle: "If BTC reaches your sell price",
-    missTitle: "If BTC stays below your price",
+    targetLabel: "Sell strike",
+    effectivePriceLabel: "Effective exit",
+    reviewTitle: "Review covered call",
+    hitTitle: "If BTC settles above your strike",
+    missTitle: "If BTC stays below your strike",
   },
 };
 
@@ -153,6 +149,16 @@ function formatPercent(value: number): string {
   return `${value.toFixed(value >= 10 ? 0 : 1)}%`;
 }
 
+function formatChartTime(epochSeconds: number): string {
+  if (!Number.isFinite(epochSeconds) || epochSeconds <= 0) return "Today";
+
+  return new Date(epochSeconds * 1000).toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
 function sanitizeDecimal(value: string): string {
   const normalized = value.replace(/[^\d.]/g, "");
   const [head, ...tail] = normalized.split(".");
@@ -167,6 +173,17 @@ function expiryLabel(epoch: number | null): string {
     year: "numeric",
     timeZone: "UTC",
   });
+}
+
+function dteLabel(epoch: number | null): string {
+  if (!epoch) return "- DTE";
+
+  const days = Math.max(
+    0,
+    Math.ceil((epoch * 1000 - Date.now()) / (24 * 60 * 60 * 1000)),
+  );
+
+  return `${days} DTE`;
 }
 
 export default function TargetComposer({
@@ -196,6 +213,7 @@ export default function TargetComposer({
     selectedExpiry: activeExpiry,
     strikes,
     spotPrice,
+    isLiveSpotFetching,
     isLoading,
   } = useAvailableStrikes(selectedExpiry, mode);
   const { subaccountId, ensureSubaccount } = useCoveredCallSubaccount();
@@ -248,11 +266,11 @@ export default function TargetComposer({
             strike: selectedStrikeData,
             expiryLabelText: expiryLabel(selectedExpiryData?.epoch ?? activeExpiry),
             rewardUsd,
+            apr: selectedStrikeData.apr,
             effectivePrice,
             contracts,
             spotPrice,
             capitalUsd,
-            targetDistance,
           }
         : null,
     [
@@ -266,7 +284,6 @@ export default function TargetComposer({
       selectedExpiryData?.epoch,
       selectedStrikeData,
       spotPrice,
-      targetDistance,
     ],
   );
 
@@ -284,9 +301,8 @@ export default function TargetComposer({
       setAmount(DEFAULT_AMOUNT[nextMode]);
       setSelectedStrike(null);
       setDoneInfo(null);
-      setComposerView("compose");
     },
-    [setComposerView],
+    [],
   );
 
   const handleContinue = useCallback(() => {
@@ -352,7 +368,7 @@ export default function TargetComposer({
         instrumentName: result.instrumentName,
       });
       toast.success(
-        `Sell target created. Estimated reward ${formatUsd(result.totalPremium, 2)}`,
+        `Covered call created. Estimated premium ${formatUsd(result.totalPremium, 2)}`,
       );
       setStep("done");
     } catch (err) {
@@ -384,7 +400,7 @@ export default function TargetComposer({
         instrumentName: selectedStrikeData.instrumentName,
         simulated: true,
       });
-      toast.success("Buy target preview saved");
+      toast.success("Buy target saved");
       setComposerView("compose");
       return;
     }
@@ -443,6 +459,7 @@ export default function TargetComposer({
           capitalUsd={capitalUsd}
           rewardUsd={rewardUsd}
           spotPrice={spotPrice}
+          isLiveSpotFetching={isLiveSpotFetching}
           targetDistance={targetDistance}
           isLoading={isLoading}
           isPending={isPending}
@@ -477,6 +494,7 @@ export default function TargetComposer({
       capitalUsd={capitalUsd}
       rewardUsd={rewardUsd}
       spotPrice={spotPrice}
+      isLiveSpotFetching={isLiveSpotFetching}
       targetDistance={targetDistance}
       isLoading={isLoading}
       isPending={isPending}
@@ -508,6 +526,7 @@ function ComposerCard({
   capitalUsd,
   rewardUsd,
   spotPrice,
+  isLiveSpotFetching,
   targetDistance,
   isLoading,
   isPending,
@@ -536,6 +555,7 @@ function ComposerCard({
   capitalUsd: number;
   rewardUsd: number;
   spotPrice: number;
+  isLiveSpotFetching: boolean;
   targetDistance: number;
   isLoading: boolean;
   isPending: boolean;
@@ -557,15 +577,15 @@ function ComposerCard({
 }) {
   const fieldSubtitle = selectedStrikeData
     ? isBuy
-      ? `You receive about ${formatBtc(contracts)} if filled`
-      : `About ${formatUsd(capitalUsd)} notional at today's spot`
+      ? `Up to ${formatBtc(contracts)} if the order fills`
+      : `About ${formatUsd(capitalUsd)} at the current BTC price`
     : undefined;
 
   return (
     <AsideCard className="relative z-10 min-w-0 overflow-visible rounded-lg border-[0.5px] border-zinc-200 bg-white shadow-[0_0_30px_0_rgba(0,0,0,0.05)]">
       <AsideHeader className="min-h-14 rounded-t-lg bg-zinc-100 px-5 py-4 pr-[1.875rem]">
         <AsideTitle>{variant === "landing" ? "Target Composer" : "Hedge Composer"}</AsideTitle>
-        <LiveIndicator isFetching={isLoading || isPending} />
+        <LiveIndicator isFetching={isLoading || isPending || isLiveSpotFetching} />
       </AsideHeader>
 
       <AsideContent className={cn("p-5 sm:p-6", compact ? "lg:p-6" : "lg:p-[1.875rem]")}>
@@ -576,6 +596,12 @@ function ComposerCard({
             </Text>
             <ModeToggle mode={mode} onChange={switchMode} />
           </div>
+
+          <ExpiryOptions
+            activeExpiry={activeExpiry}
+            expiries={expiries}
+            onChange={setSelectedExpiry}
+          />
 
           <CurrencyField size="large">
             <CurrencyField.Label>{copy.amountLabel}</CurrencyField.Label>
@@ -590,34 +616,13 @@ function ComposerCard({
             />
           </CurrencyField>
 
-          <div>
-            <div className="mb-3 flex items-center justify-between gap-4">
-              <Text variant="subheading-1" className="text-zinc-800">
-                {copy.targetLabel}
-              </Text>
-              <span
-                className={cn(
-                  "rounded-sm px-2.5 py-1 font-mono text-xs",
-                  targetDistance <= 0.05
-                    ? "bg-green-50 text-green-600"
-                    : "bg-orange-50 text-orange-600",
-                )}
-              >
-                {formatPercent(targetDistance * 100)} from spot
-              </span>
-            </div>
-            <TargetRail
-              strikes={strikes}
-              selectedStrike={activeStrike}
-              onSelect={setSelectedStrike}
-              mode={mode}
-            />
-          </div>
-
-          <ExpirySelect
-            activeExpiry={activeExpiry}
-            expiries={expiries}
-            onChange={setSelectedExpiry}
+          <StrikeSelect
+            label={copy.targetLabel}
+            strikes={strikes}
+            selectedStrike={activeStrike}
+            selectedStrikeData={selectedStrikeData}
+            onSelect={setSelectedStrike}
+            targetDistance={targetDistance}
           />
 
           {auction && isPending && (
@@ -649,7 +654,7 @@ function ComposerCard({
               <Separator orientation="vertical" className="hidden sm:block" />
               <div className="grid min-w-0 flex-1 grid-cols-3 gap-4">
                 <FooterMetric
-                  label="Reward"
+                  label="Premium"
                   value={
                     doneInfo
                       ? formatUsd(doneInfo.premium, 2)
@@ -659,12 +664,12 @@ function ComposerCard({
                   }
                 />
                 <FooterMetric
-                  label="Target"
+                  label="Strike"
                   value={
                     selectedStrikeData ? formatUsd(selectedStrikeData.strike) : "-"
                   }
                 />
-                <FooterMetric label="BTC Spot" value={formatUsd(spotPrice)} />
+                <FooterMetric label="BTC spot" value={formatUsd(spotPrice)} />
               </div>
             </div>
           </div>
@@ -722,7 +727,7 @@ function CurrencyBadge({
   );
 }
 
-function ExpirySelect({
+function ExpiryOptions({
   activeExpiry,
   expiries,
   onChange,
@@ -731,10 +736,63 @@ function ExpirySelect({
   expiries: Array<{ epoch: number; label: string }>;
   onChange: (expiry: number) => void;
 }) {
-  const [isOpen, setIsOpen] = useState(false);
-  const rootRef = useRef<HTMLDivElement | null>(null);
   const activeOption =
     expiries.find((expiry) => expiry.epoch === activeExpiry) ?? expiries[0] ?? null;
+
+  return (
+    <div className="flex flex-col gap-2">
+      <Text variant="body-small" className="text-zinc-500">
+        Expiry
+      </Text>
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+        {expiries.map((expiry) => {
+          const selected = expiry.epoch === activeOption?.epoch;
+
+          return (
+            <button
+              key={expiry.epoch}
+              type="button"
+              aria-pressed={selected}
+              onClick={() => onChange(expiry.epoch)}
+              className={cn(
+                "min-h-[68px] rounded-[5px] border-[0.5px] px-3 py-2 text-left transition-colors",
+                selected
+                  ? "border-orange-500 bg-orange-50 text-orange-700"
+                  : "border-zinc-200 bg-white text-zinc-700 hover:border-zinc-400",
+              )}
+            >
+              <span className="block font-mono text-xs font-medium">
+                {expiry.label}
+              </span>
+              <span className="mt-1 block font-mono text-[11px] text-zinc-500">
+                {dteLabel(expiry.epoch)}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function StrikeSelect({
+  label,
+  strikes,
+  selectedStrike,
+  selectedStrikeData,
+  onSelect,
+  targetDistance,
+}: {
+  label: string;
+  strikes: StrikeOption[];
+  selectedStrike: number | null;
+  selectedStrikeData: StrikeOption | null;
+  onSelect: (strike: number) => void;
+  targetDistance: number;
+}) {
+  const [isOpen, setIsOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const selected = selectedStrikeData ?? strikes[0] ?? null;
 
   useEffect(() => {
     if (!isOpen) return;
@@ -746,9 +804,7 @@ function ExpirySelect({
     };
 
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        setIsOpen(false);
-      }
+      if (event.key === "Escape") setIsOpen(false);
     };
 
     document.addEventListener("pointerdown", handlePointerDown);
@@ -759,33 +815,58 @@ function ExpirySelect({
     };
   }, [isOpen]);
 
-  const handleSelect = (expiry: number) => {
-    onChange(expiry);
+  if (strikes.length === 0) {
+    return (
+      <div className="flex flex-col gap-2">
+        <Text variant="body-small" className="text-zinc-500">
+          {label}
+        </Text>
+        <div className="rounded-[5px] bg-zinc-50 p-4">
+          <Text variant="body-small" className="text-zinc-500">
+            No strikes are available for this expiry yet.
+          </Text>
+        </div>
+      </div>
+    );
+  }
+
+  const handleSelect = (strike: number) => {
+    onSelect(strike);
     setIsOpen(false);
   };
 
   return (
     <div ref={rootRef} className="relative flex flex-col gap-2">
-      <Text id="expiry-label" variant="body-small" className="text-zinc-500">
-        Expiry
-      </Text>
+      <div className="flex items-center justify-between gap-4">
+        <Text id="strike-label" variant="body-small" className="text-zinc-500">
+          {label}
+        </Text>
+        <Text variant="terminal-small" className="text-zinc-500">
+          {formatPercent(targetDistance * 100)} from spot
+        </Text>
+      </div>
       <button
         type="button"
-        aria-controls="expiry-menu"
+        aria-controls="strike-menu"
         aria-expanded={isOpen}
         aria-haspopup="listbox"
-        aria-labelledby="expiry-label"
-        disabled={expiries.length === 0}
+        aria-labelledby="strike-label"
         onClick={() => setIsOpen((open) => !open)}
-        className="relative flex h-11 w-full items-center rounded-[5px] border-[0.5px] border-zinc-200 bg-white pl-10 pr-10 font-mono text-sm text-zinc-800 shadow-[0_1px_0_rgba(9,9,11,0.02)] transition-colors hover:bg-zinc-50 focus-visible:border-zinc-300 disabled:cursor-not-allowed disabled:opacity-60"
+        className="relative flex min-h-14 w-full items-center justify-between gap-4 rounded-[5px] border-[0.5px] border-zinc-200 bg-white px-4 py-3 text-left shadow-[0_1px_0_rgba(9,9,11,0.02)] transition-colors hover:bg-zinc-50 focus-visible:border-zinc-300"
       >
-        <CalendarDays className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-zinc-500" />
-        <span className="truncate">
-          {activeOption?.label ?? "Select expiry"}
-        </span>
+        <div className="min-w-0">
+          <Text as="span" variant="h5" className="block text-zinc-950">
+            {selected ? formatUsd(selected.strike) : "Select strike"}
+          </Text>
+          {selected && (
+            <Text as="span" variant="terminal-small" className="mt-1 block text-zinc-500">
+              Premium {formatUsd(selected.premium, selected.premium >= 100 ? 0 : 2)}/BTC
+            </Text>
+          )}
+        </div>
         <ChevronDown
           className={cn(
-            "pointer-events-none absolute right-3 top-1/2 size-4 -translate-y-1/2 text-zinc-500 transition-transform",
+            "size-4 shrink-0 text-zinc-500 transition-transform",
             isOpen && "rotate-180",
           )}
         />
@@ -793,32 +874,45 @@ function ExpirySelect({
 
       {isOpen && (
         <div
-          id="expiry-menu"
+          id="strike-menu"
           role="listbox"
-          aria-labelledby="expiry-label"
-          className="absolute top-full left-0 z-[100] mt-2 max-h-56 w-full overflow-auto rounded-[5px] border-[0.5px] border-zinc-200 bg-white p-1 shadow-[0_16px_40px_rgba(9,9,11,0.12)]"
+          aria-labelledby="strike-label"
+          className="absolute top-full left-0 z-[100] mt-2 max-h-64 w-full overflow-auto rounded-[5px] border-[0.5px] border-zinc-200 bg-white p-1 shadow-[0_16px_40px_rgba(9,9,11,0.12)]"
         >
-          {expiries.map((expiry) => {
-            const selected = expiry.epoch === activeOption?.epoch;
+          {strikes.map((strike) => {
+            const selectedOption = strike.strike === selectedStrike;
+
             return (
               <button
-                key={expiry.epoch}
+                key={strike.instrumentName}
                 type="button"
                 role="option"
-                aria-selected={selected}
-                onClick={() => handleSelect(expiry.epoch)}
+                aria-selected={selectedOption}
+                onClick={() => handleSelect(strike.strike)}
                 className={cn(
-                  "flex h-9 w-full items-center justify-between rounded-[4px] px-3 font-mono text-sm transition-colors",
-                  selected
+                  "flex min-h-12 w-full items-center justify-between gap-4 rounded-[4px] px-3 py-2 text-left transition-colors",
+                  selectedOption
                     ? "bg-zinc-950 text-white"
                     : "text-zinc-700 hover:bg-zinc-100 hover:text-zinc-950",
                 )}
               >
-                <span>{expiry.label}</span>
+                <span className="min-w-0">
+                  <span className="block font-mono text-sm">
+                    {formatUsd(strike.strike)}
+                  </span>
+                  <span
+                    className={cn(
+                      "mt-0.5 block font-mono text-xs",
+                      selectedOption ? "text-zinc-300" : "text-zinc-500",
+                    )}
+                  >
+                    {formatUsd(strike.premium, strike.premium >= 100 ? 0 : 2)}/BTC
+                  </span>
+                </span>
                 <Check
                   className={cn(
-                    "size-3.5",
-                    selected ? "opacity-100" : "opacity-0",
+                    "size-3.5 shrink-0",
+                    selectedOption ? "opacity-100" : "opacity-0",
                   )}
                 />
               </button>
@@ -826,89 +920,6 @@ function ExpirySelect({
           })}
         </div>
       )}
-    </div>
-  );
-}
-
-function TargetRail({
-  strikes,
-  selectedStrike,
-  onSelect,
-  mode,
-}: {
-  strikes: StrikeOption[];
-  selectedStrike: number | null;
-  onSelect: (strike: number) => void;
-  mode: TargetMode;
-}) {
-  if (strikes.length === 0) {
-    return (
-      <div className="rounded-[5px] bg-zinc-50 p-4">
-        <Text variant="body-small" className="text-zinc-500">
-          No targets are available for this expiry yet.
-        </Text>
-      </div>
-    );
-  }
-
-  const visibleStrikes = strikes.slice(0, 4);
-  const selectedIndex = Math.max(
-    0,
-    visibleStrikes.findIndex((strike) => strike.strike === selectedStrike),
-  );
-  const selected = visibleStrikes[selectedIndex] ?? visibleStrikes[0];
-  const progress =
-    visibleStrikes.length === 1
-      ? 0
-      : (selectedIndex / (visibleStrikes.length - 1)) * 100;
-  const sliderStyle = {
-    "--hedge-slider-progress": `${progress}%`,
-    "--hedge-slider-start": mode === "buy_low" ? "#16a34a" : "#fed7aa",
-    "--hedge-slider-end": mode === "buy_low" ? "#fed7aa" : "#16a34a",
-  } as CSSProperties;
-  const handleSliderValue = (rawValue: string) => {
-    const next = visibleStrikes[Number(rawValue)];
-    if (next) onSelect(next.strike);
-  };
-
-  return (
-    <div className="space-y-4">
-      <div className="flex items-end justify-between gap-4 rounded-[5px] bg-zinc-50 px-4 py-3">
-        <div>
-          <Text variant="body-small" className="text-zinc-500">
-            Selected target
-          </Text>
-          <Text as="p" variant="h4" className="mt-1 text-zinc-950">
-            {formatUsd(selected.strike)}
-          </Text>
-        </div>
-        <Text variant="body-small" className="text-zinc-500">
-          Premium: {formatUsd(selected.premium, selected.premium >= 100 ? 0 : 2)}/BTC
-        </Text>
-      </div>
-      <input
-        aria-label="Select target price"
-        className="hedge-target-slider"
-        min={0}
-        max={visibleStrikes.length - 1}
-        step={1}
-        type="range"
-        value={selectedIndex}
-        onInput={(event) => handleSliderValue(event.currentTarget.value)}
-        onChange={(event) => handleSliderValue(event.currentTarget.value)}
-        style={sliderStyle}
-      />
-      <div className="flex items-center justify-between gap-3">
-        <Text variant="body-small" className="text-zinc-400">
-          {formatUsd(visibleStrikes[0]?.strike ?? 0)}
-        </Text>
-        <Text variant="body-small" className="text-zinc-500">
-          {visibleStrikes.length} live targets
-        </Text>
-        <Text variant="body-small" className="text-zinc-400">
-          {formatUsd(visibleStrikes[visibleStrikes.length - 1]?.strike ?? 0)}
-        </Text>
-      </div>
     </div>
   );
 }
@@ -942,7 +953,7 @@ function LiveIndicator({
         />
         <span className="relative size-2 rounded-full bg-green-500" />
       </span>
-      Live - 20s
+      BTC live
     </div>
   );
 }
@@ -974,7 +985,7 @@ function AuctionStatus({
       </div>
       {bestTotalPremium !== undefined && (
         <Text variant="terminal-small" className="mt-2 text-orange-700">
-          Best reward so far: {formatUsd(bestTotalPremium, 2)}
+          Best premium so far: {formatUsd(bestTotalPremium, 2)}
         </Text>
       )}
     </div>
@@ -1004,6 +1015,7 @@ function TargetOfferCard({
   const isBuy = summary.mode === "buy_low";
   const copy = MODE_COPY[summary.mode];
   const DirectionIcon = isBuy ? TrendingDown : TrendingUp;
+  const { data: priceHistory = [] } = useBitcoinPriceHistory();
 
   return (
     <section className="overflow-hidden rounded-lg border-[0.5px] border-zinc-200 bg-white shadow-[0_0_30px_0_rgba(0,0,0,0.05)]">
@@ -1022,83 +1034,70 @@ function TargetOfferCard({
         </div>
       </div>
 
-      <div className="p-6 sm:p-8">
+      <div className="px-6 pt-5 pb-6 sm:px-8 sm:pt-6 sm:pb-7">
         <Text as="h2" variant="h3" className="text-zinc-950">
           {copy.reviewTitle}
         </Text>
-        <Text variant="body-large" className="mt-3 max-w-[620px] text-zinc-500">
-          {copy.description}
-        </Text>
 
-        <div className="mt-8 grid gap-x-12 gap-y-7 border-y-[0.5px] border-zinc-200 py-6 sm:grid-cols-2 lg:grid-cols-3">
+        <PriceSummaryChart
+          chartData={priceHistory}
+          spotPrice={summary.spotPrice}
+          strikePrice={summary.strike.strike}
+        />
+
+        <div className="mt-5 grid gap-x-12 gap-y-7 border-y-[0.5px] border-zinc-200 py-6 sm:grid-cols-2 lg:grid-cols-3">
           <SummaryLine
-          icon={<DollarSign className="size-4" />}
-          label="Estimated reward"
-          value={formatUsd(summary.rewardUsd, 2)}
+            icon={<DollarSign className="size-4" />}
+            label="Premium (projected)"
+            value={formatUsd(summary.rewardUsd, 2)}
           />
           <SummaryLine
-          icon={<Target className="size-4" />}
-          label={copy.targetLabel}
-          value={formatUsd(summary.strike.strike)}
+            icon={<TrendingUp className="size-4" />}
+            label="APR (projected)"
+            value={formatPercent(summary.apr)}
           />
           <SummaryLine
-          icon={<CalendarDays className="size-4" />}
-          label="Expiry"
-          value={summary.expiryLabelText}
+            icon={<Target className="size-4" />}
+            label="Strike price"
+            value={formatUsd(summary.strike.strike)}
           />
           <SummaryLine
-          icon={<DirectionIcon className="size-4" />}
-          label={isBuy ? "Cash reserved" : "BTC committed"}
-          value={isBuy ? formatUsd(summary.amount) : formatBtc(summary.amount)}
+            icon={<CalendarDays className="size-4" />}
+            label="Expiry"
+            value={summary.expiryLabelText}
           />
           <SummaryLine
-          icon={<CheckCircle2 className="size-4" />}
-          label={copy.effectivePriceLabel}
-          value={`${formatUsd(summary.effectivePrice)}/BTC`}
+            icon={<DirectionIcon className="size-4" />}
+            label="Collateral"
+            value={isBuy ? formatUsd(summary.amount) : formatBtc(summary.amount)}
           />
           <SummaryLine
-            icon={<TokenIcon symbol={isBuy ? "USDC" : "BTC"} size={18} />}
-            label={copy.metricAmountLabel}
-            value={formatBtc(summary.contracts)}
+            icon={<CheckCircle2 className="size-4" />}
+            label={copy.effectivePriceLabel}
+            value={`${formatUsd(summary.effectivePrice)}/BTC`}
           />
         </div>
 
         <div className="mt-8 grid gap-8 lg:grid-cols-2">
           <OutcomeBlock
-          icon={<Target className="size-4" />}
-          title={copy.hitTitle}
-          text={
-            isBuy
-              ? `You reserve ${formatUsd(summary.amount)} and buy about ${formatBtc(summary.contracts)} at ${formatUsd(summary.strike.strike)}. The reward lowers your effective entry to about ${formatUsd(summary.effectivePrice)}/BTC.`
-              : `The ${formatBtc(summary.amount)} slice sells at ${formatUsd(summary.strike.strike)}. Including the reward, the effective exit is about ${formatUsd(summary.effectivePrice)}/BTC.`
-          }
+            icon={<Target className="size-4" />}
+            title={copy.hitTitle}
+            text={
+              isBuy
+                ? `Your reserved ${formatUsd(summary.amount)} can be assigned into about ${formatBtc(summary.contracts)} at ${formatUsd(summary.strike.strike)}. The premium lowers your effective entry to about ${formatUsd(summary.effectivePrice)}/BTC.`
+                : `The covered ${formatBtc(summary.amount)} slice can be sold or capped at ${formatUsd(summary.strike.strike)}. Including premium, the effective exit is about ${formatUsd(summary.effectivePrice)}/BTC.`
+            }
           />
           <OutcomeBlock
-          icon={<CheckCircle2 className="size-4" />}
-          title={copy.missTitle}
-          text={
-            isBuy
-              ? `No BTC is bought. Your ${formatUsd(summary.amount)} stays available and you keep the estimated ${formatUsd(summary.rewardUsd, 2)} reward.`
-              : `You keep the ${formatBtc(summary.amount)} and the estimated ${formatUsd(summary.rewardUsd, 2)} reward. Anything outside this slice stays uncapped.`
-          }
+            icon={<CheckCircle2 className="size-4" />}
+            title={copy.missTitle}
+            text={
+              isBuy
+                ? `No BTC is assigned. Your ${formatUsd(summary.amount)} stays available and you keep the estimated ${formatUsd(summary.rewardUsd, 2)} premium.`
+                : `You keep the ${formatBtc(summary.amount)} and the estimated ${formatUsd(summary.rewardUsd, 2)} premium. Anything outside this slice stays uncapped.`
+            }
           />
         </div>
-
-        <div className="mt-8 flex items-start gap-3 border-t-[0.5px] border-zinc-200 pt-5">
-          <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-green-600" />
-          <Text variant="body-small" className="text-zinc-700">
-            BTC spot is {formatUsd(summary.spotPrice)}. This target is{" "}
-            {formatPercent(summary.targetDistance * 100)} from spot and the reward
-            is shown before signing.
-          </Text>
-        </div>
-
-        {isBuy && (
-          <Text variant="body-small" className="mt-4 text-zinc-500">
-            Buy targets are priced in this prototype. Live USDC reservation and
-            put-side matching still need to be wired before this can execute onchain.
-          </Text>
-        )}
 
         {doneInfo?.txHash && (
           <a
@@ -1116,15 +1115,15 @@ function TargetOfferCard({
         <Text variant="body-small" className="text-zinc-500">
           {doneInfo
             ? doneInfo.simulated
-              ? "Preview saved"
+              ? "Target saved"
               : "Target created"
-            : `Reward: ${formatUsd(summary.rewardUsd, 2)}`}
+            : `Premium: ${formatUsd(summary.rewardUsd, 2)}`}
         </Text>
         <Button type="button" action onClick={onConfirm} disabled={isPending}>
           {isPending
             ? "Working..."
             : isBuy
-              ? "Save target preview"
+              ? "Save target"
               : isConnected
                 ? "Create target"
                 : "Connect wallet"}
@@ -1155,6 +1154,259 @@ function SummaryLine({
         <Text variant="h5" className="mt-1 min-w-0 text-zinc-950">
           {value}
         </Text>
+      </div>
+    </div>
+  );
+}
+
+function PriceSummaryChart({
+  chartData,
+  spotPrice,
+  strikePrice,
+}: {
+  chartData: BitcoinPriceHistoryPoint[];
+  spotPrice: number;
+  strikePrice: number;
+}) {
+  const chartRef = useRef<HTMLDivElement | null>(null);
+  const [chartWidth, setChartWidth] = useState(0);
+  const [activeIndex, setActiveIndex] = useState<number | null>(null);
+  const chartHeight = 128;
+  const topPadding = 12;
+  const bottomPadding = 18;
+
+  useEffect(() => {
+    const element = chartRef.current;
+    if (!element) return;
+
+    const updateWidth = () => {
+      setChartWidth(Math.max(0, Math.floor(element.clientWidth)));
+    };
+
+    updateWidth();
+
+    const observer = new ResizeObserver(updateWidth);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
+
+  const validPoints = useMemo(
+    () =>
+      chartData.filter(
+        (point) =>
+          Number.isFinite(point.time) &&
+          Number.isFinite(point.value) &&
+          point.value > 0,
+      ),
+    [chartData],
+  );
+  const values = useMemo(
+    () => validPoints.map((point) => point.value),
+    [validPoints],
+  );
+  const range = useMemo(() => {
+    const candidates = [...values, spotPrice, strikePrice].filter(
+      (value) => Number.isFinite(value) && value > 0,
+    );
+    if (candidates.length === 0) {
+      return { min: 0, max: 1 };
+    }
+
+    const min = Math.min(...candidates);
+    const max = Math.max(...candidates);
+    const padding = Math.max((max - min) * 0.14, spotPrice * 0.01, 1);
+
+    return {
+      min: min - padding,
+      max: max + padding,
+    };
+  }, [spotPrice, strikePrice, values]);
+
+  const toPoint = useCallback(
+    (value: number, index: number, total: number) => {
+      const effectiveHeight = chartHeight - topPadding - bottomPadding;
+      const valueRange = range.max - range.min || 1;
+      const x = total <= 1 ? 0 : (index / (total - 1)) * chartWidth;
+      const normalizedValue = (value - range.min) / valueRange;
+      const y = chartHeight - bottomPadding - normalizedValue * effectiveHeight;
+
+      return { x, y };
+    },
+    [bottomPadding, chartHeight, chartWidth, range.max, range.min, topPadding],
+  );
+
+  const path = useMemo(() => {
+    if (validPoints.length < 2 || chartWidth <= 0) return "";
+
+    return validPoints
+      .map((dataPoint, index) => {
+        const point = toPoint(dataPoint.value, index, validPoints.length);
+        return `${index === 0 ? "M" : "L"} ${point.x} ${point.y}`;
+      })
+      .join(" ");
+  }, [chartWidth, toPoint, validPoints]);
+
+  const areaPath = useMemo(() => {
+    if (!path || validPoints.length < 2) return "";
+
+    const first = toPoint(validPoints[0].value, 0, validPoints.length);
+    const last = toPoint(
+      validPoints[validPoints.length - 1].value,
+      validPoints.length - 1,
+      validPoints.length,
+    );
+    const baseline = chartHeight - bottomPadding;
+
+    return `${path} L ${last.x} ${baseline} L ${first.x} ${baseline} Z`;
+  }, [bottomPadding, chartHeight, path, toPoint, validPoints]);
+
+  const strikeY = useMemo(() => {
+    if (chartWidth <= 0 || strikePrice <= 0) return null;
+    return toPoint(strikePrice, 0, 1).y;
+  }, [chartWidth, strikePrice, toPoint]);
+
+  const activePoint = useMemo(() => {
+    if (
+      activeIndex === null ||
+      activeIndex < 0 ||
+      activeIndex >= validPoints.length ||
+      chartWidth <= 0
+    ) {
+      return null;
+    }
+
+    const dataPoint = validPoints[activeIndex];
+    const position = toPoint(dataPoint.value, activeIndex, validPoints.length);
+
+    return {
+      ...dataPoint,
+      x: position.x,
+      y: position.y,
+    };
+  }, [activeIndex, chartWidth, toPoint, validPoints]);
+
+  const handlePointerMove = useCallback(
+    (event: ReactPointerEvent<HTMLDivElement>) => {
+      if (validPoints.length < 2 || chartWidth <= 0) return;
+
+      const rect = event.currentTarget.getBoundingClientRect();
+      const x = Math.min(Math.max(event.clientX - rect.left, 0), chartWidth);
+      const nextIndex = Math.round((x / chartWidth) * (validPoints.length - 1));
+
+      setActiveIndex(
+        Math.min(Math.max(nextIndex, 0), validPoints.length - 1),
+      );
+    },
+    [chartWidth, validPoints.length],
+  );
+
+  return (
+    <div className="mt-4">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <Text variant="terminal-small" className="text-zinc-500">
+            BTC
+          </Text>
+          <Text variant="h5" className="mt-1 text-zinc-950">
+            {formatUsd(spotPrice)}
+          </Text>
+        </div>
+        <div className="text-right">
+          <Text variant="terminal-small" className="text-zinc-500">
+            Strike
+          </Text>
+          <Text variant="body-small" className="mt-1 text-zinc-950">
+            {formatUsd(strikePrice)}
+          </Text>
+        </div>
+      </div>
+
+      <div
+        ref={chartRef}
+        className="relative mt-2 touch-none"
+        style={{ height: chartHeight }}
+        onPointerMove={handlePointerMove}
+        onPointerLeave={() => setActiveIndex(null)}
+      >
+        {path && chartWidth > 0 ? (
+          <svg
+            aria-hidden
+            width={chartWidth}
+            height={chartHeight}
+            className="absolute inset-0 overflow-visible"
+          >
+            <defs>
+              <linearGradient id="btc-summary-area" x1="0" x2="0" y1="0" y2="1">
+                <stop offset="0%" stopColor="#f97316" stopOpacity="0.28" />
+                <stop offset="100%" stopColor="#f97316" stopOpacity="0" />
+              </linearGradient>
+            </defs>
+            {strikeY !== null && (
+              <line
+                x1="0"
+                x2={chartWidth}
+                y1={strikeY}
+                y2={strikeY}
+                stroke="#a1a1aa"
+                strokeDasharray="4 4"
+                strokeWidth="1"
+              />
+            )}
+            {areaPath && <path d={areaPath} fill="url(#btc-summary-area)" />}
+            <path
+              d={path}
+              fill="none"
+              stroke="#f97316"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth="2"
+            />
+            {activePoint && (
+              <>
+                <line
+                  x1={activePoint.x}
+                  x2={activePoint.x}
+                  y1={topPadding}
+                  y2={chartHeight - bottomPadding}
+                  stroke="#71717a"
+                  strokeOpacity="0.45"
+                  strokeWidth="1"
+                />
+                <circle
+                  cx={activePoint.x}
+                  cy={activePoint.y}
+                  r="4"
+                  fill="#f97316"
+                  stroke="#ffffff"
+                  strokeWidth="2"
+                />
+              </>
+            )}
+          </svg>
+        ) : (
+          <div className="flex h-full items-center justify-center">
+            <Text variant="body-small" className="text-zinc-500">
+              BTC price loading
+            </Text>
+          </div>
+        )}
+
+        {activePoint && (
+          <div
+            className="pointer-events-none absolute z-10 -translate-x-1/2 rounded-[5px] border-[0.5px] border-zinc-200 bg-white px-2.5 py-1.5 shadow-[0_12px_30px_rgba(9,9,11,0.12)]"
+            style={{
+              left: Math.min(Math.max(activePoint.x, 56), Math.max(chartWidth - 56, 56)),
+              top: Math.max(activePoint.y - 48, 0),
+            }}
+          >
+            <Text variant="terminal-small" className="whitespace-nowrap text-zinc-500">
+              {formatChartTime(activePoint.time)}
+            </Text>
+            <Text variant="body-small" className="mt-0.5 whitespace-nowrap text-zinc-950">
+              {formatUsd(activePoint.value, 2)}
+            </Text>
+          </div>
+        )}
       </div>
     </div>
   );

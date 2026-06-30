@@ -16,7 +16,7 @@ export function NavbarLogo({ href = "/" }: { href?: string }) {
         />
       </Link>
       <span className="rounded-sm border-[0.5px] border-orange-200 bg-orange-50 px-2 py-1 font-mono text-[10px] font-medium uppercase text-orange-700">
-        BSC testnet
+        Testnet
       </span>
     </div>
   );

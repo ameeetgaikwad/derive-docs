@@ -55,10 +55,10 @@ export default function Navbar() {
               <button
                 onClick={() => mintBtcb.mutate()}
                 disabled={mintBtcb.isPending}
-                title="Mint 1 mock BTCB to your wallet"
+                title="Add 1 BTCB to your wallet"
                 className="rounded-sm border-[0.5px] border-orange-200 bg-orange-50 px-3 py-1.5 text-xs font-semibold text-orange-700 transition-colors hover:bg-orange-100 disabled:opacity-50"
               >
-                {mintBtcb.isPending ? "Minting..." : "Get test BTCB"}
+                {mintBtcb.isPending ? "Adding..." : "Get BTCB"}
               </button>
               <a
                 href={TBNB_FAUCET_URL}
@@ -66,7 +66,7 @@ export default function Navbar() {
                 rel="noopener noreferrer"
                 className="rounded-sm border-[0.5px] border-zinc-200 bg-white px-3 py-1.5 text-xs text-zinc-500 transition-colors hover:text-zinc-950"
               >
-                tBNB faucet
+                Gas faucet
               </a>
             </div>
           )}

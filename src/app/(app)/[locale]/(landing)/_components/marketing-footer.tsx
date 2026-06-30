@@ -15,10 +15,10 @@ const footerLinks = {
     { label: 'How It Works', href: '#learn-more' },
     { label: 'FAQs', href: '#faq' },
   ],
-  Prototype: [
-    { label: 'BNB testnet', href: '/' },
+  Protocol: [
+    { label: 'Decentralized rails', href: '/' },
     { label: 'Wallet signed', href: '/' },
-    { label: 'Non-custodial flow', href: '/' },
+    { label: 'Self-custody', href: '/' },
   ],
 } as const
 
@@ -61,7 +61,7 @@ export function MarketingFooter({ t }: { t: (value: string) => string }) {
               className="mt-[25px] tracking-[-0.025em] text-zinc-500"
             >
               {t(
-                'Hedge is a separate Sats Terminal product prototype for paid BTC targets. The current sell target path uses the existing testnet matching flow; buy targets are a UX and pricing preview until USDC reservation is wired.',
+                'Hedge is a Sats Terminal product for paid BTC targets. Buy lower maps to cash-secured puts, sell higher maps to covered calls, and every order is wallet signed on decentralized rails.',
               )}
             </Text>
           </div>
@@ -74,7 +74,7 @@ export function MarketingFooter({ t }: { t: (value: string) => string }) {
                 <div className="flex flex-col gap-[5px]">
                   {links.map((link) => (
                     <Link
-                      key={link.href}
+                      key={`${title}-${link.label}`}
                       href={link.href}
                       className="w-fit text-xs leading-[1.35] font-medium tracking-[-0.025em] text-zinc-500 hover:underline"
                     >

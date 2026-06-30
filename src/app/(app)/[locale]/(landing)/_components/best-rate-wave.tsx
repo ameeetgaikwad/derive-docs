@@ -26,7 +26,7 @@ export function BestRateWave() {
           )}
         </span>
         <span className="flex h-5 items-center text-base leading-none tracking-[-0.03em] whitespace-nowrap">
-          Top annualized reward
+          Top premium APR
         </span>
       </div>
       <div className="h-full min-w-[180px] flex-1 overflow-hidden">

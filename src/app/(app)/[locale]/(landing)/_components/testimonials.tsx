@@ -5,7 +5,7 @@ const ASSET_BASE = '/images/marketing/landing'
 const testimonials = [
   {
     quote:
-      '“I want to buy BTC every month, but I hate chasing dips. Hedge lets me set the price I wanted anyway and shows the reward if the market never gets there.”',
+      '“I want to buy BTC every month, but I hate chasing dips. Hedge lets me set the strike I wanted anyway and shows the premium if the market never gets there.”',
     name: 'Monthly buyer',
     handle: 'Buy BTC cheaper',
     avatar: `${ASSET_BASE}/paul-taylor.jpeg`,
@@ -19,9 +19,9 @@ const testimonials = [
   },
   {
     quote:
-      '“The review screen matters. I can see exactly what happens if my target hits and what happens if it misses, without learning options language.”',
+      '“The review screen matters. I can see the strike, expiry, premium, and exactly what happens if BTC settles above or below the price.”',
     name: 'First-time user',
-    handle: 'Plain-English outcomes',
+    handle: 'Decentralized rails',
     avatar: `${ASSET_BASE}/jack.jpeg`,
   },
   {
@@ -40,7 +40,7 @@ const testimonials = [
   },
   {
     quote:
-      '“For my cash, the buy side is the interesting part. I already know the dip I would buy. Hedge just turns that patience into a visible reward.”',
+      '“For my cash, the buy side is the interesting part. I already know the dip I would buy. Hedge just turns that patience into a visible premium.”',
     name: 'Cash allocator',
     handle: 'Dip target',
     avatar: `${ASSET_BASE}/draper.jpg`,

@@ -12,16 +12,16 @@ const steps = [
   {
     number: '02',
     numberClassName: 'text-blue-500',
-    title: 'Set the BTC price you want.',
+    title: 'Set strike and expiry.',
     description:
-      'Pick a target and expiry. The composer shows the reward, the effective price, and the amount of cash or BTC committed before you continue.',
+      'Pick a strike and expiry. The composer shows the premium, the effective price, and the amount of USDC or BTC collateral committed before you continue.',
   },
   {
     number: '03',
     numberClassName: 'text-green-500',
-    title: 'Review both outcomes.',
+    title: 'Review settlement outcomes.',
     description:
-      'The summary page explains what happens if BTC reaches the target and what happens if it does not, then you can save or create the target.',
+      'The summary explains what happens if the option settles in the money or out of the money, then you can save or create the target.',
   },
 ] as const
 

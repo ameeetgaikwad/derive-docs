@@ -54,7 +54,7 @@ export function Liquidity({ t }: { t: (value: string) => string }) {
           </Text>
           <Text variant="body-large" className="mt-[25px] text-zinc-500">
             {t(
-              'The important idea is not options. It is a paid target: choose a BTC price, see the reward, and understand the two outcomes before your wallet signs.',
+              'The important idea is not hiding options. It is making the contract readable: choose a BTC strike, see the premium, and understand the payoff before your wallet signs.',
             )}
           </Text>
           <Button

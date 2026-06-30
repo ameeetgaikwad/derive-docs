@@ -8,22 +8,22 @@ const faqs = [
   {
     question: 'What is Hedge?',
     answer:
-      'Hedge is options made simple for BTC targets. You choose a price where you would already buy or sell BTC, and the app shows the reward for making that commitment.',
+      'Hedge is a BTC target order interface powered by options. You choose the strike where you would already buy or sell BTC, and the app shows the premium for making that commitment.',
   },
   {
     question: 'Is this options trading?',
     answer:
-      'Yes, under the hood. Buy cheaper maps to a cash-secured put, and sell higher maps to a covered call. Hedge keeps the interface focused on BTC price, reward, and outcomes instead of options jargon.',
+      'Yes. Buy cheaper maps to a cash-secured put, and sell higher maps to a covered call. Hedge keeps the workflow focused on BTC price, premium, expiry, and settlement outcomes.',
   },
   {
     question: 'How does buying BTC cheaper work?',
     answer:
-      'You reserve cash for a lower BTC price. If BTC trades down to your target, you buy at that price. If it does not, no BTC is bought and you keep the reward previewed by the composer.',
+      'You reserve USDC for a lower BTC strike. If BTC trades down to your target, you buy at that strike. If it does not, no BTC is bought and you keep the premium shown by the composer.',
   },
   {
     question: 'How does selling BTC higher work?',
     answer:
-      'You commit only the BTC slice you would be comfortable selling at a higher price. If BTC reaches the target, that slice is capped or sold. If it does not, you keep the BTC and the reward.',
+      'You commit only the BTC slice you would be comfortable selling at a higher strike. If BTC reaches it, that slice is capped or sold. If it does not, you keep the BTC and the premium.',
   },
   {
     question: 'Can I lose my whole BTC stack?',
@@ -33,7 +33,7 @@ const faqs = [
   {
     question: 'Is this just a limit order?',
     answer:
-      'It feels like a limit order, but the difference is the reward. Hedge shows the effective price after the reward, so users can reason in normal buy and sell terms.',
+      'It should feel close to a limit order, but the difference is the upfront premium. Hedge shows the effective price after premium so users can reason in normal buy and sell terms.',
   },
 ] as const
 

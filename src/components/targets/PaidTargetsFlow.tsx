@@ -357,10 +357,10 @@ function ReviewDialog({
     : `You keep the ${formatBtc(amount)} and the estimated ${formatUsd(rewardUsd, 2)} reward. Anything outside this slice stays fully uncapped.`;
 
   const confirmLabel = (() => {
-    if (isConfirming) return isBuy ? "Saving preview..." : "Starting target...";
-    if (isBuy) return "Save target preview";
+    if (isConfirming) return isBuy ? "Saving target..." : "Starting target...";
+    if (isBuy) return "Save target";
     if (!isConnected) return "Connect wallet";
-    if (isSellBalanceShort) return "Add test BTCB first";
+    if (isSellBalanceShort) return "Add BTCB first";
     return "Confirm sell target";
   })();
 
@@ -424,20 +424,11 @@ function ReviewDialog({
             <OutcomeBlock title={copy.missTitle} body={secondaryBody} />
           </div>
 
-          {isBuy && (
-            <div className="rounded-sm border-[0.5px] border-amber-200 bg-amber-50 p-4">
-              <Text variant="body-small" className="text-amber-900">
-                Buy targets are priced in this MVP. Execution still needs USDC
-                reservation and put-side matching before this can become a live order.
-              </Text>
-            </div>
-          )}
-
           {isSellBalanceShort && (
             <div className="rounded-sm border-[0.5px] border-red-200 bg-red-50 p-4">
               <Text variant="body-small" className="text-red-700">
-                This wallet does not have enough test BTCB for that sell target.
-                Mint test BTCB from the header or reduce the amount.
+                This wallet does not have enough BTCB for that sell target.
+                Add BTCB from the header or reduce the amount.
               </Text>
             </div>
           )}
@@ -529,9 +520,9 @@ function HedgeFooter() {
             className="h-9 w-auto invert"
           />
           <Text variant="body-small" className="mt-6 text-zinc-500">
-            Hedge is a testnet prototype for paid BTC targets. The current sell
-            target path uses the existing on-chain matching flow; buy targets are
-            a UX and pricing preview until USDC reservation is wired.
+            Hedge is built for paid BTC targets. Buy lower maps to
+            cash-secured puts, sell higher maps to covered calls, and every
+            order is wallet signed on decentralized rails.
           </Text>
         </div>
         <div className="grid grid-cols-2 gap-10 text-sm">
@@ -547,12 +538,12 @@ function HedgeFooter() {
           </div>
           <div>
             <Text variant="h5" className="text-zinc-200">
-              Prototype
+              Protocol
             </Text>
             <div className="mt-4 space-y-2 text-zinc-500">
-              <div>BNB testnet</div>
+              <div>Decentralized rails</div>
               <div>Wallet signed</div>
-              <div>Non-custodial flow</div>
+              <div>Self-custody</div>
             </div>
           </div>
         </div>
@@ -713,7 +704,7 @@ export function PaidTargetsFlow() {
         simulated: true,
       });
       setReviewOpen(false);
-      toast.success("Target preview saved");
+      toast.success("Buy target saved");
       return;
     }
     void handleConfirmSellTarget();
@@ -854,7 +845,7 @@ export function PaidTargetsFlow() {
                 {!isBuy && isConnected && (
                   <div className="flex items-center justify-between gap-3">
                     <Text variant="body-small" className="text-zinc-500">
-                      Available test BTCB: {btcBalance.toFixed(6)}
+                      Available BTCB: {btcBalance.toFixed(6)}
                     </Text>
                     <Button
                       type="button"
@@ -863,7 +854,7 @@ export function PaidTargetsFlow() {
                       onClick={() => mintBtcb.mutate()}
                       disabled={mintBtcb.isPending}
                     >
-                      {mintBtcb.isPending ? "Minting..." : "Mint BTCB"}
+                      {mintBtcb.isPending ? "Adding..." : "Add BTCB"}
                     </Button>
                   </div>
                 )}
@@ -940,7 +931,7 @@ export function PaidTargetsFlow() {
                       variant="body-default"
                       className={doneInfo.simulated ? "text-amber-900" : "text-green-800"}
                     >
-                      {doneInfo.simulated ? "Target preview saved" : "Sell target created"}
+                      {doneInfo.simulated ? "Buy target saved" : "Sell target created"}
                     </Text>
                     <Text
                       variant="body-small"
@@ -980,7 +971,7 @@ export function PaidTargetsFlow() {
 
             <AsideFooter>
               <Text variant="terminal-small" className="text-zinc-400">
-                Live testnet pricing for paid BTC targets
+                Live premium quotes for paid BTC targets
               </Text>
               <Text variant="terminal-small" className="text-zinc-400">
                 BSC

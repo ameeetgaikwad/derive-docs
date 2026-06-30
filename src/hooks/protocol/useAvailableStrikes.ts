@@ -19,6 +19,7 @@ import {
 import { black76Price, yearsToExpiry } from "@/lib/protocol/black76";
 import { calculateAPR, daysToExpiry } from "@/lib/protocol/apr";
 import { unitToNumber } from "@/lib/protocol/units";
+import { useBitcoinPrice } from "@/hooks/useBitcoinPrice";
 import { useSpotPrice } from "./useSpotPrice";
 
 /** Fallbacks when an expiry has no posted feed data yet (testnet reality). */
@@ -55,7 +56,17 @@ export function useAvailableStrikes(
   direction: TargetDirection = "sell_high"
 ) {
   const { spotPrice: oracleSpotPrice, isLoading: spotLoading, isStale } = useSpotPrice();
-  const spotPrice = oracleSpotPrice > 0 ? oracleSpotPrice : DEFAULT_SPOT_PRICE;
+  const {
+    data: liveSpot,
+    isFetching: liveSpotFetching,
+  } = useBitcoinPrice();
+  const liveSpotPrice = liveSpot?.price ?? 0;
+  const spotPrice =
+    oracleSpotPrice > 0
+      ? oracleSpotPrice
+      : liveSpotPrice > 0
+        ? liveSpotPrice
+        : DEFAULT_SPOT_PRICE;
   const usedSpotFallback = oracleSpotPrice <= 0;
 
   const expiries = useMemo<ExpiryInfo[]>(
@@ -166,6 +177,7 @@ export function useAvailableStrikes(
     selectedExpiry: effectiveExpiry,
     strikes,
     spotPrice,
+    isLiveSpotFetching: liveSpotFetching,
     usedSpotFallback,
     spotError: isStale,
     isLoading:

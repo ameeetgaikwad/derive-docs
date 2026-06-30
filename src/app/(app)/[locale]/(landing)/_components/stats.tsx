@@ -10,35 +10,35 @@ const steps = [
     numberClassName: 'text-orange-500',
     title: 'Choose your side.',
     description:
-      "Use cash for a lower BTC entry, or commit the BTC slice you would sell above today's price.",
+      "Use USDC for a lower BTC entry through a cash-secured put, or commit the BTC slice you would sell higher through a covered call.",
   },
   {
     number: '02',
     numberClassName: 'text-blue-500',
-    title: 'Set the target.',
+    title: 'Set strike and expiry.',
     description:
-      'Pick the price and expiry. Hedge shows the option-powered reward and effective BTC price before anything is signed.',
+      'Pick the strike, expiry, and size. Hedge shows the premium, effective BTC price, and capital committed before anything is signed.',
   },
   {
     number: '03',
     numberClassName: 'text-green-500',
-    title: 'Review both outcomes.',
+    title: 'Review settlement outcomes.',
     description:
-      'See what happens if BTC hits your target and what happens if it does not. Then decide.',
+      'See the in-the-money and out-of-the-money outcomes in BTC terms, then decide if the premium is worth the commitment.',
   },
 ] as const
 
 export function Stats({ t }: { t: (value: string) => string }) {
   return (
-    <section className="mt-[100px]">
+    <section id="learn-more" className="mt-[100px] scroll-mt-24">
       <div className="flex flex-col gap-6 sm:gap-8 lg:min-h-[120px] lg:flex-row lg:items-end lg:justify-between">
         <div>
           <Text as="h2" variant="h2" className="max-w-[690px] text-zinc-950">
-            {t('Pick a BTC price. See what it pays.')}
+            {t('Pick a BTC strike. See the premium.')}
           </Text>
           <Text variant="body-large" className="mt-5 max-w-[560px] text-zinc-500">
             {t(
-              'Under the hood, Hedge uses cash-secured puts and covered calls. In the app, they become two simple target orders: buy lower or sell higher.',
+              'Hedge keeps the BTC target flow simple, but the terms are real: strike, expiry, premium, cash-secured put, and covered call.',
             )}
           </Text>
         </div>

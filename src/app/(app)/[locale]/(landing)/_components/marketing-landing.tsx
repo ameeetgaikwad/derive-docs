@@ -22,7 +22,7 @@ export function MarketingLanding() {
           className={cn(
             'mx-auto flex w-full max-w-[1512px] flex-col px-5 sm:px-8 lg:px-[clamp(2rem,13.93vw_-_110.66px,6.25rem)]',
             reviewMode
-              ? 'pt-6 pb-10 lg:pt-10 lg:pb-12'
+              ? 'pt-4 pb-8 lg:pt-6 lg:pb-10'
               : 'pt-8 pb-20 lg:pt-[75px] lg:pb-[120px]',
           )}
         >
