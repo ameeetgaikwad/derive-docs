@@ -19,8 +19,11 @@ import {IStandardManager} from "v2-core/src/interfaces/IStandardManager.sol";
 
 import {IERC20Metadata} from "openzeppelin/token/ERC20/extensions/IERC20Metadata.sol";
 
+import {ISpotFeed} from "v2-core/src/interfaces/ISpotFeed.sol";
+
 import {MockERC20} from "./mocks/MockERC20.sol";
 import {AnchoredSettlementFeed} from "../src/AnchoredSettlementFeed.sol";
+import {PythSpotFeed} from "../src/PythSpotFeed.sol";
 import {IPyth} from "../src/interfaces/IPyth.sol";
 import {IAggregatorV3} from "../src/interfaces/IAggregatorV3.sol";
 
@@ -37,6 +40,27 @@ import {IAggregatorV3} from "../src/interfaces/IAggregatorV3.sol";
 abstract contract MarketDeployerBase is Script {
   // anvil well-known account #0 — dev default only
   uint internal constant ANVIL_KEY_0 = 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80;
+
+  // ---------------------------------------------------------------------------
+  // BSC MAINNET (chainId 56) — verified addresses. Every entry was cross-checked
+  // against an official source AND read back on-chain via RPC on 2026-07-01; the
+  // full evidence table lives in protocol/MAINNET.md. Env vars (BTCB_ADDRESS,
+  // USDT_ADDRESS, PYTH_ADDRESS) still override, so these are defaults, not locks.
+  // ---------------------------------------------------------------------------
+
+  /// @dev Binance-Peg BTCB Token — bscscan verified; on-chain symbol()="BTCB", decimals()=18
+  address internal constant BSC_MAINNET_BTCB = 0x7130d2A12B9BCbFAe4f2634d864A1Ee1Ce3Ead9c;
+  /// @dev Binance-Peg BSC-USD (Tether USD) — bscscan verified; on-chain symbol()="USDT", decimals()=18
+  address internal constant BSC_MAINNET_USDT = 0x55d398326f99059fF775485246999027B3197955;
+  /// @dev official Pyth price-feeds contract, BNB Chain mainnet (docs.pyth.network);
+  ///      on-chain getValidTimePeriod()=60 and a live Crypto.BTC/USD price
+  address internal constant BSC_MAINNET_PYTH = 0x4D7E825f80bDf85e913E0DD2A2D54927e9dE1594;
+  /// @dev Chainlink BTC/USD proxy, BSC mainnet (docs.chain.link reference data);
+  ///      on-chain description()="BTC / USD", decimals()=8
+  address internal constant BSC_MAINNET_CHAINLINK_BTC_USD = 0x264990fbd0A4796A3E3d8E37C4d5F87a3aCa5Ebf;
+  /// @dev Chainlink ETH/USD proxy, BSC mainnet (docs.chain.link reference data);
+  ///      on-chain description()="ETH / USD", decimals()=8
+  address internal constant BSC_MAINNET_CHAINLINK_ETH_USD = 0x9ef1B8c0E4F7dc8bF5719Ea496883DC6401d5b2e;
 
   // Config feed heartbeats (lib/v2-core/scripts/config-mainnet.sol)
   uint64 internal constant SPOT_HEARTBEAT = 3 minutes;
@@ -68,9 +92,13 @@ abstract contract MarketDeployerBase is Script {
     string underlyingSymbol;
     /// env var holding the real (18-decimal) token address off-anvil, e.g. "BTCB_ADDRESS"
     string underlyingEnvKey;
+    /// baked-in default token address for the current chain (BSC mainnet only);
+    /// address(0) means the env var is required off-anvil
+    address underlyingDefault;
     /// Pyth price feed id (Hermes / on-chain Pyth), for PythSpotFeed deployments
     bytes32 pythPriceId;
-    /// Chainlink aggregator on BSC testnet used as PythSpotFeed circuit breaker
+    /// Chainlink aggregator for the current chain — PythSpotFeed circuit breaker +
+    /// AnchoredSettlementFeed anchor (selected by block.chainid; testnet default)
     address chainlinkAggregator;
     /// OptionAsset total position cap (18dp contracts)
     uint optionCap;
@@ -88,7 +116,13 @@ abstract contract MarketDeployerBase is Script {
   }
 
   /// @notice entry 0 = BTC (the live testnet market), entry 1 = ETH (example second market)
-  function getMarketConfig(uint index) public pure returns (MarketConfig memory) {
+  /// @dev chain-aware (view): Chainlink aggregators and baked-in underlying defaults are
+  ///      selected by block.chainid — BSC mainnet (56) uses the verified constants above,
+  ///      everything else keeps the BSC-testnet aggregators (no code on anvil -> signed
+  ///      fallback). Caps/margin params are the standard values from the vendored
+  ///      lib/v2-core/scripts/config-mainnet.sol on every chain.
+  function getMarketConfig(uint index) public view returns (MarketConfig memory) {
+    bool isBscMainnet = block.chainid == 56;
     // shared across markets per config-mainnet.sol getSRMParams()
     IStandardManager.OptionMarginParams memory optionMarginParams = IStandardManager.OptionMarginParams({
       maxSpotReq: 0.15e18,
@@ -112,10 +146,13 @@ abstract contract MarketDeployerBase is Script {
         name: "BTC",
         underlyingSymbol: "BTCB",
         underlyingEnvKey: "BTCB_ADDRESS",
-        // Crypto.BTC/USD (hermes.pyth.network)
+        underlyingDefault: isBscMainnet ? BSC_MAINNET_BTCB : address(0),
+        // Crypto.BTC/USD (hermes.pyth.network) — Pyth price ids are chain-agnostic
         pythPriceId: 0xe62df6c8b4a85fe1a67db44dc12de5db330f7ac66b72dc658afedf0f4a415b43,
-        // Chainlink BTC/USD, BSC testnet
-        chainlinkAggregator: 0x5741306c21795FdCBb9b265Ea0255F499DFe515C,
+        // Chainlink BTC/USD (mainnet verified / testnet default)
+        chainlinkAggregator: isBscMainnet
+          ? BSC_MAINNET_CHAINLINK_BTC_USD
+          : 0x5741306c21795FdCBb9b265Ea0255F499DFe515C,
         optionCap: 100_000e18, // Config.getSRMCaps("BTC")
         baseCap: 5e18,
         optionMarginParams: optionMarginParams,
@@ -129,10 +166,15 @@ abstract contract MarketDeployerBase is Script {
         name: "ETH",
         underlyingSymbol: "WETH",
         underlyingEnvKey: "WETH_ADDRESS",
-        // Crypto.ETH/USD (hermes.pyth.network)
+        // no baked-in mainnet default: BSC's canonical "ETH" is Binance-Peg ETH, not
+        // verified here — WETH_ADDRESS env is required to add this market on 56
+        underlyingDefault: address(0),
+        // Crypto.ETH/USD (hermes.pyth.network) — Pyth price ids are chain-agnostic
         pythPriceId: 0xff61491a931112ddf1bd8147cd1b641375f79f5825126d665480874634fd0ace,
-        // Chainlink ETH/USD, BSC testnet (verified: description() == "ETH / USD")
-        chainlinkAggregator: 0x143db3CEEfbdfe5631aDD3E50f7614B6ba708BA7,
+        // Chainlink ETH/USD (mainnet verified / testnet default)
+        chainlinkAggregator: isBscMainnet
+          ? BSC_MAINNET_CHAINLINK_ETH_USD
+          : 0x143db3CEEfbdfe5631aDD3E50f7614B6ba708BA7,
         optionCap: 2_000_000e18, // Config.getSRMCaps("ETH")
         baseCap: 250e18,
         optionMarginParams: optionMarginParams,
@@ -157,6 +199,10 @@ abstract contract MarketDeployerBase is Script {
     /// address(0) when the market's Chainlink aggregator is unavailable (plain anvil),
     /// in which case settlement falls back to the signed LyraForwardFeed
     AnchoredSettlementFeed settlementFeed;
+    /// Pyth adapter with Chainlink circuit breaker, wired as the SRM's live spot feed;
+    /// address(0) when Pyth/Chainlink are unavailable (plain anvil), in which case the
+    /// SRM keeps the signed LyraSpotFeed (which stays deployed as fallback regardless)
+    PythSpotFeed pythSpotFeed;
     OptionAsset option;
     WrappedERC20Asset base;
     uint marketId;
@@ -165,19 +211,23 @@ abstract contract MarketDeployerBase is Script {
   /// @dev official Pyth price-feeds contract per chain (docs.pyth.network); used by the
   ///      AnchoredSettlementFeed as a best-effort cross-check. address(0) disables it.
   function _pythAddress() internal returns (address) {
+    if (block.chainid == 56) return vm.envOr("PYTH_ADDRESS", BSC_MAINNET_PYTH); // BSC mainnet
     if (block.chainid == 97) return 0x5744Cbf430D99456a0A8771208b674F27f8EF0Fb; // BSC testnet
     return vm.envOr("PYTH_ADDRESS", address(0));
   }
 
   /// @dev resolve the market's underlying 18-decimal token: a fresh open-mint mock on
-  ///      anvil, otherwise `cfg.underlyingEnvKey` from env. Must run inside broadcast.
+  ///      anvil; otherwise `cfg.underlyingEnvKey` from env, falling back to the chain's
+  ///      baked-in verified default (BSC mainnet) when set. Must run inside broadcast.
   function _resolveUnderlying(MarketConfig memory cfg) internal returns (address token) {
     if (block.chainid == 31337) {
       MockERC20 mock =
         new MockERC20(string.concat("Mock ", cfg.underlyingSymbol), cfg.underlyingSymbol, 18);
       return address(mock);
     }
-    token = vm.envAddress(cfg.underlyingEnvKey);
+    token = cfg.underlyingDefault == address(0)
+      ? vm.envAddress(cfg.underlyingEnvKey)
+      : vm.envOr(cfg.underlyingEnvKey, cfg.underlyingDefault);
     require(IERC20Metadata(token).decimals() == 18, "underlying must be 18 decimals");
   }
 
@@ -209,11 +259,22 @@ abstract contract MarketDeployerBase is Script {
     // Chainlink aggregator actually exists on this chain. On plain anvil (no aggregator
     // code) settlement falls back to the signed LyraForwardFeed so local e2e keeps working.
     address settlementFeed = address(m.forwardFeed);
+    ISpotFeed srmSpotFeed = m.spotFeed;
     if (cfg.chainlinkAggregator != address(0) && cfg.chainlinkAggregator.code.length > 0) {
+      address pyth = _pythAddress();
       m.settlementFeed = new AnchoredSettlementFeed(
-        IAggregatorV3(cfg.chainlinkAggregator), IPyth(_pythAddress()), cfg.pythPriceId
+        IAggregatorV3(cfg.chainlinkAggregator), IPyth(pyth), cfg.pythPriceId
       );
       settlementFeed = address(m.settlementFeed);
+
+      // Live oracle stack: the SRM's spot feed is the Pyth adapter (Chainlink circuit
+      // breaker) whenever the on-chain Pyth contract exists — the hardened end-state
+      // the testnet reached via a post-deploy setOraclesForMarket swap (TESTNET.md
+      // "Oracle stack"). The signed LyraSpotFeed stays deployed/configured as fallback.
+      if (pyth != address(0) && pyth.code.length > 0) {
+        m.pythSpotFeed = new PythSpotFeed(IPyth(pyth), cfg.pythPriceId, IAggregatorV3(cfg.chainlinkAggregator));
+        srmSpotFeed = m.pythSpotFeed;
+      }
     }
     m.option = new OptionAsset(subAccounts, settlementFeed);
     m.base = new WrappedERC20Asset(subAccounts, IERC20Metadata(underlying));
@@ -229,7 +290,7 @@ abstract contract MarketDeployerBase is Script {
     srm.whitelistAsset(m.option, m.marketId, IStandardManager.AssetType.Option);
     srm.whitelistAsset(m.base, m.marketId, IStandardManager.AssetType.Base);
 
-    srm.setOraclesForMarket(m.marketId, m.spotFeed, m.forwardFeed, m.volFeed);
+    srm.setOraclesForMarket(m.marketId, srmSpotFeed, m.forwardFeed, m.volFeed);
 
     srm.setOptionMarginParams(m.marketId, cfg.optionMarginParams);
     srm.setOracleContingencyParams(m.marketId, cfg.ocParams);

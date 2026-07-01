@@ -18,11 +18,28 @@ import { bsc, bscTestnet, foundry } from "viem/chains";
  */
 export const BSC_TESTNET_GAS_PRICE = 200_000_000n; // 0.2 gwei
 
+/**
+ * BSC mainnet (56): validators enforce a minimum gas price (0.05 gwei floor
+ * since the 2024 repricing) and the chain's EIP-1559 base fee is pinned at
+ * zero, so fee estimation is unreliable. For consistency with the deploy
+ * tooling (`--legacy --with-gas-price 100000000`) every transaction on 56 is
+ * a LEGACY transaction at a fixed 0.1 gwei — comfortably above the floor for
+ * reliable inclusion.
+ */
+export const BSC_MAINNET_GAS_PRICE = 100_000_000n; // 0.1 gwei
+
+/** Chains whose writes are forced to legacy type with a fixed gasPrice. */
+const LEGACY_GAS_PRICE: Record<number, bigint> = {
+  97: BSC_TESTNET_GAS_PRICE,
+  56: BSC_MAINNET_GAS_PRICE,
+};
+
 /** Per-chain tx field overrides to spread into write calls (see above). */
 export function txOverrides(
   chainId: number,
 ): { type: "legacy"; gasPrice: bigint } | Record<string, never> {
-  return chainId === 97 ? { type: "legacy", gasPrice: BSC_TESTNET_GAS_PRICE } : {};
+  const gasPrice = LEGACY_GAS_PRICE[chainId];
+  return gasPrice !== undefined ? { type: "legacy", gasPrice } : {};
 }
 
 /**
@@ -90,10 +107,10 @@ export function makeWalletClient(
     chain: getChain(chainId),
     transport: http(opts?.rpcUrl ?? getRpcUrl()),
   });
-  if (chainId !== 97) return client;
-  // BSC testnet: force legacy txs with a fixed gasPrice on every write,
-  // regardless of what the caller (or a simulateContract request) passed.
-  // (Wrapped as casts: the wrappers are intentionally non-generic.)
+  if (LEGACY_GAS_PRICE[chainId] === undefined) return client;
+  // BSC testnet + mainnet: force legacy txs with a fixed gasPrice on every
+  // write, regardless of what the caller (or a simulateContract request)
+  // passed. (Wrapped as casts: the wrappers are intentionally non-generic.)
   const overrides = txOverrides(chainId);
   return {
     ...client,
