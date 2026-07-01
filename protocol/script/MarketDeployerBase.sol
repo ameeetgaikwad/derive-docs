@@ -20,6 +20,9 @@ import {IStandardManager} from "v2-core/src/interfaces/IStandardManager.sol";
 import {IERC20Metadata} from "openzeppelin/token/ERC20/extensions/IERC20Metadata.sol";
 
 import {MockERC20} from "./mocks/MockERC20.sol";
+import {AnchoredSettlementFeed} from "../src/AnchoredSettlementFeed.sol";
+import {IPyth} from "../src/interfaces/IPyth.sol";
+import {IAggregatorV3} from "../src/interfaces/IAggregatorV3.sol";
 
 /**
  * @title MarketDeployerBase
@@ -150,9 +153,20 @@ abstract contract MarketDeployerBase is Script {
     LyraForwardFeed forwardFeed;
     LyraVolFeed volFeed;
     LyraRateFeed rateFeed;
+    /// Chainlink/Pyth-anchored ISettlementFeed the OptionAsset settles against;
+    /// address(0) when the market's Chainlink aggregator is unavailable (plain anvil),
+    /// in which case settlement falls back to the signed LyraForwardFeed
+    AnchoredSettlementFeed settlementFeed;
     OptionAsset option;
     WrappedERC20Asset base;
     uint marketId;
+  }
+
+  /// @dev official Pyth price-feeds contract per chain (docs.pyth.network); used by the
+  ///      AnchoredSettlementFeed as a best-effort cross-check. address(0) disables it.
+  function _pythAddress() internal returns (address) {
+    if (block.chainid == 97) return 0x5744Cbf430D99456a0A8771208b674F27f8EF0Fb; // BSC testnet
+    return vm.envOr("PYTH_ADDRESS", address(0));
   }
 
   /// @dev resolve the market's underlying 18-decimal token: a fresh open-mint mock on
@@ -190,8 +204,18 @@ abstract contract MarketDeployerBase is Script {
     m.forwardFeed.setSettlementHeartbeat(SETTLEMENT_HEARTBEAT);
     m.forwardFeed.setMaxExpiry(FWD_MAX_EXPIRY);
 
-    // option settles against the forward feed (ISettlementFeed)
-    m.option = new OptionAsset(subAccounts, address(m.forwardFeed));
+    // Settlement anchoring: options settle against Chainlink round data (Pyth-cross-checked)
+    // via AnchoredSettlementFeed — NOT the signed forward feed — whenever the market's
+    // Chainlink aggregator actually exists on this chain. On plain anvil (no aggregator
+    // code) settlement falls back to the signed LyraForwardFeed so local e2e keeps working.
+    address settlementFeed = address(m.forwardFeed);
+    if (cfg.chainlinkAggregator != address(0) && cfg.chainlinkAggregator.code.length > 0) {
+      m.settlementFeed = new AnchoredSettlementFeed(
+        IAggregatorV3(cfg.chainlinkAggregator), IPyth(_pythAddress()), cfg.pythPriceId
+      );
+      settlementFeed = address(m.settlementFeed);
+    }
+    m.option = new OptionAsset(subAccounts, settlementFeed);
     m.base = new WrappedERC20Asset(subAccounts, IERC20Metadata(underlying));
 
     // ---- registration (mirrors _setPermissionAndCaps + _registerMarketToSRM) ----

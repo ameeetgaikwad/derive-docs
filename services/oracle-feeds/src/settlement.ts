@@ -8,6 +8,7 @@ import {
   standardManagerAbi,
   subAccountsAbi,
 } from "@hedge/shared";
+import { anchoredFeedFromDeployments, ensureAnchoredSettlementPrice } from "./anchored.js";
 import type { FeedPoster } from "./poster.js";
 
 export interface SettlementAddresses {
@@ -16,6 +17,8 @@ export interface SettlementAddresses {
   subAccounts: Address;
   cashAsset: Address;
   baseAsset: Address;
+  /** AnchoredSettlementFeed (btcSettlementFeed) — absent on signed-feed-only deployments */
+  anchoredSettlementFeed?: Address;
 }
 
 export function settlementAddressesFromDeployments(chainId: number): SettlementAddresses {
@@ -26,6 +29,7 @@ export function settlementAddressesFromDeployments(chainId: number): SettlementA
     subAccounts: getDeployedAddress(d, "subAccounts"),
     cashAsset: getDeployedAddress(d, "cashAsset"),
     baseAsset: getDeployedAddress(d, "btcBaseAsset"),
+    anchoredSettlementFeed: anchoredFeedFromDeployments(d),
   };
 }
 
@@ -43,13 +47,23 @@ export interface SettlementReport {
 }
 
 /**
- * Settlement runner. Sequence verified against the vendored integration test
- * v2-core/test/integration-tests/standard-manager/settle-option.sol:
+ * Settlement runner. Two ways to fix the settlement price:
+ *
+ * ANCHORED (default whenever the deployment has an AnchoredSettlementFeed):
+ *   1. (at/after expiry) call the PERMISSIONLESS
+ *      AnchoredSettlementFeed.fixSettlementPrice(expiry) — the price comes from Chainlink
+ *      round history (cross-checked against Pyth near expiry), NOT from our signed feeds,
+ *   2. StandardManager.settleOptions per account, 3. read back balances.
+ *
+ * SIGNED (explicit `signed: true` fallback; sequence verified against the vendored
+ * integration test v2-core/test/integration-tests/standard-manager/settle-option.sol):
  *   1. (at/after expiry) post fresh spot,
  *   2. post forward-feed settlement data (timestamp == expiry, TWAP aggregates),
  *   3. StandardManager.settleOptions(optionAsset, subaccount) per account
  *      (public function, callable by anyone),
  *   4. read back balances.
+ *   Only used when the OptionAsset still settles against the LyraForwardFeed
+ *   (e.g. plain-anvil deployments without Chainlink/Pyth).
  */
 export class SettlementRunner {
   constructor(
@@ -62,37 +76,74 @@ export class SettlementRunner {
 
   async run(params: {
     expiry: bigint;
-    price: bigint; // 18dp settlement price
+    /** 18dp settlement price — REQUIRED for the signed path, optional sanity log otherwise */
+    price?: bigint;
     subaccounts: bigint[];
-    /** skip posting feed data (already fixed on-chain) */
+    /** force the legacy signed-feed path (LyraForwardFeed TWAP aggregates) */
+    signed?: boolean;
+    /** signed path only: skip posting feed data (already fixed on-chain) */
     skipFeed?: boolean;
   }): Promise<SettlementReport> {
-    const { expiry, price, subaccounts } = params;
+    const { expiry, subaccounts } = params;
 
     const now = await this.poster.chainNow();
     if (now < expiry) {
       throw new Error(`Cannot settle: chain time ${now} < expiry ${expiry}`);
     }
 
-    if (!params.skipFeed) {
-      // Fresh spot first: post-warp the cached spot is stale and several
-      // manager views depend on it.
-      const spotTx = await this.poster.postSpot(price);
-      log(`spot=${fromUnit(price)} posted  tx=${spotTx}`);
+    const anchored = this.addresses.anchoredSettlementFeed;
+    let fixed: { settled: boolean; price: bigint };
 
-      const already = await this.poster.readSettlementPrice(expiry);
-      if (already.settled) {
-        log(`settlement price already fixed at ${fromUnit(already.price)} — not reposting`);
-      } else {
-        const tx = await this.poster.postSettlement(expiry, price);
-        log(`settlement data posted for expiry ${expiry}  tx=${tx}`);
+    if (!params.signed && anchored) {
+      const result = await ensureAnchoredSettlementPrice({
+        publicClient: this.publicClient,
+        walletClient: this.walletClient,
+        account: this.account,
+        feed: anchored,
+        expiry,
+      });
+      log(
+        result.txHash
+          ? `anchored settlement price fixed at ${fromUnit(result.price)}  tx=${result.txHash}`
+          : `anchored settlement price already fixed at ${fromUnit(result.price)}`,
+      );
+      if (params.price !== undefined && params.price !== result.price) {
+        log(
+          `note: --price ${fromUnit(params.price)} differs from the oracle anchor ` +
+            `${fromUnit(result.price)} — the anchor is authoritative`,
+        );
+      }
+      fixed = { settled: true, price: result.price };
+    } else {
+      if (!params.signed && !anchored) {
+        log("no anchored settlement feed in deployments — falling back to the signed path");
+      }
+      const price = params.price;
+      if (price === undefined) {
+        throw new Error("signed settlement path requires an explicit price");
+      }
+
+      if (!params.skipFeed) {
+        // Fresh spot first: post-warp the cached spot is stale and several
+        // manager views depend on it.
+        const spotTx = await this.poster.postSpot(price);
+        log(`spot=${fromUnit(price)} posted  tx=${spotTx}`);
+
+        const already = await this.poster.readSettlementPrice(expiry);
+        if (already.settled) {
+          log(`settlement price already fixed at ${fromUnit(already.price)} — not reposting`);
+        } else {
+          const tx = await this.poster.postSettlement(expiry, price);
+          log(`settlement data posted for expiry ${expiry}  tx=${tx}`);
+        }
+      }
+
+      fixed = await this.poster.readSettlementPrice(expiry);
+      if (!fixed.settled) {
+        throw new Error(`Forward feed did not register settlement data for expiry ${expiry}`);
       }
     }
 
-    const fixed = await this.poster.readSettlementPrice(expiry);
-    if (!fixed.settled) {
-      throw new Error(`Forward feed did not register settlement data for expiry ${expiry}`);
-    }
     log(`getSettlementPrice(${expiry}) = ${fromUnit(fixed.price)} (settled)`);
 
     for (const acc of subaccounts) {

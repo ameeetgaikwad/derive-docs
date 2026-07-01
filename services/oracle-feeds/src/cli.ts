@@ -29,11 +29,15 @@ Usage:
       deployments JSON (keys: pyth, btcPythPriceId, btcPythSpotFeed); HERMES_URL env
       overrides the Hermes endpoint. The sender (FEED_SIGNER_KEY) only needs gas.
 
-  oracle-feeds settle --expiry <unix> --price <settlement price>
-                      --subaccounts 4,5 [--skip-feed]
-      Post forward-feed settlement data (timestamp == expiry) and call
-      StandardManager.settleOptions for each subaccount, then print balances.
-      Chain time must be >= expiry (e2e warps anvil first).
+  oracle-feeds settle --expiry <unix> --subaccounts 4,5
+                      [--price <settlement price>] [--signed] [--skip-feed]
+      Fix the settlement price and call StandardManager.settleOptions for each
+      subaccount, then print balances. Chain time must be >= expiry (e2e warps
+      anvil first). Default path: the PERMISSIONLESS
+      AnchoredSettlementFeed.fixSettlementPrice (Chainlink round data,
+      Pyth-cross-checked; --price is only a sanity log). --signed forces the
+      legacy signed forward-feed path (requires --price; use for deployments
+      whose OptionAsset still settles against LyraForwardFeed, e.g. anvil).
 
 Env: RPC_URL (default http://127.0.0.1:8545), CHAIN_ID (default 31337),
      FEED_SIGNER_KEY (default: anvil key #0 on 31337), FEED_DEADLINE_SEC,
@@ -178,8 +182,12 @@ async function cmdSettle(args: Args): Promise<void> {
   const expiry = one(args, "expiry");
   const price = one(args, "price");
   const subs = one(args, "subaccounts");
-  if (!expiry || !price || !subs) {
-    throw new Error("settle requires --expiry, --price and --subaccounts (comma-separated)");
+  const signed = args.bools.has("signed");
+  if (!expiry || !subs) {
+    throw new Error("settle requires --expiry and --subaccounts (comma-separated)");
+  }
+  if (signed && !price) {
+    throw new Error("settle --signed requires --price (the signed path posts the price)");
   }
   const { poster, publicClient, walletClient, signer, chainId } = buildPoster();
   const runner = new SettlementRunner(
@@ -191,8 +199,9 @@ async function cmdSettle(args: Args): Promise<void> {
   );
   await runner.run({
     expiry: BigInt(expiry),
-    price: toUnit(price),
+    price: price ? toUnit(price) : undefined,
     subaccounts: subs.split(",").map((s) => BigInt(s.trim())),
+    signed,
     skipFeed: args.bools.has("skip-feed"),
   });
 }

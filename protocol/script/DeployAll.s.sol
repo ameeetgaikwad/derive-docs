@@ -114,6 +114,7 @@ contract DeployAll is MarketDeployerBase {
   LyraForwardFeed internal btcForwardFeed;
   LyraVolFeed internal btcVolFeed;
   LyraRateFeed internal btcRateFeed;
+  address internal btcSettlementFeed; // AnchoredSettlementFeed (0 on plain anvil — signed fallback)
   OptionAsset internal btcOption;
   WrappedERC20Asset internal btcBase;
   uint internal btcMarketId;
@@ -240,6 +241,7 @@ contract DeployAll is MarketDeployerBase {
     btcForwardFeed = m.forwardFeed;
     btcVolFeed = m.volFeed;
     btcRateFeed = m.rateFeed;
+    btcSettlementFeed = address(m.settlementFeed);
     btcOption = m.option;
     btcBase = m.base;
     btcMarketId = m.marketId;
@@ -303,6 +305,7 @@ contract DeployAll is MarketDeployerBase {
     vm.serializeAddress(k, "btcForwardFeed", address(btcForwardFeed));
     vm.serializeAddress(k, "btcVolFeed", address(btcVolFeed));
     vm.serializeAddress(k, "btcRateFeed", address(btcRateFeed));
+    vm.serializeAddress(k, "btcSettlementFeed", btcSettlementFeed);
     vm.serializeAddress(k, "btcOptionAsset", address(btcOption));
     vm.serializeAddress(k, "btcBaseAsset", address(btcBase));
     vm.serializeUint(k, "btcMarketId", btcMarketId);
