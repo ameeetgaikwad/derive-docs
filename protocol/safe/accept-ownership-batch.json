@@ -1,0 +1,223 @@
+{
+  "version": "1.0",
+  "chainId": "97",
+  "createdAt": 1782941425000,
+  "meta": {
+    "name": "Hedge: accept ownership (chain 97)",
+    "description": "acceptOwnership() on every Ownable2Step Hedge contract. Run after script/TransferOwnership.s.sol set pendingOwner to this Safe. See protocol/OWNERSHIP.md.",
+    "txBuilderVersion": "1.18.0",
+    "createdFromSafeAddress": "",
+    "createdFromOwnerAddress": ""
+  },
+  "transactions": [
+    {
+      "to": "0x5d9e4EbD7E28deEF6f9A1a89Ed7Ce8608EE9074F",
+      "value": "0",
+      "data": null,
+      "contractMethod": {
+        "inputs": [],
+        "name": "acceptOwnership",
+        "payable": false
+      },
+      "contractInputsValues": null
+    },
+    {
+      "to": "0xc72120c89434519C6239cA4A8c65dC682439F998",
+      "value": "0",
+      "data": null,
+      "contractMethod": {
+        "inputs": [],
+        "name": "acceptOwnership",
+        "payable": false
+      },
+      "contractInputsValues": null
+    },
+    {
+      "to": "0x60E8Ae0A117d62DF21D79d4fe9C2F5DB67911af5",
+      "value": "0",
+      "data": null,
+      "contractMethod": {
+        "inputs": [],
+        "name": "acceptOwnership",
+        "payable": false
+      },
+      "contractInputsValues": null
+    },
+    {
+      "to": "0x4d55A929e184fc366664C11526E3B54aB70340B5",
+      "value": "0",
+      "data": null,
+      "contractMethod": {
+        "inputs": [],
+        "name": "acceptOwnership",
+        "payable": false
+      },
+      "contractInputsValues": null
+    },
+    {
+      "to": "0xbC9ae813B45Fa950AabE2E82eAB023Dd45a36486",
+      "value": "0",
+      "data": null,
+      "contractMethod": {
+        "inputs": [],
+        "name": "acceptOwnership",
+        "payable": false
+      },
+      "contractInputsValues": null
+    },
+    {
+      "to": "0x2Eeb9512F40c1964eCA5dc156D8e2479dA632116",
+      "value": "0",
+      "data": null,
+      "contractMethod": {
+        "inputs": [],
+        "name": "acceptOwnership",
+        "payable": false
+      },
+      "contractInputsValues": null
+    },
+    {
+      "to": "0x69662A47C3C2626EB75a8c861C48a0a87Cb01b2C",
+      "value": "0",
+      "data": null,
+      "contractMethod": {
+        "inputs": [],
+        "name": "acceptOwnership",
+        "payable": false
+      },
+      "contractInputsValues": null
+    },
+    {
+      "to": "0x86b7148B69F3eFad27Af6d0d892d063D6a6C9e05",
+      "value": "0",
+      "data": null,
+      "contractMethod": {
+        "inputs": [],
+        "name": "acceptOwnership",
+        "payable": false
+      },
+      "contractInputsValues": null
+    },
+    {
+      "to": "0x5a892364cFBd8e725eC1e7af25855005C0E0f0aE",
+      "value": "0",
+      "data": null,
+      "contractMethod": {
+        "inputs": [],
+        "name": "acceptOwnership",
+        "payable": false
+      },
+      "contractInputsValues": null
+    },
+    {
+      "to": "0x11C394e92592d08B43fE957c1A80f4c1F012d15D",
+      "value": "0",
+      "data": null,
+      "contractMethod": {
+        "inputs": [],
+        "name": "acceptOwnership",
+        "payable": false
+      },
+      "contractInputsValues": null
+    },
+    {
+      "to": "0xD0dD8DcA596540F615e66E07F49d40647D8bC6eD",
+      "value": "0",
+      "data": null,
+      "contractMethod": {
+        "inputs": [],
+        "name": "acceptOwnership",
+        "payable": false
+      },
+      "contractInputsValues": null
+    },
+    {
+      "to": "0xc17EbE645aca587d7D2077097D797133FE2a633e",
+      "value": "0",
+      "data": null,
+      "contractMethod": {
+        "inputs": [],
+        "name": "acceptOwnership",
+        "payable": false
+      },
+      "contractInputsValues": null
+    },
+    {
+      "to": "0xaAc2C29105928A6fe7788956058bcF3B9A3D5E51",
+      "value": "0",
+      "data": null,
+      "contractMethod": {
+        "inputs": [],
+        "name": "acceptOwnership",
+        "payable": false
+      },
+      "contractInputsValues": null
+    },
+    {
+      "to": "0x0A98363B7679BE75682D579C4d8cc5D7b6F5a285",
+      "value": "0",
+      "data": null,
+      "contractMethod": {
+        "inputs": [],
+        "name": "acceptOwnership",
+        "payable": false
+      },
+      "contractInputsValues": null
+    },
+    {
+      "to": "0x955E509aAe4e39A97B1E4Fe7FAa1f52182827Fc0",
+      "value": "0",
+      "data": null,
+      "contractMethod": {
+        "inputs": [],
+        "name": "acceptOwnership",
+        "payable": false
+      },
+      "contractInputsValues": null
+    },
+    {
+      "to": "0x99179e96af7E7691Fc723da83Fabc15f61a724D4",
+      "value": "0",
+      "data": null,
+      "contractMethod": {
+        "inputs": [],
+        "name": "acceptOwnership",
+        "payable": false
+      },
+      "contractInputsValues": null
+    },
+    {
+      "to": "0xd021F3ac13903A5EA18A35952335014916D70db4",
+      "value": "0",
+      "data": null,
+      "contractMethod": {
+        "inputs": [],
+        "name": "acceptOwnership",
+        "payable": false
+      },
+      "contractInputsValues": null
+    },
+    {
+      "to": "0x09dBF4C9dbc4d238861adCB9eCD689609a3A8e08",
+      "value": "0",
+      "data": null,
+      "contractMethod": {
+        "inputs": [],
+        "name": "acceptOwnership",
+        "payable": false
+      },
+      "contractInputsValues": null
+    },
+    {
+      "to": "0x2769E33b2169C83304cEa0c5C8fbC5a1707E305D",
+      "value": "0",
+      "data": null,
+      "contractMethod": {
+        "inputs": [],
+        "name": "acceptOwnership",
+        "payable": false
+      },
+      "contractInputsValues": null
+    }
+  ]
+}
