@@ -5,5 +5,6 @@ export * from "./feeds.js";
 export * from "./instruments.js";
 export * from "./deployments.js";
 export * from "./clients.js";
+export * from "./kms.js";
 export * from "./units.js";
 export * from "./abis/index.js";

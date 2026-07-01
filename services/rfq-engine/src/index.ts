@@ -1,4 +1,4 @@
-import { privateKeyToAccount } from "viem/accounts";
+import { resolveAccount } from "@hedge/shared";
 import { AuctionEngine } from "./auction.js";
 import { makeViemChain } from "./chain.js";
 import { loadConfig } from "./config.js";
@@ -17,7 +17,11 @@ export * from "./config.js";
 
 async function main(): Promise<void> {
   const config = loadConfig();
-  const account = privateKeyToAccount(config.executorPrivateKey);
+  // KMS-backed when EXECUTOR_KMS_KEY_ID is set; raw EXECUTOR_PRIVATE_KEY otherwise.
+  const account = await resolveAccount({
+    role: "EXECUTOR",
+    privateKey: config.executorPrivateKey,
+  });
 
   const { reader, submitter } = makeViemChain({
     chainId: config.chainId,
@@ -38,8 +42,9 @@ async function main(): Promise<void> {
   if (!isExecutor) {
     throw new Error(
       `${account.address} is not a registered trade executor on Matching ${config.matching} ` +
-        `(chain ${config.chainId}). Set EXECUTOR_PRIVATE_KEY to the registered key ` +
-        `(deployments JSON field "tradeExecutor").`,
+        `(chain ${config.chainId}). Set EXECUTOR_PRIVATE_KEY (or EXECUTOR_KMS_KEY_ID) to ` +
+        `the registered key (deployments JSON field "tradeExecutor"), or register this ` +
+        `address via Matching.setTradeExecutor.`,
     );
   }
 

@@ -27,6 +27,7 @@
     "smoke": "pnpm build && vitest run"
   },
   "dependencies": {
+    "@aws-sdk/client-kms": "^3.1078.0",
     "viem": "^2.21.0"
   },
   "devDependencies": {

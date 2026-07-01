@@ -42,8 +42,16 @@ export interface EngineConfig {
   optionAssets: Record<string, Address>;
   /** currency symbol -> forward feed (OI fee estimation) */
   forwardFeeds: Record<string, Address>;
-  /** trade-executor private key; defaults to anvil #0 on chain 31337 */
-  executorPrivateKey: Hex;
+  /**
+   * trade-executor private key; defaults to anvil #0 on chain 31337.
+   * Null when the executor key lives in AWS KMS (EXECUTOR_KMS_KEY_ID).
+   */
+  executorPrivateKey: Hex | null;
+  /**
+   * AWS KMS key id/ARN/alias for the executor (EXECUTOR_KMS_KEY_ID).
+   * Takes precedence over EXECUTOR_PRIVATE_KEY — see @hedge/shared resolveAccount.
+   */
+  executorKmsKeyId: string | null;
 }
 
 /**
@@ -63,15 +71,21 @@ export interface EngineConfig {
  *   RFQ_RATE_LIMIT_PER_MIN   default 30 RFQ creations per IP per minute (0 disables)
  *   STORE_PATH               JSONL persistence file; unset = in-memory
  *   EXECUTOR_PRIVATE_KEY     default anvil key #0 (only on 31337)
+ *   EXECUTOR_KMS_KEY_ID      AWS KMS key id/ARN/alias — used instead of the
+ *                            raw key when set (region: EXECUTOR_KMS_REGION or
+ *                            the standard AWS chain)
  */
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): EngineConfig {
   const chainId = getChainId();
   const deployments = requireDeployments(chainId);
 
-  const executorPrivateKey = (env.EXECUTOR_PRIVATE_KEY ??
-    (chainId === 31337 ? ANVIL_EXECUTOR_KEY : undefined)) as Hex | undefined;
-  if (!executorPrivateKey) {
-    throw new Error(`EXECUTOR_PRIVATE_KEY is required on chain ${chainId}`);
+  const executorKmsKeyId = env.EXECUTOR_KMS_KEY_ID?.trim() || null;
+  const executorPrivateKey = ((env.EXECUTOR_PRIVATE_KEY ??
+    (chainId === 31337 ? ANVIL_EXECUTOR_KEY : undefined)) ?? null) as Hex | null;
+  if (!executorKmsKeyId && !executorPrivateKey) {
+    throw new Error(
+      `EXECUTOR_PRIVATE_KEY or EXECUTOR_KMS_KEY_ID is required on chain ${chainId}`,
+    );
   }
 
   const makerAllowlist = (env.MAKER_ALLOWLIST ?? "")
@@ -109,5 +123,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): EngineConfig {
       BTC: getDeployedAddress(deployments, "btcForwardFeed"),
     },
     executorPrivateKey,
+    executorKmsKeyId,
   };
 }

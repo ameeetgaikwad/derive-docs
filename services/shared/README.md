@@ -40,6 +40,20 @@ encodings differ in places.
   contracts track hasn't produced it yet). Override dir with `SATS_DEPLOYMENTS_DIR`.
 - **`src/clients.ts`** — viem public/wallet client factories. Env: `RPC_URL`
   (default `http://127.0.0.1:8545`), `CHAIN_ID` (default `31337`; also 97/56).
+- **`src/kms.ts`** — AWS KMS signing (see [`KMS.md`](./KMS.md) for key
+  creation, IAM and on-chain adoption):
+  - `createKmsAccount({ keyId })` — viem `LocalAccount` backed by a KMS
+    `ECC_SECG_P256K1` key: address from `kms:GetPublicKey` (DER SPKI ->
+    keccak), signatures via `kms:Sign` (ECDSA_SHA_256 + DIGEST) with EIP-2
+    low-s normalization and recovery-id derivation. Works for FeedData/Action
+    EIP-712 signing and legacy (chain-97) transaction signing.
+  - `resolveAccount({ role, privateKey })` — the factory every service should
+    construct its signer through: uses KMS when `<ROLE>_KMS_KEY_ID` is set
+    (e.g. `EXECUTOR_KMS_KEY_ID`, `FEED_SIGNER_KMS_KEY_ID`; optional
+    `<ROLE>_KMS_REGION`), else falls back to the service's raw-key env path.
+    rfq-engine's executor is already wired through it.
+  - Credentials/region resolve via the standard AWS chain
+    (`@aws-sdk/client-kms`); tests inject a local `KmsCryptoClient` fake.
 - **`src/units.ts`** — `toUnit` / `fromUnit` / `toTokenAmount` (18dp on BNB for
   both BTCB and USDT).
 
@@ -48,7 +62,7 @@ encodings differ in places.
 ```sh
 pnpm install        # from services/
 pnpm build          # regenerates src/abis from forge artifacts, then tsc
-pnpm test           # vitest: typehash-vs-bytecode, subId round-trip, sign+recover, rfq/feed encodings
+pnpm test           # vitest: typehash-vs-bytecode, subId round-trip, sign+recover, rfq/feed encodings, mocked-KMS account
 pnpm smoke          # build + test
 ```
 
