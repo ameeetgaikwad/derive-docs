@@ -265,3 +265,22 @@ forge script script/TransferOwnership.s.sol \
 Until the Safe has **accepted**, the deployer EOA remains owner of everything —
 including `OptionAsset.setSettlementFeed`, the one owner power that can repoint
 settlement (see AnchoredSettlementFeed trust model in TESTNET.md).
+
+## LIVE (deployed 2026-07-01)
+
+All 84 txs executed; addresses in `deployments/56.json`. Key contracts:
+Matching `0xEAC4A53145969191833Eefd007A2255e0Cc0bD55`, RfqModule
+`0x5d9e4EbD7E28deEF6f9A1a89Ed7Ce8608EE9074F`, SRM `0x8ACC382c9e7a22A63D16C92Ac5377D8F3550e2dA`,
+PythSpotFeed `0x7AbcBc77B693b31B42F7f8F7ed31455130a5fd5B`, AnchoredSettlementFeed
+`0x60DA363fc601650AaB4fB28852F3B878CcdA2277`.
+
+Genesis state verified on-chain: RfqModule whitelisted, KMS executor
+(`0x9159...171B`) registered, KMS feed signer (`0x7dFC...C667`) whitelisted on all
+feeds and funded. Oracle bootstrap complete: Pyth push (getSpot $60,143 conf 0.9997,
+Chainlink 0.014% away), signed fwd/rate/vol posted for expiries 1783065600,
+1783670400, 1784275200, 1784880000 (flat 55% IV, 5% rate), USDT stable = 1.0
+(`0x4a73f43d...b0db`).
+
+Pending: real-BTCB smoke trade, Safe ownership handover, diff-audit of
+PythSpotFeed + AnchoredSettlementFeed, services off-laptop (AWS), frontend
+mainnet repoint.
