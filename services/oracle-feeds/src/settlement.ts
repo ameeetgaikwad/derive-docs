@@ -1,5 +1,5 @@
 import type { Address, PublicClient, WalletClient } from "viem";
-import type { PrivateKeyAccount } from "viem/accounts";
+import type { LocalAccount } from "viem";
 import {
   fromUnit,
   getDeployedAddress,
@@ -69,7 +69,7 @@ export class SettlementRunner {
   constructor(
     private readonly publicClient: PublicClient,
     private readonly walletClient: WalletClient,
-    private readonly account: PrivateKeyAccount,
+    private readonly account: LocalAccount,
     private readonly poster: FeedPoster,
     private readonly addresses: SettlementAddresses,
   ) {}

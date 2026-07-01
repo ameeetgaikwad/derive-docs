@@ -1,5 +1,5 @@
 import type { Address, Hex, PublicClient, WalletClient } from "viem";
-import type { PrivateKeyAccount } from "viem/accounts";
+import type { LocalAccount } from "viem";
 import { getDeployedAddress, type DeploymentsFile } from "@hedge/shared";
 
 /**
@@ -64,7 +64,7 @@ export interface AnchoredFixResult {
 export async function ensureAnchoredSettlementPrice(opts: {
   publicClient: PublicClient;
   walletClient: WalletClient;
-  account: PrivateKeyAccount;
+  account: LocalAccount;
   feed: Address;
   expiry: bigint;
 }): Promise<AnchoredFixResult> {

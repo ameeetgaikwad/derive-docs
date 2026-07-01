@@ -73,9 +73,9 @@ function one(args: Args, name: string): string | undefined {
   return args.flags.get(name)?.at(-1);
 }
 
-function buildPoster() {
+async function buildPoster() {
   const chainId = getChainId();
-  const signer = getFeedSignerAccount(chainId);
+  const signer = await getFeedSignerAccount(chainId);
   const publicClient = makePublicClient({ chainId });
   const walletClient = makeWalletClient(signer, { chainId });
   const addresses = feedAddressesFromDeployments(chainId);
@@ -110,7 +110,7 @@ async function resolveSpot(args: Args, source: () => PriceSource): Promise<bigin
 }
 
 async function cmdPost(args: Args): Promise<void> {
-  const { poster, publicClient, signer, chainId } = buildPoster();
+  const { poster, publicClient, signer, chainId } = await buildPoster();
   console.log(`[oracle-feeds] chain=${chainId} signer=${signer.address}`);
   const spot = await resolveSpot(args, () => priceSourceFromEnv(publicClient));
   const conf = one(args, "conf");
@@ -122,7 +122,7 @@ async function cmdPost(args: Args): Promise<void> {
 }
 
 async function cmdDaemon(args: Args): Promise<void> {
-  const { poster, publicClient, signer, chainId } = buildPoster();
+  const { poster, publicClient, signer, chainId } = await buildPoster();
   const intervalSec = Number(one(args, "interval") ?? "15");
   const source = one(args, "spot")
     ? new StaticPriceSource(toUnit(one(args, "spot")!))
@@ -147,7 +147,7 @@ async function cmdDaemon(args: Args): Promise<void> {
 
 async function cmdPythPush(args: Args): Promise<void> {
   const chainId = getChainId();
-  const account = getFeedSignerAccount(chainId);
+  const account = await getFeedSignerAccount(chainId);
   const publicClient = makePublicClient({ chainId });
   const walletClient = makeWalletClient(account, { chainId });
 
@@ -189,7 +189,7 @@ async function cmdSettle(args: Args): Promise<void> {
   if (signed && !price) {
     throw new Error("settle --signed requires --price (the signed path posts the price)");
   }
-  const { poster, publicClient, walletClient, signer, chainId } = buildPoster();
+  const { poster, publicClient, walletClient, signer, chainId } = await buildPoster();
   const runner = new SettlementRunner(
     publicClient,
     walletClient,

@@ -1,5 +1,5 @@
 import type { Address, Hex, PublicClient, WalletClient } from "viem";
-import type { PrivateKeyAccount } from "viem/accounts";
+import type { LocalAccount } from "viem";
 import { getDeployedAddress, requireDeployments } from "@hedge/shared";
 
 /** Hermes price-service endpoint (override with HERMES_URL). */
@@ -121,7 +121,7 @@ export function formatPythPrice(price: string, expo: number): string {
 export async function pushPythUpdate(opts: {
   publicClient: PublicClient;
   walletClient: WalletClient;
-  account: PrivateKeyAccount;
+  account: LocalAccount;
   addresses: PythAddresses;
   hermesUrl?: string;
 }): Promise<{ txHash: Hex; spot?: { spotPrice: bigint; confidence: bigint } }> {

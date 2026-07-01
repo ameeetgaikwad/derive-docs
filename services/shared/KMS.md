@@ -199,3 +199,15 @@ On chain 97, `<matchingAddress>` = `0x0A98363B7679BE75682D579C4d8cc5D7b6F5a285`
 |---|---|---|---|
 | feed signer | `alias/hedge-feed-signer` | _pending_ | _pending_ |
 | trade executor | `alias/hedge-executor` | _pending_ | _pending_ |
+
+## Live key inventory (created 2026-07-01, us-east-1, account 985539774899)
+
+| Alias | KeyId | Derived address | On-chain status (testnet 97) |
+|---|---|---|---|
+| `alias/hedge-feed-signer` | `2a6784b6-dbaa-4ab5-87ec-d3afbb5ad518` | `0x7dFC96d1b08eF29a99957EF99BF68F631348C667` | whitelisted via `addSigner` on all 5 signed feeds; proved live (KMS-signed feed post, spot tx `0xf057cc95...`) |
+| `alias/hedge-executor` | `0bff19af-7994-4802-a844-442411384bf7` | `0x915949FeEBedE7196Ed5F35b5b23997be790171B` | registered via `Matching.setTradeExecutor`; funded 0.005 tBNB |
+
+The legacy raw-key signer/executor (testnet-only, in gitignored `protocol/.env`) remain
+whitelisted in parallel for now; rotate them out once services run in AWS with an IAM
+role. ⚠️ Keys were created with ROOT credentials — before mainnet: create the scoped IAM
+role from §4, attach it to the service host, and remove root access keys from this machine.

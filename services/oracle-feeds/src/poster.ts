@@ -1,5 +1,5 @@
 import type { Address, Hex, PublicClient, WalletClient } from "viem";
-import type { PrivateKeyAccount } from "viem/accounts";
+import type { LocalAccount } from "viem";
 import {
   encodeForwardData,
   encodeRateData,
@@ -72,7 +72,7 @@ export class FeedPoster {
   constructor(
     private readonly publicClient: PublicClient,
     private readonly walletClient: WalletClient,
-    private readonly signer: PrivateKeyAccount,
+    private readonly signer: LocalAccount,
     private readonly chainId: number,
     private readonly addresses: FeedAddresses,
     private readonly deadlineSec: bigint = 3600n,
