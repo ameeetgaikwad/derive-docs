@@ -4,8 +4,9 @@ import {
   computeDomainSeparator,
 } from "../constants";
 import {
-  EXPECTED_ACTION_TYPEHASH,
-  EXPECTED_DOMAIN_SEPARATOR,
+  getAddresses,
+  getExpectedActionTypehash,
+  getExpectedDomainSeparator,
 } from "../deployments";
 import {
   decodeOptionSubId,
@@ -17,13 +18,17 @@ import { strikesForExpiry, weeklyExpiries } from "../board";
 import { black76Price } from "../black76";
 
 describe("EIP-712 constants vs on-chain-verified deployment values", () => {
-  it("locally computed Matching domain separator matches deployments/97.json", () => {
-    expect(computeDomainSeparator()).toBe(EXPECTED_DOMAIN_SEPARATOR);
-  });
+  for (const chainId of [56, 97] as const) {
+    it(`locally computed Matching domain separator matches deployments/${chainId}.json`, () => {
+      expect(computeDomainSeparator(chainId, getAddresses(chainId).matching)).toBe(
+        getExpectedDomainSeparator(chainId)
+      );
+    });
 
-  it("locally computed ACTION_TYPEHASH matches deployments/97.json", () => {
-    expect(ACTION_TYPEHASH).toBe(EXPECTED_ACTION_TYPEHASH);
-  });
+    it(`locally computed ACTION_TYPEHASH matches deployments/${chainId}.json`, () => {
+      expect(ACTION_TYPEHASH).toBe(getExpectedActionTypehash(chainId));
+    });
+  }
 });
 
 describe("option subId encoding", () => {

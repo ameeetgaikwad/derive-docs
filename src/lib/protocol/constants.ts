@@ -7,11 +7,11 @@ import {
   type TypedDataDomain,
 } from "viem";
 import {
-  ADDRESSES,
-  CHAIN_ID,
-  EXPECTED_ACTION_TYPEHASH,
-  EXPECTED_DOMAIN_SEPARATOR,
+  getAddresses,
+  getExpectedActionTypehash,
+  getExpectedDomainSeparator,
 } from "./deployments";
+import { APP_CHAIN_IDS } from "@/stores/network";
 
 /**
  * EIP-712 Action type, verified against
@@ -49,8 +49,8 @@ export const MATCHING_DOMAIN_NAME = "Matching";
 export const MATCHING_DOMAIN_VERSION = "1.0";
 
 export function matchingDomain(
-  chainId: number = CHAIN_ID,
-  matchingAddress: Address = ADDRESSES.matching
+  chainId: number,
+  matchingAddress: Address
 ): TypedDataDomain {
   return {
     name: MATCHING_DOMAIN_NAME,
@@ -62,8 +62,8 @@ export function matchingDomain(
 
 /** EIP-712 domain separator, computed locally (matches Matching.domainSeparator()). */
 export function computeDomainSeparator(
-  chainId: number = CHAIN_ID,
-  matchingAddress: Address = ADDRESSES.matching
+  chainId: number,
+  matchingAddress: Address
 ): Hex {
   return hashDomain({
     domain: {
@@ -84,24 +84,31 @@ export function computeDomainSeparator(
 }
 
 /**
- * Dev-time sanity check, run at module init: our locally computed EIP-712
- * domain separator and Action typehash must match the on-chain-verified
- * values recorded in protocol/deployments/97.json. Catches any drift between
- * the frontend signing code and the deployed Matching contract immediately.
+ * Dev-time sanity check, run at module init: for each supported network, our
+ * locally computed EIP-712 domain separator and Action typehash must match the
+ * on-chain-verified values recorded in protocol/deployments/{56,97}.json.
+ * Catches any drift between the frontend signing code and the deployed
+ * Matching contracts immediately.
  */
 function assertDomainIntegrity(): void {
-  const computed = computeDomainSeparator();
-  if (computed !== EXPECTED_DOMAIN_SEPARATOR) {
-    throw new Error(
-      `sats-options: computed Matching domain separator ${computed} does not match ` +
-        `deployments/97.json ${EXPECTED_DOMAIN_SEPARATOR} — signing would produce invalid signatures`
-    );
-  }
-  if (ACTION_TYPEHASH !== EXPECTED_ACTION_TYPEHASH) {
-    throw new Error(
-      `sats-options: computed ACTION_TYPEHASH ${ACTION_TYPEHASH} does not match ` +
-        `deployments/97.json ${EXPECTED_ACTION_TYPEHASH}`
-    );
+  for (const chainId of APP_CHAIN_IDS) {
+    const addresses = getAddresses(chainId);
+    const expectedSeparator = getExpectedDomainSeparator(chainId);
+    const expectedTypehash = getExpectedActionTypehash(chainId);
+
+    const computed = computeDomainSeparator(chainId, addresses.matching);
+    if (computed !== expectedSeparator) {
+      throw new Error(
+        `Hedge: computed Matching domain separator ${computed} does not match ` +
+          `deployments/${chainId}.json ${expectedSeparator} — signing would produce invalid signatures`
+      );
+    }
+    if (ACTION_TYPEHASH !== expectedTypehash) {
+      throw new Error(
+        `Hedge: computed ACTION_TYPEHASH ${ACTION_TYPEHASH} does not match ` +
+          `deployments/${chainId}.json ${expectedTypehash}`
+      );
+    }
   }
 }
 

@@ -3,7 +3,7 @@
 import { useMemo } from "react";
 import { useAccount, useReadContract, useReadContracts } from "wagmi";
 import { lyraForwardFeedAbi, subAccountsAbi } from "@/lib/protocol/abis";
-import { ADDRESSES, CHAIN_ID } from "@/lib/protocol/deployments";
+import { useNetwork } from "./useNetwork";
 import {
   decodeOptionSubId,
   instrumentNameFromSubId,
@@ -48,12 +48,13 @@ export interface SubaccountBalances {
  * Settlement status comes from LyraForwardFeed.getSettlementPrice(expiry).
  */
 export function usePositionMonitor(subaccountId: bigint | null) {
+  const { addresses, chainId } = useNetwork();
   const balancesQuery = useReadContract({
     abi: subAccountsAbi,
-    address: ADDRESSES.subAccounts,
+    address: addresses.subAccounts,
     functionName: "getAccountBalances",
     args: subaccountId !== null ? [subaccountId] : undefined,
-    chainId: CHAIN_ID,
+    chainId,
     query: { enabled: subaccountId !== null, refetchInterval: 15_000 },
   });
 
@@ -63,16 +64,16 @@ export function usePositionMonitor(subaccountId: bigint | null) {
     const options: { subId: bigint; balance: number }[] = [];
     for (const b of balancesQuery.data ?? []) {
       const asset = b.asset.toLowerCase();
-      if (asset === ADDRESSES.cashAsset.toLowerCase()) {
+      if (asset === addresses.cashAsset.toLowerCase()) {
         cash.value = unitToNumber(b.balance);
-      } else if (asset === ADDRESSES.btcBaseAsset.toLowerCase()) {
+      } else if (asset === addresses.btcBaseAsset.toLowerCase()) {
         btcb.value = unitToNumber(b.balance);
-      } else if (asset === ADDRESSES.btcOptionAsset.toLowerCase()) {
+      } else if (asset === addresses.btcOptionAsset.toLowerCase()) {
         if (b.balance !== 0n) options.push({ subId: b.subId, balance: unitToNumber(b.balance) });
       }
     }
     return { cash: cash.value, btcb: btcb.value, options };
-  }, [balancesQuery.data]);
+  }, [balancesQuery.data, addresses]);
 
   // Settlement price per distinct expiry of held options
   const expiries = useMemo(
@@ -88,10 +89,10 @@ export function usePositionMonitor(subaccountId: bigint | null) {
       (expiry) =>
         ({
           abi: lyraForwardFeedAbi,
-          address: ADDRESSES.btcForwardFeed,
+          address: addresses.btcForwardFeed,
           functionName: "getSettlementPrice",
           args: [BigInt(expiry)],
-          chainId: CHAIN_ID,
+          chainId,
         }) as const
     ),
     query: { enabled: expiries.length > 0, refetchInterval: 60_000 },

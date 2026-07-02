@@ -2,19 +2,20 @@
 
 import { useReadContract } from "wagmi";
 import { lyraSpotFeedAbi } from "@/lib/protocol/abis";
-import { ADDRESSES, CHAIN_ID } from "@/lib/protocol/deployments";
 import { unitToNumber } from "@/lib/protocol/units";
+import { useNetwork } from "./useNetwork";
 
 /**
  * BTC spot price read on-chain from our LyraSpotFeed (posted by
  * services/oracle-feeds). Returns USD as a float for display/pricing.
  */
 export function useSpotPrice() {
+  const { addresses, chainId } = useNetwork();
   const query = useReadContract({
     abi: lyraSpotFeedAbi,
-    address: ADDRESSES.btcSpotFeed,
+    address: addresses.btcSpotFeed,
     functionName: "getSpot",
-    chainId: CHAIN_ID,
+    chainId,
     query: { refetchInterval: 15_000 },
   });
 

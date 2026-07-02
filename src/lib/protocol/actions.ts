@@ -1,6 +1,5 @@
 import type { Address, Hex } from "viem";
 import { ACTION_TYPES, MATCHING_DOMAIN_NAME, MATCHING_DOMAIN_VERSION } from "./constants";
-import { ADDRESSES, CHAIN_ID } from "./deployments";
 
 /**
  * Mirrors IActionVerifier.Action (protocol/lib/v2-matching), field-for-field
@@ -59,14 +58,21 @@ export function buildAction(params: {
  * The exact wagmi/viem `signTypedData` parameters for an Action against our
  * Matching deployment (standard eth_signTypedData_v4 — the signature is
  * verified by ActionVerifier via SignatureChecker, no EIP-191 prefix).
+ *
+ * chainId + matching address are passed explicitly so signing always targets
+ * the active network's deployment.
  */
-export function actionTypedData(action: Action) {
+export function actionTypedData(
+  action: Action,
+  chainId: number,
+  matchingAddress: Address
+) {
   return {
     domain: {
       name: MATCHING_DOMAIN_NAME,
       version: MATCHING_DOMAIN_VERSION,
-      chainId: CHAIN_ID,
-      verifyingContract: ADDRESSES.matching,
+      chainId,
+      verifyingContract: matchingAddress,
     },
     types: ACTION_TYPES,
     primaryType: "Action" as const,

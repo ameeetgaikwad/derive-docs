@@ -8,7 +8,6 @@ import {
   lyraRateFeedAbi,
   lyraVolFeedAbi,
 } from "@/lib/protocol/abis";
-import { ADDRESSES } from "@/lib/protocol/deployments";
 import {
   formatExpiryLabel,
   strikesForExpiry,
@@ -19,6 +18,7 @@ import { black76Price, yearsToExpiry } from "@/lib/protocol/black76";
 import { calculateAPR, daysToExpiry } from "@/lib/protocol/apr";
 import { unitToNumber } from "@/lib/protocol/units";
 import { useSpotPrice } from "./useSpotPrice";
+import { useNetwork } from "./useNetwork";
 
 /** Fallbacks when an expiry has no posted feed data yet (testnet reality). */
 const DEFAULT_IV = 0.6;
@@ -49,6 +49,7 @@ export interface StrikeOption extends BoardStrike {
  * the RFQ auction.
  */
 export function useAvailableStrikes(selectedExpiry: number | null) {
+  const { addresses } = useNetwork();
   const { spotPrice, isLoading: spotLoading } = useSpotPrice();
 
   const expiries = useMemo<ExpiryInfo[]>(
@@ -74,24 +75,24 @@ export function useAvailableStrikes(selectedExpiry: number | null) {
     return [
       {
         abi: lyraForwardFeedAbi,
-        address: ADDRESSES.btcForwardFeed,
+        address: addresses.btcForwardFeed,
         functionName: "getForwardPrice",
         args: [BigInt(selectedExpiry)],
       },
       {
         abi: lyraRateFeedAbi,
-        address: ADDRESSES.btcRateFeed,
+        address: addresses.btcRateFeed,
         functionName: "getInterestRate",
         args: [BigInt(selectedExpiry)],
       },
       ...boardStrikes.map((s) => ({
         abi: lyraVolFeedAbi,
-        address: ADDRESSES.btcVolFeed,
+        address: addresses.btcVolFeed,
         functionName: "getVol",
         args: [s.strike18, BigInt(s.expiry)],
       })),
     ];
-  }, [selectedExpiry, boardStrikes]);
+  }, [selectedExpiry, boardStrikes, addresses]);
 
   const feedReads = useReadContracts({
     contracts: feedContracts,

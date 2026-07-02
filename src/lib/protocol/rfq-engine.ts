@@ -10,10 +10,25 @@
 
 import type { Hex } from "viem";
 import type { SerializedAction } from "./actions";
+import { getActiveChainId, type AppChainId } from "@/stores/network";
 
-export const RFQ_ENGINE_URL = (
-  process.env.NEXT_PUBLIC_RFQ_ENGINE_URL ?? "http://localhost:3030"
-).replace(/\/+$/, "");
+const trimSlash = (u: string) => u.replace(/\/+$/, "");
+
+/**
+ * rfq-engine base URL per network. Configure with
+ * NEXT_PUBLIC_RFQ_ENGINE_URL_56 (mainnet) and NEXT_PUBLIC_RFQ_ENGINE_URL_97
+ * (testnet). A legacy NEXT_PUBLIC_RFQ_ENGINE_URL is honoured as a fallback for
+ * both. Defaults to localhost:3030 for local dev.
+ */
+export function rfqEngineUrl(chainId: AppChainId = getActiveChainId()): string {
+  const perChain =
+    chainId === 56
+      ? process.env.NEXT_PUBLIC_RFQ_ENGINE_URL_56
+      : process.env.NEXT_PUBLIC_RFQ_ENGINE_URL_97;
+  const url =
+    perChain ?? process.env.NEXT_PUBLIC_RFQ_ENGINE_URL ?? "http://localhost:3030";
+  return trimSlash(url);
+}
 
 export type RfqStatus =
   | "open"
@@ -103,13 +118,13 @@ export interface AcceptRfqResponse {
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   let res: Response;
   try {
-    res = await fetch(`${RFQ_ENGINE_URL}${path}`, {
+    res = await fetch(`${rfqEngineUrl()}${path}`, {
       ...init,
       headers: { "content-type": "application/json", ...init?.headers },
     });
   } catch {
     throw new Error(
-      `RFQ engine unreachable at ${RFQ_ENGINE_URL} — is services/rfq-engine running?`
+      `RFQ engine unreachable at ${rfqEngineUrl()} — is services/rfq-engine running?`
     );
   }
   const body = (await res.json().catch(() => ({}))) as Record<string, unknown>;

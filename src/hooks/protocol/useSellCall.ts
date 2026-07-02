@@ -17,9 +17,9 @@ import {
   type PublicBestQuote,
   type RfqStatusResponse,
 } from "@/lib/protocol/rfq-engine";
-import { ADDRESSES, CHAIN_ID } from "@/lib/protocol/deployments";
 import { encodeOptionSubId } from "@/lib/protocol/instruments";
 import { toUnit, unitToNumber } from "@/lib/protocol/units";
+import { useNetwork } from "./useNetwork";
 
 export type SellPhase =
   | "idle"
@@ -79,6 +79,7 @@ export function useSellCall() {
   const { address } = useAccount();
   const { signTypedDataAsync } = useSignTypedData();
   const { switchChainAsync } = useSwitchChain();
+  const { addresses, chainId } = useNetwork();
 
   const [phase, setPhase] = useState<SellPhase>("idle");
   const [auction, setAuction] = useState<AuctionState | null>(null);
@@ -139,19 +140,21 @@ export function useSellCall() {
         }
         const best = status.bestQuote;
 
-        verifyBestQuote(best, params);
+        verifyBestQuote(best, params, addresses.btcOptionAsset);
 
         // 3. Sign the TakerOrder Action with the wallet (EIP-712)
         setPhase("signing");
-        await switchChainAsync({ chainId: CHAIN_ID }).catch(() => {});
+        await switchChainAsync({ chainId }).catch(() => {});
         const action = buildAction({
           subaccountId: params.subaccountId,
-          module: ADDRESSES.rfqModule,
+          module: addresses.rfqModule,
           data: encodeTakerOrder({ orderHash: best.orderHash, maxFee: 0n }),
           owner: address,
           expiry: getActionExpiry(600),
         });
-        const signature = await signTypedDataAsync(actionTypedData(action));
+        const signature = await signTypedDataAsync(
+          actionTypedData(action, chainId, addresses.matching)
+        );
 
         // 4. Accept — engine executes verifyAndMatch on-chain
         setPhase("executing");
@@ -178,7 +181,7 @@ export function useSellCall() {
         busyRef.current = false;
       }
     },
-    [address, signTypedDataAsync, switchChainAsync]
+    [address, signTypedDataAsync, switchChainAsync, addresses, chainId]
   );
 
   return { sell, reset, phase, auction, result, error };
@@ -188,7 +191,11 @@ export function useSellCall() {
  * Defense-in-depth before signing: re-derive the orderHash from the quoted
  * trades and check the trade matches the requested instrument exactly.
  */
-function verifyBestQuote(best: PublicBestQuote, params: SellParams): void {
+function verifyBestQuote(
+  best: PublicBestQuote,
+  params: SellParams,
+  btcOptionAsset: Address
+): void {
   const trades = best.trades.map((t) => ({
     asset: t.asset as Address,
     subId: BigInt(t.subId),
@@ -209,7 +216,7 @@ function verifyBestQuote(best: PublicBestQuote, params: SellParams): void {
     strike: toUnit(params.strike),
     isCall: true,
   });
-  if (trade.asset.toLowerCase() !== ADDRESSES.btcOptionAsset.toLowerCase()) {
+  if (trade.asset.toLowerCase() !== btcOptionAsset.toLowerCase()) {
     throw new Error("Quote rejected: wrong asset");
   }
   if (trade.subId !== expectedSubId) {

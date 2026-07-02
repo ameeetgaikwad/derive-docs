@@ -9,8 +9,8 @@ import {
   writeContract,
 } from "wagmi/actions";
 import { matchingAbi, subAccountsAbi, mockErc20Abi, wrappedErc20AssetAbi } from "@/lib/protocol/abis";
-import { ADDRESSES, CHAIN_ID } from "@/lib/protocol/deployments";
 import { useAccountStore } from "@/stores/account";
+import { useNetwork } from "./useNetwork";
 
 /**
  * The user's covered-call subaccount under Matching (SRM-managed).
@@ -25,6 +25,7 @@ export function useCoveredCallSubaccount() {
   const config = useConfig();
   const { switchChainAsync } = useSwitchChain();
   const { getSubaccount, setSubaccount, clearSubaccount } = useAccountStore();
+  const { addresses, chainId } = useNetwork();
 
   const storedId = getSubaccount(address);
 
@@ -32,10 +33,10 @@ export function useCoveredCallSubaccount() {
   // owned (via Matching) by the connected EOA.
   const ownerQuery = useReadContract({
     abi: matchingAbi,
-    address: ADDRESSES.matching,
+    address: addresses.matching,
     functionName: "subAccountToOwner",
     args: storedId !== null ? [storedId] : undefined,
-    chainId: CHAIN_ID,
+    chainId,
     query: { enabled: storedId !== null && !!address },
   });
 
@@ -57,10 +58,10 @@ export function useCoveredCallSubaccount() {
   }, [mismatch, address, clearSubaccount]);
 
   const ensureChain = useCallback(async () => {
-    await switchChainAsync({ chainId: CHAIN_ID }).catch(() => {
+    await switchChainAsync({ chainId }).catch(() => {
       // ignore "already on chain" / user-handled cases; writes will re-check
     });
-  }, [switchChainAsync]);
+  }, [switchChainAsync, chainId]);
 
   /** Returns the existing subaccount id or creates one (1 wallet tx). */
   const ensureSubaccount = useCallback(async (): Promise<bigint> => {
@@ -70,20 +71,20 @@ export function useCoveredCallSubaccount() {
     await ensureChain();
     const hash = await writeContract(config, {
       abi: matchingAbi,
-      address: ADDRESSES.matching,
+      address: addresses.matching,
       functionName: "createSubAccount",
-      args: [ADDRESSES.standardManager],
-      chainId: CHAIN_ID,
+      args: [addresses.standardManager],
+      chainId,
     });
     const receipt = await waitForTransactionReceipt(config, {
       hash,
-      chainId: CHAIN_ID,
+      chainId,
     });
 
     // SubAccounts emits AccountCreated(owner=Matching, accountId, manager).
     let accountId: bigint | null = null;
     for (const log of receipt.logs) {
-      if (log.address.toLowerCase() !== ADDRESSES.subAccounts.toLowerCase()) continue;
+      if (log.address.toLowerCase() !== addresses.subAccounts.toLowerCase()) continue;
       try {
         const decoded = decodeEventLog({
           abi: subAccountsAbi,
@@ -104,7 +105,7 @@ export function useCoveredCallSubaccount() {
 
     setSubaccount(address, accountId);
     return accountId;
-  }, [address, verified, storedId, ensureChain, config, setSubaccount]);
+  }, [address, verified, storedId, ensureChain, config, setSubaccount, addresses, chainId]);
 
   /** Adopt an existing subaccount id (e.g. created via scripts) after verifying ownership. */
   const adoptSubaccount = useCallback(
@@ -112,17 +113,17 @@ export function useCoveredCallSubaccount() {
       if (!address) throw new Error("Wallet not connected");
       const owner = await readContract(config, {
         abi: matchingAbi,
-        address: ADDRESSES.matching,
+        address: addresses.matching,
         functionName: "subAccountToOwner",
         args: [id],
-        chainId: CHAIN_ID,
+        chainId,
       });
       if (owner.toLowerCase() !== address.toLowerCase()) {
         throw new Error(`Subaccount ${id} is not owned by ${address}`);
       }
       setSubaccount(address, id);
     },
-    [address, config, setSubaccount]
+    [address, config, setSubaccount, addresses, chainId]
   );
 
   return {
@@ -144,49 +145,50 @@ export function useDepositBtcb() {
   const { address } = useAccount();
   const config = useConfig();
   const { switchChainAsync } = useSwitchChain();
+  const { addresses, chainId } = useNetwork();
 
   return useCallback(
     async (subaccountId: bigint, amount: bigint): Promise<void> => {
       if (!address) throw new Error("Wallet not connected");
-      await switchChainAsync({ chainId: CHAIN_ID }).catch(() => {});
+      await switchChainAsync({ chainId }).catch(() => {});
 
       const allowance = await readContract(config, {
         abi: mockErc20Abi,
-        address: ADDRESSES.btcb,
+        address: addresses.btcb,
         functionName: "allowance",
-        args: [address, ADDRESSES.btcBaseAsset],
-        chainId: CHAIN_ID,
+        args: [address, addresses.btcBaseAsset],
+        chainId,
       });
 
       if (allowance < amount) {
         const approveHash = await writeContract(config, {
           abi: mockErc20Abi,
-          address: ADDRESSES.btcb,
+          address: addresses.btcb,
           functionName: "approve",
-          args: [ADDRESSES.btcBaseAsset, amount],
-          chainId: CHAIN_ID,
+          args: [addresses.btcBaseAsset, amount],
+          chainId,
         });
         await waitForTransactionReceipt(config, {
           hash: approveHash,
-          chainId: CHAIN_ID,
+          chainId,
         });
       }
 
       const depositHash = await writeContract(config, {
         abi: wrappedErc20AssetAbi,
-        address: ADDRESSES.btcBaseAsset,
+        address: addresses.btcBaseAsset,
         functionName: "deposit",
         args: [subaccountId, amount],
-        chainId: CHAIN_ID,
+        chainId,
       });
       const receipt = await waitForTransactionReceipt(config, {
         hash: depositHash,
-        chainId: CHAIN_ID,
+        chainId,
       });
       if (receipt.status !== "success") {
         throw new Error(`BTCB deposit reverted (tx ${depositHash})`);
       }
     },
-    [address, config, switchChainAsync]
+    [address, config, switchChainAsync, addresses, chainId]
   );
 }

@@ -6,19 +6,20 @@ import { useAccount, useConfig, useReadContract, useSwitchChain } from "wagmi";
 import { waitForTransactionReceipt, writeContract } from "wagmi/actions";
 import { toast } from "sonner";
 import { mockErc20Abi } from "@/lib/protocol/abis";
-import { ADDRESSES, CHAIN_ID } from "@/lib/protocol/deployments";
 import { unitToNumber } from "@/lib/protocol/units";
+import { useNetwork } from "./useNetwork";
 
 /** Wallet BTCB (mock, 18 decimals) balance. */
 export function useBtcbBalance() {
   const { address } = useAccount();
+  const { addresses, chainId } = useNetwork();
 
   const query = useReadContract({
     abi: mockErc20Abi,
-    address: ADDRESSES.btcb,
+    address: addresses.btcb,
     functionName: "balanceOf",
     args: address ? [address] : undefined,
-    chainId: CHAIN_ID,
+    chainId,
     query: { enabled: !!address, refetchInterval: 15_000 },
   });
 
@@ -39,19 +40,20 @@ export function useMintBtcb() {
   const config = useConfig();
   const { switchChainAsync } = useSwitchChain();
   const queryClient = useQueryClient();
+  const { addresses, chainId } = useNetwork();
 
   return useMutation({
     mutationFn: async () => {
       if (!address) throw new Error("Wallet not connected");
-      await switchChainAsync({ chainId: CHAIN_ID }).catch(() => {});
+      await switchChainAsync({ chainId }).catch(() => {});
       const hash = await writeContract(config, {
         abi: mockErc20Abi,
-        address: ADDRESSES.btcb,
+        address: addresses.btcb,
         functionName: "mint",
         args: [address, parseEther("1")],
-        chainId: CHAIN_ID,
+        chainId,
       });
-      await waitForTransactionReceipt(config, { hash, chainId: CHAIN_ID });
+      await waitForTransactionReceipt(config, { hash, chainId });
       return hash;
     },
     onSuccess: () => {
