@@ -160,14 +160,17 @@ async function buildDeribitSnapshotFromArgs(
 async function cmdDaemon(args: Args): Promise<void> {
   const { poster, publicClient, signer, chainId } = await buildPoster();
   const intervalSec = Number(one(args, "interval") ?? "15");
-  const source = one(args, "spot")
-    ? new StaticPriceSource(toUnit(one(args, "spot")!))
-    : priceSourceFromEnv(publicClient);
-  const expiries = expiriesFromArgs(args);
   const useDeribit = one(args, "source") === "deribit";
+  // Only build a spot source for the non-Deribit path (Deribit brings its own index).
+  const source = useDeribit
+    ? null
+    : one(args, "spot")
+      ? new StaticPriceSource(toUnit(one(args, "spot")!))
+      : priceSourceFromEnv(publicClient);
+  const expiries = expiriesFromArgs(args);
   console.log(
     `[oracle-feeds] daemon chain=${chainId} signer=${signer.address} ` +
-      `source=${useDeribit ? "deribit" : source.name} interval=${intervalSec}s ` +
+      `source=${useDeribit ? "deribit" : source!.name} interval=${intervalSec}s ` +
       `expiries=[${expiries.map((e) => e.expiry).join(",")}]`,
   );
 
@@ -178,7 +181,7 @@ async function cmdDaemon(args: Args): Promise<void> {
         const snapshot = await buildDeribitSnapshotFromArgs(args, poster);
         await poster.postSnapshot(snapshot);
       } else {
-        const spot = await source.getSpotPrice();
+        const spot = await source!.getSpotPrice();
         await poster.postSnapshot({ spot, expiries });
       }
     } catch (err) {
