@@ -1,14 +1,21 @@
 import type { Address, PublicClient } from "viem";
 import {
+  DeribitClient,
+  fitSvi,
   fromUnit,
   getDeployedAddress,
   lyraForwardFeedAbi,
   lyraRateFeedAbi,
   lyraSpotFeedAbi,
   lyraVolFeedAbi,
+  sviVol,
   type DeploymentsFile,
+  type DeribitBoard,
+  type SviRawParams,
 } from "@hedge/shared";
 import type { MakerBotConfig } from "./config.js";
+
+const SECONDS_PER_YEAR = 365 * 24 * 60 * 60;
 
 /** Market inputs for a single option (per expiry/strike). */
 export interface MarketInputs {
@@ -131,7 +138,76 @@ export class ChainPriceSource implements PriceSource {
   }
 }
 
-/** Env source when fully specified, else on-chain feeds. */
+/**
+ * Prices vol off Deribit's live BTC surface — the reference vol market — and
+ * takes forward/rate from a fallback source (on-chain feeds). For each
+ * expiry it fits a raw-SVI curve to Deribit's mark IVs (cached with a TTL)
+ * and reads vol at the requested strike. Any failure (Deribit unreachable,
+ * no matching expiry, too few points) transparently yields the fallback's
+ * vol, so quoting never stalls.
+ */
+export class DeribitPriceSource implements PriceSource {
+  private readonly client: DeribitClient;
+  private board: DeribitBoard | null = null;
+  private boardAt = 0;
+  private readonly fits = new Map<number, { params: SviRawParams; forward: number; tau: number }>();
+
+  constructor(
+    private readonly fallback: PriceSource,
+    private readonly ttlMs = 30_000,
+    client?: DeribitClient,
+    private readonly minPoints = 4,
+    private readonly toleranceSec = 0,
+  ) {
+    this.client = client ?? new DeribitClient();
+  }
+
+  async getInputs(option: { expiry: bigint; strike: bigint }): Promise<MarketInputs> {
+    const base = await this.fallback.getInputs(option);
+    try {
+      const vol = await this.deribitVol(option);
+      return vol != null ? { ...base, vol } : base;
+    } catch (err) {
+      console.warn(`[pricing] deribit vol unavailable (${(err as Error).message?.split("\n")[0]}); using fallback`);
+      return base;
+    }
+  }
+
+  private async deribitVol(option: { expiry: bigint; strike: bigint }): Promise<number | null> {
+    const now = Math.floor(Date.now() / 1000);
+    if (!this.board || Date.now() - this.boardAt > this.ttlMs) {
+      this.board = await this.client.getBoard("BTC", now);
+      this.boardAt = Date.now();
+      this.fits.clear();
+    }
+    const expiry = Number(option.expiry);
+    const strike = Number(fromUnit(option.strike));
+    const tau = (expiry - now) / SECONDS_PER_YEAR;
+    if (tau <= 0) return null;
+
+    let fit = this.fits.get(expiry);
+    if (!fit) {
+      // nearest Deribit expiry within tolerance
+      let slice = null as (typeof this.board.expiries)[number] | null;
+      let bestDelta = Infinity;
+      for (const s of this.board.expiries) {
+        const d = Math.abs(s.expiry - expiry);
+        if (d < bestDelta) { slice = s; bestDelta = d; }
+      }
+      if (!slice || bestDelta > this.toleranceSec) return null;
+      const points = slice.options
+        .filter((o) => o.markIv != null && o.strike > 0)
+        .map((o) => ({ strike: o.strike, iv: o.markIv as number }));
+      if (points.length < this.minPoints) return null;
+      const res = fitSvi({ forward: slice.forward, tau, points });
+      fit = { params: res.params, forward: slice.forward, tau };
+      this.fits.set(expiry, fit);
+    }
+    return sviVol(fit.params, strike, fit.forward, fit.tau);
+  }
+}
+
+/** Env source when fully specified, else on-chain feeds (optionally Deribit-vol on top). */
 export function makePriceSource(
   cfg: MakerBotConfig,
   client: PublicClient | null,
@@ -145,5 +221,6 @@ export function makePriceSource(
       "Pricing needs either env overrides (FORWARD_PRICE/SPOT_PRICE + IV) or an RPC + deployments file",
     );
   }
-  return new ChainPriceSource(client, deployments, cfg);
+  const chain = new ChainPriceSource(client, deployments, cfg);
+  return cfg.deribitVol ? new DeribitPriceSource(chain) : chain;
 }

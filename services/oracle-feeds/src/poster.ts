@@ -51,10 +51,12 @@ export interface SnapshotExpiryParams {
   expiry: bigint; // unix seconds
   /** 18dp forward price; defaults to spot */
   forwardPrice?: bigint;
-  /** 18dp flat IV for the SVI surface; default 0.6 (60%) */
+  /** 18dp flat IV for the SVI surface; default 0.6 (60%). Ignored if `svi` is set. */
   iv?: bigint;
   /** 18dp annualized rate; default 0.05 */
   rate?: bigint;
+  /** Fitted SVI params (e.g. from a Deribit surface). When set, posted verbatim instead of a flat-IV curve. */
+  svi?: SviParams;
 }
 
 export interface SnapshotParams {
@@ -234,9 +236,14 @@ export class FeedPoster {
       const rateTx = await this.postRate(e.expiry, rate, conf);
       log(`rate   expiry=${e.expiry} ${fmt(rate)}  tx=${rateTx}`);
 
-      const iv = e.iv ?? toUnit("0.6");
-      const volTx = await this.postFlatVol(e.expiry, iv, fwd, conf);
-      log(`vol    expiry=${e.expiry} flatIV=${fmt(iv)}  tx=${volTx}`);
+      if (e.svi) {
+        const volTx = await this.postVolSvi(e.expiry, e.svi, conf);
+        log(`vol    expiry=${e.expiry} SVI(fitted)  tx=${volTx}`);
+      } else {
+        const iv = e.iv ?? toUnit("0.6");
+        const volTx = await this.postFlatVol(e.expiry, iv, fwd, conf);
+        log(`vol    expiry=${e.expiry} flatIV=${fmt(iv)}  tx=${volTx}`);
+      }
     }
   }
 

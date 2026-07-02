@@ -1,0 +1,8 @@
+**/node_modules
+**/dist
+**/.turbo
+**/*.log
+**/maker-state.*.json
+**/.env
+**/coverage
+**/test

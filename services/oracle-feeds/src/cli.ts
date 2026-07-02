@@ -6,7 +6,13 @@ import {
   toUnit,
 } from "@hedge/shared";
 import { getDeadlineSec, getFeedSignerAccount } from "./env.js";
-import { FeedPoster, feedAddressesFromDeployments, type SnapshotExpiryParams } from "./poster.js";
+import {
+  FeedPoster,
+  feedAddressesFromDeployments,
+  type SnapshotExpiryParams,
+  type SnapshotParams,
+} from "./poster.js";
+import { buildDeribitSnapshot } from "./deribitSnapshot.js";
 import { priceSourceFromEnv, StaticPriceSource, type PriceSource } from "./priceSource.js";
 import { SettlementRunner, settlementAddressesFromDeployments } from "./settlement.js";
 import { pushPythUpdate, pythAddressesFromDeployments, type PythAddresses } from "./pyth.js";
@@ -112,13 +118,43 @@ async function resolveSpot(args: Args, source: () => PriceSource): Promise<bigin
 async function cmdPost(args: Args): Promise<void> {
   const { poster, publicClient, signer, chainId } = await buildPoster();
   console.log(`[oracle-feeds] chain=${chainId} signer=${signer.address}`);
+  const conf = one(args, "conf") ? toUnit(one(args, "conf")!) : undefined;
+
+  if (one(args, "source") === "deribit") {
+    const snapshot = await buildDeribitSnapshotFromArgs(args, poster);
+    await poster.postSnapshot({ ...snapshot, confidence: conf });
+    return;
+  }
+
   const spot = await resolveSpot(args, () => priceSourceFromEnv(publicClient));
-  const conf = one(args, "conf");
   await poster.postSnapshot({
     spot,
-    confidence: conf ? toUnit(conf) : undefined,
+    confidence: conf,
     expiries: expiriesFromArgs(args),
   });
+}
+
+/** Fetch the Deribit surface and build a fitted-SVI snapshot for the requested expiries. */
+async function buildDeribitSnapshotFromArgs(
+  args: Args,
+  poster: Awaited<ReturnType<typeof buildPoster>>["poster"],
+): Promise<SnapshotParams> {
+  const expiries = (args.flags.get("expiry") ?? []).map((e) => BigInt(e));
+  if (expiries.length === 0) throw new Error("--source deribit requires at least one --expiry");
+  const rate = one(args, "rate");
+  const tolerance = one(args, "expiry-tolerance");
+  const now = Number(await poster.chainNow());
+  const { snapshot, fitted, indexPrice } = await buildDeribitSnapshot({
+    expiries,
+    now,
+    rate: rate ? toUnit(rate) : undefined,
+    toleranceSec: tolerance ? Number(tolerance) : 0,
+  });
+  console.log(`[oracle-feeds] deribit index=${indexPrice}`);
+  for (const f of fitted) {
+    console.log(`[oracle-feeds] deribit expiry=${f.expiry} ${f.used ? "SVI" : "flat"}: ${f.note}`);
+  }
+  return snapshot;
 }
 
 async function cmdDaemon(args: Args): Promise<void> {
@@ -128,16 +164,23 @@ async function cmdDaemon(args: Args): Promise<void> {
     ? new StaticPriceSource(toUnit(one(args, "spot")!))
     : priceSourceFromEnv(publicClient);
   const expiries = expiriesFromArgs(args);
+  const useDeribit = one(args, "source") === "deribit";
   console.log(
     `[oracle-feeds] daemon chain=${chainId} signer=${signer.address} ` +
-      `source=${source.name} interval=${intervalSec}s expiries=[${expiries.map((e) => e.expiry).join(",")}]`,
+      `source=${useDeribit ? "deribit" : source.name} interval=${intervalSec}s ` +
+      `expiries=[${expiries.map((e) => e.expiry).join(",")}]`,
   );
 
   // eslint-disable-next-line no-constant-condition
   while (true) {
     try {
-      const spot = await source.getSpotPrice();
-      await poster.postSnapshot({ spot, expiries });
+      if (useDeribit) {
+        const snapshot = await buildDeribitSnapshotFromArgs(args, poster);
+        await poster.postSnapshot(snapshot);
+      } else {
+        const spot = await source.getSpotPrice();
+        await poster.postSnapshot({ spot, expiries });
+      }
     } catch (err) {
       console.error(`[oracle-feeds] post failed: ${(err as Error).message}`);
     }
