@@ -43,6 +43,8 @@ RUN pnpm install --frozen-lockfile --filter "@hedge/oracle-feeds..."
 # Sources for the two packages we build.
 COPY services/shared services/shared
 COPY services/oracle-feeds services/oracle-feeds
+# Deployment address books (public, not secret) — read at startup via SATS_DEPLOYMENTS_DIR.
+COPY protocol/deployments /app/protocol/deployments
 # Build @hedge/shared via tsc directly (its `build` re-extracts ABIs from forge
 # artifacts that live outside this context; the extracted src/abis are committed,
 # so a plain tsc is correct), then build oracle-feeds.
@@ -52,6 +54,7 @@ RUN pnpm --filter @hedge/shared exec tsc -p tsconfig.json \
 # --- runtime stage ---
 FROM base AS runtime
 ENV NODE_ENV=production
+ENV SATS_DEPLOYMENTS_DIR=/app/protocol/deployments
 RUN useradd -m -u 10001 oracle
 COPY --from=build --chown=oracle:oracle /app /app
 USER oracle

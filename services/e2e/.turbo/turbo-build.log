@@ -1,4 +1,0 @@
-
-> @hedge/e2e@0.1.0 build /Users/brahma/Projects/sats/derive-prod/services/e2e
-> tsc -p tsconfig.json
-
