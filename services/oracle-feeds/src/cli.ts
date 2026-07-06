@@ -96,6 +96,25 @@ async function buildPoster() {
   return { chainId, signer, publicClient, walletClient, poster };
 }
 
+/**
+ * Next `count` weekly expiries: Fridays 08:00 UTC, strictly >1 day out.
+ * Mirrors apps/web board.ts so the daemon always posts for exactly the
+ * expiries the UI shows. Recomputed each daemon cycle, so never stale.
+ */
+function upcomingFridayExpiries(count: number, nowMs = Date.now()): bigint[] {
+  const out: bigint[] = [];
+  const d = new Date(nowMs);
+  const candidate = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 8, 0, 0));
+  const daysToFriday = (5 - candidate.getUTCDay() + 7) % 7;
+  candidate.setUTCDate(candidate.getUTCDate() + daysToFriday);
+  while (out.length < count) {
+    const epoch = Math.floor(candidate.getTime() / 1000);
+    if (epoch - nowMs / 1000 > 86400) out.push(BigInt(epoch));
+    candidate.setUTCDate(candidate.getUTCDate() + 7);
+  }
+  return out;
+}
+
 function expiriesFromArgs(args: Args): SnapshotExpiryParams[] {
   const expiries = args.flags.get("expiry") ?? [];
   const forward = one(args, "forward");
@@ -139,8 +158,11 @@ async function buildDeribitSnapshotFromArgs(
   args: Args,
   poster: Awaited<ReturnType<typeof buildPoster>>["poster"],
 ): Promise<SnapshotParams> {
-  const expiries = (args.flags.get("expiry") ?? []).map((e) => BigInt(e));
-  if (expiries.length === 0) throw new Error("--source deribit requires at least one --expiry");
+  const explicit = (args.flags.get("expiry") ?? []).map((e) => BigInt(e));
+  // Default to the upcoming weekly expiries (matching the frontend board) when
+  // none are passed — so the deployed daemon needs no hardcoded/rolling expiries.
+  const count = Number(one(args, "expiry-count") ?? process.env.EXPIRY_COUNT ?? "4");
+  const expiries = explicit.length > 0 ? explicit : upcomingFridayExpiries(count);
   const rate = one(args, "rate");
   const tolerance = one(args, "expiry-tolerance");
   const now = Number(await poster.chainNow());
