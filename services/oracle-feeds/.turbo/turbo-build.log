@@ -1,0 +1,4 @@
+
+> @hedge/oracle-feeds@0.1.0 build /Users/brahma/Projects/sats/derive-prod/services/oracle-feeds
+> tsc -p tsconfig.json
+

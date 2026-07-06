@@ -1,0 +1,24 @@
+
+> @hedge/web@0.1.0 build /Users/brahma/Projects/sats/derive-prod/apps/web
+> next build
+
+▲ Next.js 16.1.6 (Turbopack)
+
+  Creating an optimized production build ...
+✓ Compiled successfully in 39.9s
+  Running TypeScript ...
+  Collecting page data using 13 workers ...
+  Generating static pages using 13 workers (0/4) ...
+  Generating static pages using 13 workers (1/4) 
+  Generating static pages using 13 workers (2/4) 
+  Generating static pages using 13 workers (3/4) 
+✓ Generating static pages using 13 workers (4/4) in 224.3ms
+  Finalizing page optimization ...
+
+Route (app)
+┌ ○ /
+└ ○ /_not-found
+
+
+○  (Static)  prerendered as static content
+

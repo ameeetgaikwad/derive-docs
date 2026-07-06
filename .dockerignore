@@ -1,0 +1,13 @@
+**/node_modules
+**/dist
+**/.next
+**/.turbo
+.git
+**/*.log
+**/maker-state.*.json
+**/.env*
+**/coverage
+protocol/lib
+protocol/out
+protocol/cache
+protocol/broadcast

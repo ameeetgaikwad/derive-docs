@@ -1,0 +1,25 @@
+
+> @hedge/shared@0.1.0 build /Users/brahma/Projects/sats/derive-prod/services/shared
+> node scripts/extract-abis.mjs && tsc -p tsconfig.json
+
+wrote src/abis/matching.ts (53 entries)
+wrote src/abis/actionVerifier.ts (39 entries)
+wrote src/abis/rfqModule.ts (28 entries)
+wrote src/abis/tradeModule.ts (36 entries)
+wrote src/abis/depositModule.ts (17 entries)
+wrote src/abis/withdrawalModule.ts (18 entries)
+wrote src/abis/transferModule.ts (20 entries)
+wrote src/abis/subAccounts.ts (61 entries)
+wrote src/abis/cashAsset.ts (68 entries)
+wrote src/abis/optionAsset.ts (38 entries)
+wrote src/abis/wrappedErc20Asset.ts (31 entries)
+wrote src/abis/standardManager.ts (106 entries)
+wrote src/abis/interestRateModel.ts (12 entries)
+wrote src/abis/securityModule.ts (23 entries)
+wrote src/abis/lyraSpotFeed.ts (33 entries)
+wrote src/abis/lyraForwardFeed.ts (53 entries)
+wrote src/abis/lyraVolFeed.ts (41 entries)
+wrote src/abis/lyraRateFeed.ts (33 entries)
+wrote src/abis/erc20.ts (14 entries)
+wrote src/abis/mockErc20.ts (20 entries)
+wrote src/abis/index.ts (20 ABIs)

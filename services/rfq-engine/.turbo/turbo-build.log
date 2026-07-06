@@ -1,0 +1,4 @@
+
+> @hedge/rfq-engine@0.1.0 build /Users/brahma/Projects/sats/derive-prod/services/rfq-engine
+> tsc -p tsconfig.json
+

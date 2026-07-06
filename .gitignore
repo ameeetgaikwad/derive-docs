@@ -51,3 +51,10 @@ next-env.d.ts
 /services/*/dist/
 /protocol/.env
 /services/**/.env
+
+# terraform
+infra/.terraform/
+infra/*.tfstate
+infra/*.tfstate.*
+infra/*.tfvars
+infra/.terraform.tfstate.lock.info
