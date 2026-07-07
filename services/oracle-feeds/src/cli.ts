@@ -181,7 +181,11 @@ async function buildDeribitSnapshotFromArgs(
 
 async function cmdDaemon(args: Args): Promise<void> {
   const { poster, publicClient, signer, chainId } = await buildPoster();
-  const intervalSec = Number(one(args, "interval") ?? "15");
+  // Loop cadence = the Pyth-refresh cadence (must stay under the adapter's ~60s
+  // staleness). Signed feeds (forward/vol/rate) move slowly, so they post on a
+  // longer cadence — most loops are just one cheap Pyth tx. Keeps gas sane.
+  const intervalSec = Number(one(args, "interval") ?? process.env.INTERVAL_SEC ?? "45");
+  const feedIntervalSec = Number(one(args, "feed-interval") ?? process.env.FEED_INTERVAL_SEC ?? "300");
   const useDeribit = one(args, "source") === "deribit";
   // Only build a spot source for the non-Deribit path (Deribit brings its own index).
   const source = useDeribit
@@ -210,21 +214,27 @@ async function cmdDaemon(args: Args): Promise<void> {
   console.log(
     `[oracle-feeds] daemon chain=${chainId} signer=${signer.address} ` +
       `source=${useDeribit ? "deribit" : source!.name} interval=${intervalSec}s ` +
-      `pyth=${pythAddresses ? "on" : "off"} expiries=[${expiries.map((e) => e.expiry).join(",")}]`,
+      `feedInterval=${feedIntervalSec}s pyth=${pythAddresses ? "on" : "off"} ` +
+      `expiries=[${expiries.map((e) => e.expiry).join(",")}]`,
   );
 
+  let lastFeedPost = 0;
   // eslint-disable-next-line no-constant-condition
   while (true) {
-    try {
-      if (useDeribit) {
-        const snapshot = await buildDeribitSnapshotFromArgs(args, poster);
-        await poster.postSnapshot(snapshot);
-      } else {
-        const spot = await source!.getSpotPrice();
-        await poster.postSnapshot({ spot, expiries });
+    const nowMs = Date.now();
+    if (nowMs - lastFeedPost >= feedIntervalSec * 1000) {
+      try {
+        if (useDeribit) {
+          const snapshot = await buildDeribitSnapshotFromArgs(args, poster);
+          await poster.postSnapshot(snapshot);
+        } else {
+          const spot = await source!.getSpotPrice();
+          await poster.postSnapshot({ spot, expiries });
+        }
+        lastFeedPost = nowMs;
+      } catch (err) {
+        console.error(`[oracle-feeds] post failed: ${(err as Error).message}`);
       }
-    } catch (err) {
-      console.error(`[oracle-feeds] post failed: ${(err as Error).message}`);
     }
     if (pythAddresses && walletClient) {
       try {
