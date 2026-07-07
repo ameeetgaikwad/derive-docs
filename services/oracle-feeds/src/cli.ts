@@ -190,10 +190,27 @@ async function cmdDaemon(args: Args): Promise<void> {
       ? new StaticPriceSource(toUnit(one(args, "spot")!))
       : priceSourceFromEnv(publicClient);
   const expiries = expiriesFromArgs(args);
+
+  // Also refresh the on-chain Pyth adapter (the SRM's margin spot feed) each
+  // cycle so it never goes stale — the daemon keeps BOTH the signed feeds and
+  // the Pyth adapter fresh from one process. Default-on whenever the deployment
+  // has a Pyth adapter; disable with PYTH_PUSH=false or --no-pyth.
+  const pythDisabled =
+    args.bools.has("no-pyth") || (process.env.PYTH_PUSH ?? "").toLowerCase() === "false";
+  let pythAddresses: PythAddresses | null = null;
+  if (!pythDisabled) {
+    try {
+      pythAddresses = pythAddressesFromDeployments(chainId);
+    } catch {
+      pythAddresses = null; // no adapter on this chain — signed feeds only
+    }
+  }
+  const walletClient = pythAddresses ? makeWalletClient(signer, { chainId }) : null;
+
   console.log(
     `[oracle-feeds] daemon chain=${chainId} signer=${signer.address} ` +
       `source=${useDeribit ? "deribit" : source!.name} interval=${intervalSec}s ` +
-      `expiries=[${expiries.map((e) => e.expiry).join(",")}]`,
+      `pyth=${pythAddresses ? "on" : "off"} expiries=[${expiries.map((e) => e.expiry).join(",")}]`,
   );
 
   // eslint-disable-next-line no-constant-condition
@@ -208,6 +225,19 @@ async function cmdDaemon(args: Args): Promise<void> {
       }
     } catch (err) {
       console.error(`[oracle-feeds] post failed: ${(err as Error).message}`);
+    }
+    if (pythAddresses && walletClient) {
+      try {
+        await pushPythUpdate({
+          publicClient,
+          walletClient,
+          account: signer,
+          addresses: pythAddresses,
+          hermesUrl: one(args, "hermes"),
+        });
+      } catch (err) {
+        console.error(`[oracle-feeds] pyth push failed: ${(err as Error).message}`);
+      }
     }
     await new Promise((r) => setTimeout(r, intervalSec * 1000));
   }
