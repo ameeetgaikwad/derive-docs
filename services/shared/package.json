@@ -21,12 +21,13 @@
   },
   "scripts": {
     "extract-abis": "node scripts/extract-abis.mjs",
-    "build": "node scripts/extract-abis.mjs && tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json",
     "dev": "tsc -p tsconfig.json --watch",
     "test": "vitest run",
     "smoke": "pnpm build && vitest run"
   },
   "dependencies": {
+    "@aws-sdk/client-kms": "^3.1078.0",
     "viem": "^2.21.0"
   },
   "devDependencies": {

@@ -26,6 +26,8 @@ export interface MakerBotConfig {
   rate: number;
   /** Signed quote validity in seconds. Default 300. */
   quoteTtlSec: number;
+  /** Price vol off the live Deribit surface (DERIBIT_VOL=true), falling back to on-chain. */
+  deribitVol: boolean;
 }
 
 function num(name: string, fallback: number): number {
@@ -63,6 +65,7 @@ export function loadConfig(): MakerBotConfig {
     ivOverride: optNum("IV"),
     rate: num("RATE", 0),
     quoteTtlSec: num("QUOTE_TTL_SEC", 300),
+    deribitVol: (process.env.DERIBIT_VOL ?? "").toLowerCase() === "true",
   };
 }
 

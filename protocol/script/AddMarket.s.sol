@@ -77,6 +77,8 @@ contract AddMarket is MarketDeployerBase {
     vm.serializeAddress(k, "forwardFeed", address(m.forwardFeed));
     vm.serializeAddress(k, "volFeed", address(m.volFeed));
     vm.serializeAddress(k, "rateFeed", address(m.rateFeed));
+    vm.serializeAddress(k, "settlementFeed", address(m.settlementFeed));
+    vm.serializeAddress(k, "pythSpotFeed", address(m.pythSpotFeed));
     vm.serializeAddress(k, "optionAsset", address(m.option));
     vm.serializeBytes32(k, "pythPriceId", cfg.pythPriceId);
     vm.serializeAddress(k, "chainlinkAggregator", cfg.chainlinkAggregator);

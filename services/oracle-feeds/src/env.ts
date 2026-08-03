@@ -1,5 +1,5 @@
-import { privateKeyToAccount, type PrivateKeyAccount } from "viem/accounts";
-import type { Hex } from "viem";
+import type { Hex, LocalAccount } from "viem";
+import { resolveAccount } from "@hedge/shared";
 
 /**
  * Anvil's well-known account #0 key. The anvil deploy script whitelists
@@ -10,17 +10,21 @@ import type { Hex } from "viem";
 const ANVIL_KEY_0: Hex = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
 
 /**
- * Feed signer key from FEED_SIGNER_KEY. On anvil (31337) we fall back to the
- * anvil #0 key; on any other chain the env var is mandatory.
+ * Feed signer account. Resolution order (via shared resolveAccount):
+ * 1. FEED_SIGNER_KMS_KEY_ID  -> AWS KMS-backed account (key never leaves the HSM)
+ * 2. FEED_SIGNER_KEY         -> raw private key
+ * 3. anvil #0 key            -> chainId 31337 only
  */
-export function getFeedSignerAccount(chainId: number): PrivateKeyAccount {
+export async function getFeedSignerAccount(chainId: number): Promise<LocalAccount> {
   const raw = process.env.FEED_SIGNER_KEY;
-  if (raw) {
-    const key = (raw.startsWith("0x") ? raw : `0x${raw}`) as Hex;
-    return privateKeyToAccount(key);
+  const key = raw ? ((raw.startsWith("0x") ? raw : `0x${raw}`) as Hex) : undefined;
+  if (!key && !process.env.FEED_SIGNER_KMS_KEY_ID && chainId !== 31337) {
+    throw new Error(`FEED_SIGNER_KMS_KEY_ID or FEED_SIGNER_KEY is required for chainId ${chainId}`);
   }
-  if (chainId === 31337) return privateKeyToAccount(ANVIL_KEY_0);
-  throw new Error(`FEED_SIGNER_KEY env var is required for chainId ${chainId}`);
+  return resolveAccount({
+    role: "FEED_SIGNER",
+    privateKey: key ?? (chainId === 31337 ? ANVIL_KEY_0 : undefined),
+  });
 }
 
 /** Signature deadline horizon in seconds (FEED_DEADLINE_SEC, default 1h). */

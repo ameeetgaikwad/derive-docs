@@ -1,5 +1,7 @@
 packages:
-  - "."
+  - apps/*
+  - services/*
+  - docs-site
 
 allowBuilds:
   bufferutil: true

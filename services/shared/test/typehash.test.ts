@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { keccak256, toHex } from "viem";
 import { describe, expect, it } from "vitest";
@@ -10,6 +10,23 @@ import {
 } from "../src/constants.js";
 
 const repoRoot = resolve(__dirname, "..", "..", "..");
+const vendorArtifacts = [
+  "protocol/lib/v2-matching/out/ActionVerifier.sol/ActionVerifier.json",
+  "protocol/lib/v2-matching/out/Matching.sol/Matching.json",
+  "protocol/lib/v2-core/out/LyraSpotFeed.sol/LyraSpotFeed.json",
+  "protocol/lib/v2-core/out/LyraForwardFeed.sol/LyraForwardFeed.json",
+  "protocol/lib/v2-core/out/LyraVolFeed.sol/LyraVolFeed.json",
+  "protocol/lib/v2-core/out/LyraRateFeed.sol/LyraRateFeed.json",
+  "protocol/lib/v2-matching/src/ActionVerifier.sol",
+  "protocol/lib/v2-core/src/feeds/BaseLyraFeed.sol",
+];
+const hasBuiltVendor = vendorArtifacts.every((file) => existsSync(join(repoRoot, file)));
+const requireBuiltVendor = process.env.REQUIRE_BUILT_VENDOR === "1";
+
+if (requireBuiltVendor && !hasBuiltVendor) {
+  const missing = vendorArtifacts.filter((file) => !existsSync(join(repoRoot, file)));
+  throw new Error(`required vendored protocol sources/artifacts are missing:\n${missing.join("\n")}`);
+}
 
 function deployedBytecode(artifactPath: string): string {
   const artifact = JSON.parse(readFileSync(join(repoRoot, artifactPath), "utf8"));
@@ -18,13 +35,19 @@ function deployedBytecode(artifactPath: string): string {
   return obj.toLowerCase();
 }
 
-describe("EIP-712 typehashes vs vendored compiled bytecode", () => {
+describe("EIP-712 typehash constants", () => {
   it("recomputes ACTION_TYPEHASH from the type string", () => {
     expect(keccak256(toHex(ACTION_TYPE_STRING))).toBe(ACTION_TYPEHASH);
-    // Known-good value for the vendored Action struct
     expect(ACTION_TYPEHASH).toMatch(/^0x[0-9a-f]{64}$/);
   });
 
+  it("recomputes FEED_DATA_TYPEHASH from the type string", () => {
+    expect(keccak256(toHex(FEED_DATA_TYPE_STRING))).toBe(FEED_DATA_TYPEHASH);
+    expect(FEED_DATA_TYPEHASH).toMatch(/^0x[0-9a-f]{64}$/);
+  });
+});
+
+describe.skipIf(!hasBuiltVendor)("EIP-712 typehashes vs vendored protocol", () => {
   it("ACTION_TYPEHASH constant is embedded in ActionVerifier + Matching bytecode", () => {
     const needle = ACTION_TYPEHASH.slice(2).toLowerCase();
     expect(
@@ -36,7 +59,6 @@ describe("EIP-712 typehashes vs vendored compiled bytecode", () => {
   });
 
   it("FEED_DATA_TYPEHASH constant is embedded in every Lyra feed's bytecode", () => {
-    expect(keccak256(toHex(FEED_DATA_TYPE_STRING))).toBe(FEED_DATA_TYPEHASH);
     const needle = FEED_DATA_TYPEHASH.slice(2).toLowerCase();
     for (const feed of ["LyraSpotFeed", "LyraForwardFeed", "LyraVolFeed", "LyraRateFeed"]) {
       expect(

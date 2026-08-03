@@ -72,10 +72,11 @@ breaker (`protocol/src/PythSpotFeed.sol`, GPL-3.0-or-later):
   margin penalty. All params owner-settable (`setPythStaleness`,
   `setChainlinkStaleness`, `setDeviationThreshold`, `setChainlinkAggregator` —
   `address(0)` disables the breaker).
-- **Signed feeds unchanged**: forward, vol, rate and the USDT stable feed remain the
-  Lyra signed feeds (posted by `oracle-feeds`). `LyraForwardFeed` still wraps the
-  original `LyraSpotFeed`, so **settlement is still the signed print** — anchoring
-  settlement to Pyth/Chainlink is a follow-up.
+- **Signed feeds for margining only**: forward, vol, rate and the USDT stable feed
+  remain the Lyra signed feeds (posted by `oracle-feeds`) and still drive SRM
+  margin/mark-to-market. Since 2026-07-01 they no longer decide settlement — the
+  OptionAsset settles against the **AnchoredSettlementFeed** (see
+  [Settlement anchoring](#settlement-anchoring-2026-07-01) below).
 
 Deploy/wire txs:
 
@@ -108,6 +109,70 @@ cast send 0x4d55A929e184fc366664C11526E3B54aB70340B5 \
 
 New `deployments/97.json` keys: `pyth`, `btcPythPriceId`, `btcPythSpotFeed`,
 `btcChainlinkAggregator`.
+
+## Settlement anchoring (2026-07-01)
+
+The BTC OptionAsset's **settlement feed** — the price that moves money at expiry — is no
+longer the signed LyraForwardFeed TWAP. It is now
+`protocol/src/AnchoredSettlementFeed.sol` (GPL-3.0-or-later), an `ISettlementFeed` that
+anchors settlement to external oracles. The swap was possible live because
+`OptionAsset.setSettlementFeed(address)` is an owner setter (not immutable); the SRM's
+forward-feed wiring for margining is untouched (`setOraclesForMarket` is independent of
+the OptionAsset's settlement feed).
+
+| Contract | Address |
+|---|---|
+| AnchoredSettlementFeed (BTC, live settlement feed) | `0xC496c4a67cBf83591ec24821D3afd1B94718055d` |
+
+How a settlement price gets fixed (once, immutably) per expiry:
+
+- **Permissionless oracle fix** — `fixSettlementPrice(expiry)`, callable by anyone after
+  expiry: binary-searches the Chainlink BTC/USD aggregator's current phase for the first
+  complete round with `updatedAt >= expiry` (must be within `maxRoundDelay`, default 2h —
+  the testnet aggregator ticks irregularly), scales 8→18 decimals, and — when fixed
+  within `pythCheckWindow` (30 min) of expiry with a fresh (≤60s) Pyth price available —
+  requires Chainlink and Pyth to agree within `deviationThreshold` (1%), reverting on
+  disagreement.
+- **Owner override (escape hatch)** — only for when oracle data is unusable (round gap >
+  `maxRoundDelay`, expiry predates the aggregator phase): `proposeOverride` starts a
+  6h-minimum timelock; `executeOverride` applies it only if the oracle path has *still*
+  not produced a fix — an oracle fix during the timelock always wins, and a fixed price
+  can never be overwritten.
+
+**Trust model**: the settlement price is decided by Chainlink round history (Pyth second
+opinion near expiry); the 1-of-1 feed-signer key cannot influence it. The owner can only
+set a price by proposing it publicly and waiting out the timelock while anyone can
+preempt with the oracle fix. Residual owner powers: bounded parameter setters, and —
+outside this contract — `OptionAsset.setSettlementFeed` itself, which is why OptionAsset
+ownership must eventually sit behind a multisig/timelock.
+
+Deploy/wire/proof txs (all legacy 0.2 gwei):
+
+| Step | Tx |
+|---|---|
+| Deploy AnchoredSettlementFeed `0xC496...055d` | [`0x0d50341a...`](https://testnet.bscscan.com/tx/0x0d50341a3d3f8e0e5d990aaa3320c4d59cb65756df534d946d5ae8965fda2be8) |
+| `OptionAsset.setSettlementFeed(0xC496...055d)` | [`0x505ff2e4...`](https://testnet.bscscan.com/tx/0x505ff2e4f260671eac764e2ac9ca7a202006b708d7bb9e34d8df87537946d63e) |
+| Permissionless `fixSettlementPrice(1781856000)` (sent from the feed-signer EOA to prove permissionlessness) | [`0xeb83acd2...`](https://testnet.bscscan.com/tx/0xeb83acd2454a589b12e33bbe7d59d041c9e34ddb5220e69c251becec700dffe5) |
+| `oracle-feeds settle` smoke re-run (anchored path, subaccount 5) | [`0xf6c7b7e0...`](https://testnet.bscscan.com/tx/0xf6c7b7e0982273674ac1d32fd0c8ad71bca12b89e748f6af6aadbc2116e21448) |
+
+Proof read-back: `getSettlementPrice(1781856000)` = `(true, 62,317.115e18)` — Chainlink
+round `36893488147419160089` (phase 2, agg round 56857, updated 4,304s after expiry;
+first complete round at-or-after the expiry). For comparison, the legacy signed
+settlement of that expiry used 62,557.95 (CoinGecko print); both are OTM vs the 69,000
+strike, and `OptionAsset.calcSettlementValue` on the settled subId reads payout 0,
+`priceSettled = true` through the new feed.
+
+Deploy scripts (`MarketDeployerBase._deployAndRegisterMarket`, used by DeployAll +
+AddMarket) now deploy an AnchoredSettlementFeed per market (config: Chainlink
+aggregator + Pyth price id) and construct the OptionAsset against it whenever the
+market's aggregator has code on the target chain; on plain anvil settlement falls back
+to the signed LyraForwardFeed so local e2e keeps working. New deployments key:
+`btcSettlementFeed` (per-market `settlementFeed` in AddMarket sidecars).
+
+Settlement runner: `oracle-feeds settle --expiry <unix> --subaccounts 5,6` now prefers
+the anchored path (permissionless fix + `settleOptions`; `--price` becomes a sanity
+log). `--signed` forces the legacy signed forward-feed path (requires `--price`) for
+deployments whose OptionAsset still settles against LyraForwardFeed.
 
 ## Multi-market deploy scripts (2026-06-12)
 
@@ -187,3 +252,23 @@ Notes:
 - Total cost: ~0.0405 tBNB from the deployer (0.04 of it the maker/taker gas funding).
 - **Settlement will be run at expiry** (2026-06-19 08:00 UTC):
   `oracle-feeds settle --expiry 1781856000 --price <BTC fix> --subaccounts 5,6`.
+
+## Live settlement (2026-07-01)
+
+The smoke-trade option **BTC-20260619-69000-C** expired 2026-06-19 08:00 UTC and was
+settled on 2026-07-01 with the real BTC fix from expiry (CoinGecko, 62,557.95 — OTM
+vs the 69,000 strike):
+
+| Step | Tx |
+|---|---|
+| Settlement spot posted (62,557.95) | `0x7a0e03b9cc8bb8a68b0ec4a001b2454499390055eef8a1e7c3c2efadcc2ce4d3` |
+| Settlement data posted (expiry 1781856000) | `0xccebc489a64cb935b3b03f522ed731c82b83feaf014b8129549101fc2ea6949a` |
+| Settle subaccount 5 (maker) | `0x90bf4dd6f61efeae7f4f7cb7f4ba0128fe79a03f52a86b40341b7c3287cd3103` |
+| Settle subaccount 6 (taker) | `0x57e7dc6d41db82c5da06e661ef4efbbafe1e3f25d90f4faa7735872fd1edc3b2` |
+
+Outcome (asserted on-chain): option balances 0/0; taker kept **1 BTCB** (OTM — no
+delivery) and the premium; cash carried ~20 days of borrow interest on the negative
+balances from the legacy 10%-fee era (maker 143,347.93, taker −5,907.91). With the
+fixed 0.1% OI fee, a comparable trade leaves the taker cash-positive.
+Every lifecycle stage — deposit, RFQ, execution, expiry, settlement — has now run
+on the live chain.

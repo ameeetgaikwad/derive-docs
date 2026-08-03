@@ -1,0 +1,126 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - "prod/**"
+
+# Cancel superseded runs on the same ref to save minutes.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # JS / TS monorepo: lint, test, build, typecheck via Turborepo.
+  # Turbo only runs a task for packages that define it, so services that lack a
+  # `lint`/`typecheck` script are simply skipped (no failure).
+  # ---------------------------------------------------------------------------
+  js:
+    name: js (lint / test / build / typecheck)
+    runs-on: ubuntu-latest
+    env:
+      # ESLint: fail on errors, tolerate warnings. The web app has one known
+      # <img> warning (@next/next/no-img-element) that must NOT fail CI.
+      CI: "true"
+      # --- Turbo Remote Cache (optional) --------------------------------------
+      # Uncomment and set the repo secrets/vars to enable a shared remote cache.
+      # TURBO_TOKEN: ${{ secrets.TURBO_TOKEN }}
+      # TURBO_TEAM: ${{ vars.TURBO_TEAM }}
+      # TURBO_REMOTE_ONLY: "true"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # pnpm before setup-node so setup-node can wire up the pnpm cache.
+      # Version is read from the root package.json "packageManager" field.
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Single turbo invocation; each task fans out across the workspace graph.
+      # ESLint's default behaviour is to exit non-zero only on errors, so the
+      # known <img> warning does not fail the build.
+      - name: Lint, test, build, typecheck
+        run: pnpm turbo lint test build typecheck
+
+  # ---------------------------------------------------------------------------
+  # Solidity contracts (Foundry). protocol/lib is gitignored and the vendored
+  # Derive v2 repos are NOT committed as submodules, so we restore them at their
+  # license-pinned commits via protocol/setup-vendor.sh before building.
+  # ---------------------------------------------------------------------------
+  contracts:
+    name: contracts (forge build / test)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # protocol/lib is gitignored (see .gitignore) and there are no
+          # committed submodules, so submodule checkout is a no-op here.
+          # We restore vendored sources with setup-vendor.sh below.
+          submodules: recursive
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install shared-library dependencies
+        run: pnpm install --frozen-lockfile --filter @hedge/shared...
+
+      # Restores lib/v2-core and lib/v2-matching at the pinned commits and
+      # inits their nested submodules (forge-std, openzeppelin, lyra-utils, ...).
+      - name: Restore vendored protocol dependencies
+        working-directory: protocol
+        run: ./setup-vendor.sh
+
+      - name: Build vendored protocol dependencies
+        working-directory: protocol
+        run: |
+          (cd lib/v2-core && forge build)
+          (cd lib/v2-matching && forge build)
+
+      - name: Verify generated TypeScript ABIs are current
+        run: |
+          pnpm --filter @hedge/shared extract-abis
+          git diff --exit-code -- services/shared/src/abis
+
+      - name: forge fmt
+        working-directory: protocol
+        run: forge fmt --check src script test
+
+      - name: forge build
+        working-directory: protocol
+        run: forge build
+
+      - name: forge test
+        working-directory: protocol
+        run: forge test -vvv
+
+      - name: Verify TypeScript typehashes against vendored protocol
+        env:
+          REQUIRE_BUILT_VENDOR: "1"
+        run: pnpm --filter @hedge/shared test typehash.test.ts

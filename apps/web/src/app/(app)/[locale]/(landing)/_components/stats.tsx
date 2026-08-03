@@ -1,0 +1,84 @@
+import { Fragment } from 'react'
+import Link from 'next/link'
+import { Button } from '@/components/ui/button'
+import { Text } from '@/components/ui/text'
+import { cn } from '@/lib/utils'
+
+const steps = [
+  {
+    number: '01',
+    numberClassName: 'text-orange-500',
+    title: 'Choose your BTC amount.',
+    description:
+      'Commit only the BTCB slice you would be comfortable selling at a higher strike. The rest of your wallet stays outside the position.',
+  },
+  {
+    number: '02',
+    numberClassName: 'text-blue-500',
+    title: 'Set strike and expiry.',
+    description:
+      'Pick a covered-call strike and weekly expiry. Hedge shows the indicative premium, effective exit price, and committed collateral.',
+  },
+  {
+    number: '03',
+    numberClassName: 'text-green-500',
+    title: 'Review and request quotes.',
+    description:
+      'Review both settlement outcomes, then open the RFQ auction and sign the winning order from your wallet.',
+  },
+] as const
+
+export function Stats({ t }: { t: (value: string) => string }) {
+  return (
+    <section id="learn-more" className="mt-[100px] scroll-mt-24">
+      <div className="flex flex-col gap-6 sm:gap-8 lg:min-h-[120px] lg:flex-row lg:items-end lg:justify-between">
+        <div>
+          <Text as="h2" variant="h2" className="max-w-[690px] text-zinc-950">
+            {t('Choose a BTC sell target. See the premium.')}
+          </Text>
+          <Text variant="body-large" className="mt-5 max-w-[560px] text-zinc-500">
+            {t(
+              'Hedge keeps the covered-call flow simple while preserving the real terms: BTCB collateral, strike, expiry, premium, and wallet-signed RFQ execution.',
+            )}
+          </Text>
+        </div>
+        <Button
+          asChild
+          size="sm"
+          className="w-fit rounded-[5px] tracking-[0.05em] uppercase"
+        >
+          <Link href="#composer">{t('Build Target')}</Link>
+        </Button>
+      </div>
+
+      <div className="mt-16 flex flex-col gap-12 lg:mt-[90px] lg:flex-row lg:items-stretch lg:gap-12 xl:gap-[75px]">
+        {steps.map((step, index) => (
+          <Fragment key={step.title}>
+            {index > 0 ? (
+              <div
+                aria-hidden
+                className="hidden w-[0.5px] shrink-0 self-stretch bg-zinc-200 lg:block"
+              />
+            ) : null}
+            <article className="lg:flex lg:min-w-0 lg:flex-1 lg:flex-col">
+              <p
+                className={cn(
+                  'font-mono text-[64px] leading-none font-medium',
+                  step.numberClassName,
+                )}
+              >
+                {step.number}
+              </p>
+              <Text as="h3" variant="h5" className="mt-10 text-zinc-950">
+                {t(step.title)}
+              </Text>
+              <Text variant="body-default" className="mt-[15px] text-zinc-500">
+                {t(step.description)}
+              </Text>
+            </article>
+          </Fragment>
+        ))}
+      </div>
+    </section>
+  )
+}

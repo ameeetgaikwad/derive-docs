@@ -68,6 +68,9 @@ import {MarketDeployerBase} from "./MarketDeployerBase.sol";
  *   TRADE_EXECUTOR   address allowed to call Matching.verifyAndMatch (default: deployer)
  * Env (required when chainId != 31337, e.g. BSC testnet 97):
  *   BTCB_ADDRESS, USDT_ADDRESS   real 18-decimal token addresses (mocks are anvil-only)
+ * BSC mainnet (56): BTCB/USDT/Pyth/Chainlink default to the verified constants in
+ *   MarketDeployerBase (see protocol/MAINNET.md) — env vars above still override, so
+ *   the mainnet deploy is a single command with no token env required.
  */
 contract DeployAll is MarketDeployerBase {
   // ---------------------------------------------------------------------------
@@ -114,6 +117,8 @@ contract DeployAll is MarketDeployerBase {
   LyraForwardFeed internal btcForwardFeed;
   LyraVolFeed internal btcVolFeed;
   LyraRateFeed internal btcRateFeed;
+  address internal btcSettlementFeed; // AnchoredSettlementFeed (0 on plain anvil — signed fallback)
+  address internal btcPythSpotFeed; // PythSpotFeed, the live SRM spot feed (0 on plain anvil)
   OptionAsset internal btcOption;
   WrappedERC20Asset internal btcBase;
   uint internal btcMarketId;
@@ -162,7 +167,10 @@ contract DeployAll is MarketDeployerBase {
       mockUsdt.mint(deployer, 100_000_000e18);
       usdt = address(mockUsdt);
     } else {
-      usdt = vm.envAddress("USDT_ADDRESS");
+      // BSC mainnet: verified Binance-Peg BSC-USD constant as default, env override kept
+      usdt = block.chainid == 56
+        ? vm.envOr("USDT_ADDRESS", BSC_MAINNET_USDT)
+        : vm.envAddress("USDT_ADDRESS");
       require(IERC20Metadata(usdt).decimals() == 18, "USDT must be 18 decimals");
     }
   }
@@ -240,6 +248,8 @@ contract DeployAll is MarketDeployerBase {
     btcForwardFeed = m.forwardFeed;
     btcVolFeed = m.volFeed;
     btcRateFeed = m.rateFeed;
+    btcSettlementFeed = address(m.settlementFeed);
+    btcPythSpotFeed = address(m.pythSpotFeed);
     btcOption = m.option;
     btcBase = m.base;
     btcMarketId = m.marketId;
@@ -303,6 +313,13 @@ contract DeployAll is MarketDeployerBase {
     vm.serializeAddress(k, "btcForwardFeed", address(btcForwardFeed));
     vm.serializeAddress(k, "btcVolFeed", address(btcVolFeed));
     vm.serializeAddress(k, "btcRateFeed", address(btcRateFeed));
+    vm.serializeAddress(k, "btcSettlementFeed", btcSettlementFeed);
+    // oracle stack (same keys the testnet 97.json carries; consumed by oracle-feeds pyth-push)
+    MarketConfig memory btcCfg = getMarketConfig(0);
+    vm.serializeAddress(k, "pyth", _pythAddress());
+    vm.serializeBytes32(k, "btcPythPriceId", btcCfg.pythPriceId);
+    vm.serializeAddress(k, "btcPythSpotFeed", btcPythSpotFeed);
+    vm.serializeAddress(k, "btcChainlinkAggregator", btcCfg.chainlinkAggregator);
     vm.serializeAddress(k, "btcOptionAsset", address(btcOption));
     vm.serializeAddress(k, "btcBaseAsset", address(btcBase));
     vm.serializeUint(k, "btcMarketId", btcMarketId);

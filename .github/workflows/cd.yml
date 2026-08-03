@@ -1,0 +1,143 @@
+name: CD
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      services:
+        description: "Comma-separated services to publish (rfq-engine,oracle-feeds,maker-bot)"
+        required: false
+        default: "rfq-engine,oracle-feeds"
+
+concurrency:
+  group: cd-${{ github.ref }}
+  cancel-in-progress: false
+
+# OIDC: no long-lived AWS keys. GitHub mints a short-lived token that the AWS
+# IAM role (vars.AWS_DEPLOY_ROLE_ARN) trusts and exchanges for temp creds.
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Preflight: decide whether to run at all, and which services to build.
+  # cd.yml is a no-op if AWS_DEPLOY_ROLE_ARN is unset, so it never fails before
+  # the AWS infra (role/ECR/ECS) exists.
+  # ---------------------------------------------------------------------------
+  setup:
+    name: setup (guard + matrix)
+    runs-on: ubuntu-latest
+    outputs:
+      enabled: ${{ steps.guard.outputs.enabled }}
+      matrix: ${{ steps.matrix.outputs.matrix }}
+    steps:
+      - name: Guard on AWS_DEPLOY_ROLE_ARN
+        id: guard
+        env:
+          ROLE_ARN: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+        run: |
+          if [ -z "$ROLE_ARN" ]; then
+            echo "::notice title=CD skipped::vars.AWS_DEPLOY_ROLE_ARN is not set — skipping deploy (infra not provisioned yet)."
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "AWS_DEPLOY_ROLE_ARN is set — deploy enabled."
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build service matrix
+        id: matrix
+        env:
+          # Push to main deploys both ECS services; workflow_dispatch may also
+          # publish maker-bot, whose runtime is operator-managed outside ECS.
+          REQUESTED: ${{ github.event.inputs.services }}
+        run: |
+          if [ -z "$REQUESTED" ]; then
+            REQUESTED="rfq-engine,oracle-feeds"
+          fi
+          # Turn "a,b, c" into a validated JSON array ["a","b","c"].
+          JSON=$(printf '%s' "$REQUESTED" \
+            | tr ',' '\n' \
+            | sed 's/[[:space:]]//g' \
+            | grep -v '^$' \
+            | python3 -c 'import json,sys; xs=[l.strip() for l in sys.stdin if l.strip()]; allowed={"rfq-engine","oracle-feeds","maker-bot"}; bad=[x for x in xs if x not in allowed]; bad and sys.exit(f"unsupported service(s): {chr(44).join(bad)}"); print(json.dumps(xs))')
+          echo "matrix=$JSON" >> "$GITHUB_OUTPUT"
+          echo "Deploy targets: $JSON"
+
+  # ---------------------------------------------------------------------------
+  # Build + push each service image to ECR. ECS-managed services are then
+  # rolled; maker-bot is image-publish-only for its external operator runtime.
+  # Context is the repo root; Dockerfile lives at services/<svc>/Dockerfile.
+  # We push both :<sha> (immutable, auditable) and :latest (moving tag the ECS
+  # task definition references) so `--force-new-deployment` picks up the image.
+  # ---------------------------------------------------------------------------
+  deploy:
+    name: deploy ${{ matrix.service }}
+    needs: setup
+    if: needs.setup.outputs.enabled == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service: ${{ fromJSON(needs.setup.outputs.matrix) }}
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      AWS_ACCOUNT_ID: ${{ vars.AWS_ACCOUNT_ID }}
+      ECS_CLUSTER: hedge
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push image
+        env:
+          REGISTRY: ${{ steps.ecr.outputs.registry }}
+          SERVICE: ${{ matrix.service }}
+          SHA: ${{ github.sha }}
+        run: |
+          IMAGE="$REGISTRY/hedge/$SERVICE"
+          echo "Building $IMAGE:$SHA (and :latest) from services/$SERVICE/Dockerfile"
+          docker build \
+            -f "services/$SERVICE/Dockerfile" \
+            -t "$IMAGE:$SHA" \
+            -t "$IMAGE:latest" \
+            .
+          docker push "$IMAGE:$SHA"
+          docker push "$IMAGE:latest"
+
+      - name: Force new ECS deployment
+        if: matrix.service != 'maker-bot'
+        env:
+          SERVICE: ${{ matrix.service }}
+        run: |
+          echo "Forcing new deployment of ${ECS_CLUSTER}/hedge-${SERVICE}"
+          aws ecs update-service \
+            --cluster "$ECS_CLUSTER" \
+            --service "hedge-${SERVICE}" \
+            --force-new-deployment \
+            --no-cli-pager
+
+      - name: Wait for ECS service to stabilize
+        if: matrix.service != 'maker-bot'
+        env:
+          SERVICE: ${{ matrix.service }}
+        run: |
+          echo "Waiting for ${ECS_CLUSTER}/hedge-${SERVICE} to reach a steady state..."
+          aws ecs wait services-stable \
+            --cluster "$ECS_CLUSTER" \
+            --services "hedge-${SERVICE}"
+          echo "hedge-${SERVICE} is stable."

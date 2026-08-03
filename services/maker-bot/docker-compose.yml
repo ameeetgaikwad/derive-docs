@@ -1,0 +1,36 @@
+# Reference market-maker for Hedge. Fill in the env and run:
+#   docker compose -f services/maker-bot/docker-compose.yml up --build
+# (run from the repository root)
+#
+# One-time, create the maker subaccount + deposit USDT before quoting:
+#   docker compose -f services/maker-bot/docker-compose.yml run --rm maker-bot --setup
+services:
+  maker-bot:
+    build:
+      context: ../..
+      dockerfile: services/maker-bot/Dockerfile
+    image: hedge-maker-bot
+    restart: unless-stopped
+    environment:
+      # --- network ---
+      CHAIN_ID: "${CHAIN_ID:-97}"                     # 56 mainnet / 97 testnet
+      RPC_URL: "${RPC_URL:?set RPC_URL}"
+      # --- rfq-engine maker channel (use wss:// in production) ---
+      RFQ_ENGINE_WS: "${RFQ_ENGINE_WS:?set RFQ_ENGINE_WS}"
+      # --- maker identity (signs EIP-712 quotes) ---
+      PRIVATE_KEY: "${PRIVATE_KEY:?set PRIVATE_KEY}"
+      MAKER_SUBACCOUNT_ID: "${MAKER_SUBACCOUNT_ID:-}"
+      DEPOSIT_USDT: "${DEPOSIT_USDT:-100000}"          # used only by --setup
+      # --- pricing ---
+      MAKER_BID_RATIO: "${MAKER_BID_RATIO:-0.95}"      # buy calls at 95% of theo
+      MAKER_ASK_RATIO: "${MAKER_ASK_RATIO:-1.05}"
+      DERIBIT_VOL: "${DERIBIT_VOL:-true}"              # price vol off Deribit's live surface
+      MAKER_MAX_FEE: "${MAKER_MAX_FEE:-0}"
+      QUOTE_TTL_SEC: "${QUOTE_TTL_SEC:-300}"
+      # persist the discovered subaccount id across restarts
+      MAKER_STATE_FILE: "/data/maker-state.${CHAIN_ID:-97}.json"
+    volumes:
+      - maker-data:/data
+
+volumes:
+  maker-data:

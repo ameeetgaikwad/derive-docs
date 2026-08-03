@@ -6,7 +6,13 @@ import {
   toUnit,
 } from "@hedge/shared";
 import { getDeadlineSec, getFeedSignerAccount } from "./env.js";
-import { FeedPoster, feedAddressesFromDeployments, type SnapshotExpiryParams } from "./poster.js";
+import {
+  FeedPoster,
+  feedAddressesFromDeployments,
+  type SnapshotExpiryParams,
+  type SnapshotParams,
+} from "./poster.js";
+import { buildDeribitSnapshot } from "./deribitSnapshot.js";
 import { priceSourceFromEnv, StaticPriceSource, type PriceSource } from "./priceSource.js";
 import { SettlementRunner, settlementAddressesFromDeployments } from "./settlement.js";
 import { pushPythUpdate, pythAddressesFromDeployments, type PythAddresses } from "./pyth.js";
@@ -29,11 +35,15 @@ Usage:
       deployments JSON (keys: pyth, btcPythPriceId, btcPythSpotFeed); HERMES_URL env
       overrides the Hermes endpoint. The sender (FEED_SIGNER_KEY) only needs gas.
 
-  oracle-feeds settle --expiry <unix> --price <settlement price>
-                      --subaccounts 4,5 [--skip-feed]
-      Post forward-feed settlement data (timestamp == expiry) and call
-      StandardManager.settleOptions for each subaccount, then print balances.
-      Chain time must be >= expiry (e2e warps anvil first).
+  oracle-feeds settle --expiry <unix> --subaccounts 4,5
+                      [--price <settlement price>] [--signed] [--skip-feed]
+      Fix the settlement price and call StandardManager.settleOptions for each
+      subaccount, then print balances. Chain time must be >= expiry (e2e warps
+      anvil first). Default path: the PERMISSIONLESS
+      AnchoredSettlementFeed.fixSettlementPrice (Chainlink round data,
+      Pyth-cross-checked; --price is only a sanity log). --signed forces the
+      legacy signed forward-feed path (requires --price; use for deployments
+      whose OptionAsset still settles against LyraForwardFeed, e.g. anvil).
 
 Env: RPC_URL (default http://127.0.0.1:8545), CHAIN_ID (default 31337),
      FEED_SIGNER_KEY (default: anvil key #0 on 31337), FEED_DEADLINE_SEC,
@@ -69,9 +79,9 @@ function one(args: Args, name: string): string | undefined {
   return args.flags.get(name)?.at(-1);
 }
 
-function buildPoster() {
+async function buildPoster() {
   const chainId = getChainId();
-  const signer = getFeedSignerAccount(chainId);
+  const signer = await getFeedSignerAccount(chainId);
   const publicClient = makePublicClient({ chainId });
   const walletClient = makeWalletClient(signer, { chainId });
   const addresses = feedAddressesFromDeployments(chainId);
@@ -84,6 +94,25 @@ function buildPoster() {
     getDeadlineSec(),
   );
   return { chainId, signer, publicClient, walletClient, poster };
+}
+
+/**
+ * Next `count` weekly expiries: Fridays 08:00 UTC, strictly >1 day out.
+ * Mirrors apps/web board.ts so the daemon always posts for exactly the
+ * expiries the UI shows. Recomputed each daemon cycle, so never stale.
+ */
+function upcomingFridayExpiries(count: number, nowMs = Date.now()): bigint[] {
+  const out: bigint[] = [];
+  const d = new Date(nowMs);
+  const candidate = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 8, 0, 0));
+  const daysToFriday = (5 - candidate.getUTCDay() + 7) % 7;
+  candidate.setUTCDate(candidate.getUTCDate() + daysToFriday);
+  while (out.length < count) {
+    const epoch = Math.floor(candidate.getTime() / 1000);
+    if (epoch - nowMs / 1000 > 86400) out.push(BigInt(epoch));
+    candidate.setUTCDate(candidate.getUTCDate() + 7);
+  }
+  return out;
 }
 
 function expiriesFromArgs(args: Args): SnapshotExpiryParams[] {
@@ -106,36 +135,119 @@ async function resolveSpot(args: Args, source: () => PriceSource): Promise<bigin
 }
 
 async function cmdPost(args: Args): Promise<void> {
-  const { poster, publicClient, signer, chainId } = buildPoster();
+  const { poster, publicClient, signer, chainId } = await buildPoster();
   console.log(`[oracle-feeds] chain=${chainId} signer=${signer.address}`);
+  const conf = one(args, "conf") ? toUnit(one(args, "conf")!) : undefined;
+
+  if (one(args, "source") === "deribit") {
+    const snapshot = await buildDeribitSnapshotFromArgs(args, poster);
+    await poster.postSnapshot({ ...snapshot, confidence: conf });
+    return;
+  }
+
   const spot = await resolveSpot(args, () => priceSourceFromEnv(publicClient));
-  const conf = one(args, "conf");
   await poster.postSnapshot({
     spot,
-    confidence: conf ? toUnit(conf) : undefined,
+    confidence: conf,
     expiries: expiriesFromArgs(args),
   });
 }
 
+/** Fetch the Deribit surface and build a fitted-SVI snapshot for the requested expiries. */
+async function buildDeribitSnapshotFromArgs(
+  args: Args,
+  poster: Awaited<ReturnType<typeof buildPoster>>["poster"],
+): Promise<SnapshotParams> {
+  const explicit = (args.flags.get("expiry") ?? []).map((e) => BigInt(e));
+  // Default to the upcoming weekly expiries (matching the frontend board) when
+  // none are passed — so the deployed daemon needs no hardcoded/rolling expiries.
+  const count = Number(one(args, "expiry-count") ?? process.env.EXPIRY_COUNT ?? "4");
+  const expiries = explicit.length > 0 ? explicit : upcomingFridayExpiries(count);
+  const rate = one(args, "rate");
+  const tolerance = one(args, "expiry-tolerance");
+  const now = Number(await poster.chainNow());
+  const { snapshot, fitted, indexPrice } = await buildDeribitSnapshot({
+    expiries,
+    now,
+    rate: rate ? toUnit(rate) : undefined,
+    toleranceSec: tolerance ? Number(tolerance) : 0,
+  });
+  console.log(`[oracle-feeds] deribit index=${indexPrice}`);
+  for (const f of fitted) {
+    console.log(`[oracle-feeds] deribit expiry=${f.expiry} ${f.used ? "SVI" : "flat"}: ${f.note}`);
+  }
+  return snapshot;
+}
+
 async function cmdDaemon(args: Args): Promise<void> {
-  const { poster, publicClient, signer, chainId } = buildPoster();
-  const intervalSec = Number(one(args, "interval") ?? "15");
-  const source = one(args, "spot")
-    ? new StaticPriceSource(toUnit(one(args, "spot")!))
-    : priceSourceFromEnv(publicClient);
+  const { poster, publicClient, signer, chainId } = await buildPoster();
+  // Loop cadence = the Pyth-refresh cadence (must stay under the adapter's ~60s
+  // staleness). Signed feeds (forward/vol/rate) move slowly, so they post on a
+  // longer cadence — most loops are just one cheap Pyth tx. Keeps gas sane.
+  const intervalSec = Number(one(args, "interval") ?? process.env.INTERVAL_SEC ?? "45");
+  const feedIntervalSec = Number(one(args, "feed-interval") ?? process.env.FEED_INTERVAL_SEC ?? "300");
+  const useDeribit = one(args, "source") === "deribit";
+  // Only build a spot source for the non-Deribit path (Deribit brings its own index).
+  const source = useDeribit
+    ? null
+    : one(args, "spot")
+      ? new StaticPriceSource(toUnit(one(args, "spot")!))
+      : priceSourceFromEnv(publicClient);
   const expiries = expiriesFromArgs(args);
+
+  // Also refresh the on-chain Pyth adapter (the SRM's margin spot feed) each
+  // cycle so it never goes stale — the daemon keeps BOTH the signed feeds and
+  // the Pyth adapter fresh from one process. Default-on whenever the deployment
+  // has a Pyth adapter; disable with PYTH_PUSH=false or --no-pyth.
+  const pythDisabled =
+    args.bools.has("no-pyth") || (process.env.PYTH_PUSH ?? "").toLowerCase() === "false";
+  let pythAddresses: PythAddresses | null = null;
+  if (!pythDisabled) {
+    try {
+      pythAddresses = pythAddressesFromDeployments(chainId);
+    } catch {
+      pythAddresses = null; // no adapter on this chain — signed feeds only
+    }
+  }
+  const walletClient = pythAddresses ? makeWalletClient(signer, { chainId }) : null;
+
   console.log(
     `[oracle-feeds] daemon chain=${chainId} signer=${signer.address} ` +
-      `source=${source.name} interval=${intervalSec}s expiries=[${expiries.map((e) => e.expiry).join(",")}]`,
+      `source=${useDeribit ? "deribit" : source!.name} interval=${intervalSec}s ` +
+      `feedInterval=${feedIntervalSec}s pyth=${pythAddresses ? "on" : "off"} ` +
+      `expiries=[${expiries.map((e) => e.expiry).join(",")}]`,
   );
 
+  let lastFeedPost = 0;
   // eslint-disable-next-line no-constant-condition
   while (true) {
-    try {
-      const spot = await source.getSpotPrice();
-      await poster.postSnapshot({ spot, expiries });
-    } catch (err) {
-      console.error(`[oracle-feeds] post failed: ${(err as Error).message}`);
+    const nowMs = Date.now();
+    if (nowMs - lastFeedPost >= feedIntervalSec * 1000) {
+      try {
+        if (useDeribit) {
+          const snapshot = await buildDeribitSnapshotFromArgs(args, poster);
+          await poster.postSnapshot(snapshot);
+        } else {
+          const spot = await source!.getSpotPrice();
+          await poster.postSnapshot({ spot, expiries });
+        }
+        lastFeedPost = nowMs;
+      } catch (err) {
+        console.error(`[oracle-feeds] post failed: ${(err as Error).message}`);
+      }
+    }
+    if (pythAddresses && walletClient) {
+      try {
+        await pushPythUpdate({
+          publicClient,
+          walletClient,
+          account: signer,
+          addresses: pythAddresses,
+          hermesUrl: one(args, "hermes"),
+        });
+      } catch (err) {
+        console.error(`[oracle-feeds] pyth push failed: ${(err as Error).message}`);
+      }
     }
     await new Promise((r) => setTimeout(r, intervalSec * 1000));
   }
@@ -143,7 +255,7 @@ async function cmdDaemon(args: Args): Promise<void> {
 
 async function cmdPythPush(args: Args): Promise<void> {
   const chainId = getChainId();
-  const account = getFeedSignerAccount(chainId);
+  const account = await getFeedSignerAccount(chainId);
   const publicClient = makePublicClient({ chainId });
   const walletClient = makeWalletClient(account, { chainId });
 
@@ -178,10 +290,14 @@ async function cmdSettle(args: Args): Promise<void> {
   const expiry = one(args, "expiry");
   const price = one(args, "price");
   const subs = one(args, "subaccounts");
-  if (!expiry || !price || !subs) {
-    throw new Error("settle requires --expiry, --price and --subaccounts (comma-separated)");
+  const signed = args.bools.has("signed");
+  if (!expiry || !subs) {
+    throw new Error("settle requires --expiry and --subaccounts (comma-separated)");
   }
-  const { poster, publicClient, walletClient, signer, chainId } = buildPoster();
+  if (signed && !price) {
+    throw new Error("settle --signed requires --price (the signed path posts the price)");
+  }
+  const { poster, publicClient, walletClient, signer, chainId } = await buildPoster();
   const runner = new SettlementRunner(
     publicClient,
     walletClient,
@@ -191,8 +307,9 @@ async function cmdSettle(args: Args): Promise<void> {
   );
   await runner.run({
     expiry: BigInt(expiry),
-    price: toUnit(price),
+    price: price ? toUnit(price) : undefined,
     subaccounts: subs.split(",").map((s) => BigInt(s.trim())),
+    signed,
     skipFeed: args.bools.has("skip-feed"),
   });
 }
