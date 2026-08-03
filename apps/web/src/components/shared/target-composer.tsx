@@ -45,6 +45,11 @@ import {
 import { useBtcbBalance } from "@/hooks/protocol/useBtcb";
 import { usePositionMonitor } from "@/hooks/protocol/usePositionMonitor";
 import { useSellCall } from "@/hooks/protocol/useSellCall";
+import { useBitcoinPriceHistory } from "@/hooks/useBitcoinPriceHistory";
+import {
+  mergeHistoryWithSpot,
+  type BitcoinPriceHistoryPoint,
+} from "@/lib/market/bitcoin-history";
 import { explorerTxUrl } from "@/lib/protocol/deployments";
 import { toUnit } from "@/lib/protocol/units";
 import { cn } from "@/lib/utils";
@@ -99,11 +104,6 @@ const MODE_COPY: ModeCopy = {
 };
 
 const DEFAULT_AMOUNT = "0.05";
-
-type BitcoinPriceHistoryPoint = {
-  time: number;
-  value: number;
-};
 
 const STEP_LABEL: Record<Exclude<FlowStep, "select" | "done">, string> = {
   subaccount: "Creating target account",
@@ -955,9 +955,15 @@ function TargetOfferCard({
 }) {
   const copy = MODE_COPY;
   const DirectionIcon = TrendingUp;
-  const priceHistory: BitcoinPriceHistoryPoint[] = [
-    { time: 0, value: summary.spotPrice },
-  ];
+  const {
+    data: historicalPrices = [],
+    isLoading: isHistoryLoading,
+    isError: isHistoryError,
+  } = useBitcoinPriceHistory();
+  const priceHistory = useMemo(
+    () => mergeHistoryWithSpot(historicalPrices, summary.spotPrice),
+    [historicalPrices, summary.spotPrice],
+  );
 
   return (
     <section className="overflow-hidden rounded-lg border-[0.5px] border-zinc-200 bg-white shadow-[0_0_30px_0_rgba(0,0,0,0.05)]">
@@ -986,6 +992,8 @@ function TargetOfferCard({
           chartData={priceHistory}
           spotPrice={summary.spotPrice}
           strikePrice={summary.strike.strike}
+          isHistoryLoading={isHistoryLoading}
+          isHistoryError={isHistoryError}
         />
 
         <div className="mt-5 grid gap-x-12 gap-y-7 border-y-[0.5px] border-zinc-200 py-6 sm:grid-cols-2 lg:grid-cols-3">
@@ -1103,10 +1111,14 @@ function PriceSummaryChart({
   chartData,
   spotPrice,
   strikePrice,
+  isHistoryLoading,
+  isHistoryError,
 }: {
   chartData: BitcoinPriceHistoryPoint[];
   spotPrice: number;
   strikePrice: number;
+  isHistoryLoading: boolean;
+  isHistoryError: boolean;
 }) {
   const chartRef = useRef<HTMLDivElement | null>(null);
   const [chartWidth, setChartWidth] = useState(0);
@@ -1230,6 +1242,13 @@ function PriceSummaryChart({
     };
   }, [activeIndex, chartWidth, toPoint, validPoints]);
 
+  const historyLabel =
+    validPoints.length >= 2
+      ? `30-day BTC price history from ${formatUsd(validPoints[0].value)} on ${formatChartTime(validPoints[0].time)} to ${formatUsd(validPoints.at(-1)?.value ?? spotPrice)} on ${formatChartTime(validPoints.at(-1)?.time ?? 0)}; range ${formatUsd(Math.min(...values))} to ${formatUsd(Math.max(...values))}; strike ${formatUsd(strikePrice)}`
+      : isHistoryError
+        ? "30-day BTC price history is temporarily unavailable"
+        : "30-day BTC price history is loading";
+
   const handlePointerMove = useCallback(
     (event: ReactPointerEvent<HTMLDivElement>) => {
       if (validPoints.length < 2 || chartWidth <= 0) return;
@@ -1250,7 +1269,7 @@ function PriceSummaryChart({
       <div className="flex items-start justify-between gap-4">
         <div>
           <Text variant="terminal-small" className="text-zinc-500">
-            BTC
+            BTC · 30D
           </Text>
           <Text variant="h5" className="mt-1 text-zinc-950">
             {formatUsd(spotPrice)}
@@ -1268,12 +1287,25 @@ function PriceSummaryChart({
 
       <div
         ref={chartRef}
+        role={validPoints.length >= 2 ? "img" : "status"}
+        aria-live={validPoints.length >= 2 ? undefined : "polite"}
+        aria-label={historyLabel}
+        data-testid="btc-price-history-chart"
+        data-history-points={validPoints.length}
         className="relative mt-2 touch-none"
         style={{ height: chartHeight }}
         onPointerMove={handlePointerMove}
         onPointerLeave={() => setActiveIndex(null)}
       >
-        {path && chartWidth > 0 ? (
+        {validPoints.length < 2 && (isHistoryLoading || isHistoryError) ? (
+          <div className="flex h-full items-center justify-center">
+            <Text variant="body-small" className="text-zinc-500">
+              {isHistoryError
+                ? "30-day BTC history unavailable"
+                : "Loading 30-day BTC history"}
+            </Text>
+          </div>
+        ) : path && chartWidth > 0 ? (
           <svg
             aria-hidden
             width={chartWidth}
