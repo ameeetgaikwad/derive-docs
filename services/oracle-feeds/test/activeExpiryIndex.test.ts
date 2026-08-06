@@ -64,10 +64,20 @@ describe("active expiry index", () => {
       { expiry: EXPIRY, subaccounts: [4n, 5n], subIds: [SUB_ID] },
     ]);
 
-    // A restart resumes from the durable checkpoint. Settlement then emits a
-    // zero postBalance for each holder, which is the only removal condition.
-    chain.head = 22n;
+    // Settlement is account-by-account. If the long settles first, protocol OI
+    // becomes zero even though the short remains. The balance index must retain
+    // that short so the settlement worker retries it rather than using OI as a
+    // completion signal.
+    chain.head = 21n;
     chain.logs.push(balanceLog(21n, 4n, SUB_ID, 0n));
+    await first.sync();
+    expect(first.expiredSeries(EXPIRY)).toEqual([
+      { expiry: EXPIRY, subaccounts: [5n], subIds: [SUB_ID] },
+    ]);
+
+    // A restart resumes from the durable checkpoint. The series leaves the
+    // index only after the remaining short emits its own zero postBalance.
+    chain.head = 22n;
     chain.logs.push(balanceLog(22n, 5n, SUB_ID, 0n));
     const restarted = new ActiveExpiryIndex({
       publicClient: chain.client,

@@ -95,7 +95,8 @@ Implemented in the repository daemon:
   non-zero option balances U break-glass extras`; persist finalized
   `BalanceAdjusted` replay state and rebuild on a checkpoint reorg.
 - [x] Preserve rolling 30-minute `LyraForwardFeed` spot aggregates across
-  restarts and fail closed on chain 56 when near-expiry history is incomplete.
+  restarts and fail closed on chain 56 when the tracker starts inside the
+  settlement window without complete prior history.
 - [x] Discover expired account holders for permissionless anchored settlement;
   remove an indexed series only after confirmed zero-balance events. Automatic
   execution remains explicitly gated by `AUTO_SETTLE=true`.
@@ -104,6 +105,10 @@ Implemented in the repository daemon:
 
 Required before mainnet operation:
 
+- [ ] Detect and persist observation gaps that overlap the final 30-minute TWAP
+  window before integrating between samples. Reject gaps above a reviewed limit
+  tied to `FEED_INTERVAL_SEC` and the on-chain settlement heartbeat on chain 56;
+  add outage/restart tests for gaps beginning both before and inside the window.
 - [ ] Put `ORACLE_STATE_PATH` and `ORACLE_TWAP_STATE_PATH` on durable encrypted
   storage; restore them in a staging rehearsal and verify the on-chain replay
   reaches the same active expiry/account set.

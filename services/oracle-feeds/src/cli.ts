@@ -7,7 +7,6 @@ import {
   instrumentNameFromSubId,
   makePublicClient,
   makeWalletClient,
-  optionAssetAbi,
   toUnit,
 } from "@hedge/shared";
 import { getDeadlineSec, getFeedSignerAccount, getPythPusherAccount } from "./env.js";
@@ -414,23 +413,10 @@ async function cmdDaemon(args: Args): Promise<void> {
         for (const series of activeIndex.expiredSeries(chainNow)) {
           const key = series.expiry.toString();
           if ((cooldown.get(key) ?? 0) > Date.now()) continue;
-          const openInterest = await Promise.all(
-            series.subIds.map((subId) =>
-              publicClient.readContract({
-                address: settlementAddresses.optionAsset,
-                abi: optionAssetAbi,
-                functionName: "openInterest",
-                args: [subId],
-              }),
-            ),
-          );
-          if (openInterest.every((value) => value === 0n)) {
-            console.warn(
-              `[oracle-feeds] expiry ${series.expiry} has zero openInterest but indexed balances remain; ` +
-                "waiting for confirmed zero-balance events",
-            );
-            continue;
-          }
+          // The durable balance index is the settlement source of truth. OptionAsset
+          // OI counts only positive balances, so it can reach zero after the long
+          // settles while a short balance still remains. settleOptions is idempotent;
+          // retry every indexed account until confirmed zero-balance events remove it.
           await settlementRunner.run({
             expiry: series.expiry,
             subaccounts: series.subaccounts,
