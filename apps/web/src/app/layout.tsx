@@ -28,7 +28,7 @@ const schibstedGrotesk = Schibsted_Grotesk({
 export const metadata: Metadata = {
   title: "Hedge — BTC Covered Calls",
   description:
-    "Choose a BTCB amount, strike, and expiry, then sell a covered call through a wallet-signed RFQ auction on BNB Chain.",
+    "Browse a BTC strike and expiry, choose your BTCB amount, then review and sign a covered-call RFQ quote on BNB Chain.",
 };
 
 export default function RootLayout({

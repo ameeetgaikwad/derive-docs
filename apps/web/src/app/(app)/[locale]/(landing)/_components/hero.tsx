@@ -43,7 +43,7 @@ export function Hero({
                 className="max-w-[503px] text-black/50"
               >
                 {t(
-                  'Choose how much BTCB you want to cover, set a strike and expiry, review the indicative premium, and sign only when the target works for you.',
+                  'Browse weekly expiries and strikes, choose how much BTCB to cover, then review the live premium and sign only when the target works for you.',
                 )}
               </Text>
             </div>
