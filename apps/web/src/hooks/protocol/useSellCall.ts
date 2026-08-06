@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { Address, Hex } from "viem";
 import { useAccount, useSignTypedData, useSwitchChain } from "wagmi";
 import {
@@ -24,11 +24,13 @@ import { useNetwork } from "./useNetwork";
 
 export type SellPhase =
   | "idle"
-  | "requesting" // POST /rfq
-  | "auction" // quote-collection window running
-  | "signing" // taker signs the TakerOrder EIP-712 Action
-  | "executing" // engine submits verifyAndMatch
+  | "requesting"
+  | "auction"
+  | "quoted"
+  | "signing"
+  | "executing"
   | "done"
+  | "expired"
   | "error";
 
 export interface AuctionState {
@@ -40,6 +42,22 @@ export interface AuctionState {
   bestPremium: number | null;
   /** total premium of the current best quote, USD */
   bestTotalPremium: number | null;
+}
+
+export interface PreparedQuote {
+  rfqId: string;
+  chainId: AppChainId;
+  instrumentName: string;
+  expiry: number;
+  strike: number;
+  amount: string;
+  quoteCount: number;
+  /** per-unit executable premium, USD */
+  premium: number;
+  /** total executable premium, USD */
+  totalPremium: number;
+  /** ms epoch; acceptance must begin before this time */
+  acceptBy: number;
 }
 
 export interface SellResult {
@@ -62,20 +80,30 @@ export interface SellParams {
   instrumentName: string;
 }
 
+interface PreparedContext {
+  params: SellParams;
+  best: PublicBestQuote;
+  rfqId: string;
+  chainId: AppChainId;
+  owner: Address;
+  acceptBy: number;
+  addresses: {
+    btcOptionAsset: Address;
+    rfqModule: Address;
+    matching: Address;
+  };
+}
+
 const POLL_INTERVAL_MS = 750;
 
 function sleep(ms: number): Promise<void> {
-  return new Promise((r) => setTimeout(r, ms));
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 /**
- * Sell a covered call through the RFQ auction:
- * 1. POST /rfq opens a short auction; makers stream signed quotes.
- * 2. Poll GET /rfq/:id during the window (live best quote shown in the UI).
- * 3. Verify the winning quote locally (orderHash re-derivation + instrument
- *    checks), sign the TakerOrder Action via wallet signTypedData.
- * 4. POST /rfq/:id/accept — the engine submits Matching.verifyAndMatch and
- *    returns the on-chain receipt summary.
+ * RFQ lifecycle for a covered-call sale. Quote collection and acceptance are
+ * intentionally separate so the user can inspect the winning executable
+ * premium before signing anything.
  */
 export function useSellCall() {
   const { address } = useAccount();
@@ -85,32 +113,72 @@ export function useSellCall() {
 
   const [phase, setPhase] = useState<SellPhase>("idle");
   const [auction, setAuction] = useState<AuctionState | null>(null);
+  const [quote, setQuote] = useState<PreparedQuote | null>(null);
   const [result, setResult] = useState<SellResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const preparedRef = useRef<PreparedContext | null>(null);
   const busyRef = useRef(false);
+  const expiryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const clearExpiryTimer = useCallback(() => {
+    if (expiryTimerRef.current !== null) {
+      clearTimeout(expiryTimerRef.current);
+      expiryTimerRef.current = null;
+    }
+  }, []);
+
+  const armExpiryTimer = useCallback(
+    (acceptBy: number) => {
+      clearExpiryTimer();
+      const delay = Math.max(0, acceptBy - Date.now());
+      expiryTimerRef.current = setTimeout(() => {
+        expiryTimerRef.current = null;
+        setPhase((current) =>
+          current === "quoted" || current === "signing" ? "expired" : current,
+        );
+      }, delay);
+    },
+    [clearExpiryTimer],
+  );
+
+  useEffect(() => clearExpiryTimer, [clearExpiryTimer]);
 
   const reset = useCallback(() => {
     busyRef.current = false;
+    preparedRef.current = null;
+    clearExpiryTimer();
     setPhase("idle");
     setAuction(null);
+    setQuote(null);
     setResult(null);
     setError(null);
-  }, []);
+  }, [clearExpiryTimer]);
 
-  const sell = useCallback(
-    async (params: SellParams): Promise<SellResult> => {
+  const requestQuote = useCallback(
+    async (params: SellParams): Promise<PreparedQuote> => {
       if (!address) throw new Error("Wallet not connected");
-      if (busyRef.current) throw new Error("A sale is already in progress");
+      if (busyRef.current) throw new Error("A quote request is already in progress");
+      if (phase === "quoted" && preparedRef.current) {
+        throw new Error("An executable quote is already waiting for review");
+      }
+
       busyRef.current = true;
-      setError(null);
+      preparedRef.current = null;
+      clearExpiryTimer();
+      setAuction(null);
+      setQuote(null);
       setResult(null);
+      setError(null);
 
       try {
-        // Keep one network context for the complete async flow even if the UI
-        // network toggle changes while the auction is open.
         const saleChainId = chainId;
+        const saleOwner = address;
+        const saleAddresses = {
+          btcOptionAsset: addresses.btcOptionAsset,
+          rfqModule: addresses.rfqModule,
+          matching: addresses.matching,
+        };
 
-        // 1. Open the auction
         setPhase("requesting");
         const rfq = await createRfq(
           {
@@ -122,7 +190,6 @@ export function useSellCall() {
           saleChainId,
         );
 
-        // 2. Poll until the window closes
         setPhase("auction");
         let status: RfqStatusResponse;
         for (;;) {
@@ -143,79 +210,175 @@ export function useSellCall() {
         }
 
         if (status.rfq.status === "expired" || !status.bestQuote) {
-          throw new Error(
-            "No quotes received in the auction window — is a market maker (maker-bot) connected?"
-          );
+          throw new Error("No executable quotes were received. Try again in a moment.");
         }
+        if (status.rfq.status !== "closed") {
+          throw new Error(`RFQ closed in an unexpected state: ${status.rfq.status}`);
+        }
+
         const best = status.bestQuote;
+        verifyBestQuote(best, params, saleAddresses.btcOptionAsset);
 
-        verifyBestQuote(best, params, addresses.btcOptionAsset);
-
-        // 3. Sign the TakerOrder Action with the wallet (EIP-712)
-        setPhase("signing");
-        await switchChainAsync({ chainId: saleChainId }).catch(() => {});
-        const action = buildAction({
-          subaccountId: params.subaccountId,
-          module: addresses.rfqModule,
-          data: encodeTakerOrder({ orderHash: best.orderHash, maxFee: 0n }),
-          owner: address,
-          expiry: getActionExpiry(600),
-        });
-        const signature = await signTypedDataAsync(
-          actionTypedData(action, saleChainId, addresses.matching)
-        );
-
-        // 4. Accept — engine executes verifyAndMatch on-chain
-        setPhase("executing");
-        const accepted = await acceptRfq(
-          rfq.id,
-          serializeAction(action),
-          signature,
-          saleChainId,
-        );
-        if (accepted.status !== "success") {
-          throw new Error(`Trade reverted on-chain (tx ${accepted.txHash})`);
+        const makerExpiryMs = Number(best.actionExpiry) * 1000;
+        const engineDeadline = status.rfq.acceptDeadlineAt ?? makerExpiryMs;
+        const acceptBy = Math.min(engineDeadline, makerExpiryMs);
+        if (!Number.isFinite(acceptBy) || acceptBy <= Date.now()) {
+          setPhase("expired");
+          throw new Error("The winning quote expired before it could be reviewed");
         }
 
-        const sellResult: SellResult = {
-          txHash: accepted.txHash,
+        const prepared: PreparedQuote = {
+          rfqId: rfq.id,
           chainId: saleChainId,
           instrumentName: params.instrumentName,
-          totalPremium: unitToNumber(BigInt(accepted.fill.totalPremium)),
-          maker: accepted.fill.maker,
+          expiry: params.expiry,
+          strike: params.strike,
+          amount: params.amount,
+          quoteCount: status.quoteCount,
+          premium: unitToNumber(BigInt(best.premium)),
+          totalPremium: unitToNumber(BigInt(best.totalPremium)),
+          acceptBy,
         };
-        setResult(sellResult);
-        setPhase("done");
-        return sellResult;
+
+        preparedRef.current = {
+          params,
+          best,
+          rfqId: rfq.id,
+          chainId: saleChainId,
+          owner: saleOwner,
+          acceptBy,
+          addresses: saleAddresses,
+        };
+        setQuote(prepared);
+        setPhase("quoted");
+        armExpiryTimer(acceptBy);
+        return prepared;
       } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        setError(msg);
-        setPhase("error");
+        const message = err instanceof Error ? err.message : String(err);
+        setError(message);
+        setPhase((current) => (current === "expired" ? "expired" : "error"));
         throw err;
       } finally {
         busyRef.current = false;
       }
     },
-    [address, signTypedDataAsync, switchChainAsync, addresses, chainId]
+    [address, addresses, armExpiryTimer, chainId, clearExpiryTimer, phase],
   );
 
-  return { sell, reset, phase, auction, result, error };
+  const acceptQuote = useCallback(async (): Promise<SellResult> => {
+    const prepared = preparedRef.current;
+    if (!prepared) throw new Error("No executable quote is ready");
+    if (!address || address.toLowerCase() !== prepared.owner.toLowerCase()) {
+      throw new Error("Reconnect the wallet that requested this quote");
+    }
+    if (Date.now() >= prepared.acceptBy) {
+      clearExpiryTimer();
+      setPhase("expired");
+      throw new Error("This quote has expired. Request a new quote.");
+    }
+    if (busyRef.current) throw new Error("Quote acceptance is already in progress");
+
+    busyRef.current = true;
+    setError(null);
+    let submittedToEngine = false;
+    try {
+      setPhase("signing");
+      await switchChainAsync({ chainId: prepared.chainId }).catch(() => {});
+      const action = buildAction({
+        subaccountId: prepared.params.subaccountId,
+        module: prepared.addresses.rfqModule,
+        data: encodeTakerOrder({
+          orderHash: prepared.best.orderHash,
+          maxFee: 0n,
+        }),
+        owner: prepared.owner,
+        expiry: getActionExpiry(600),
+      });
+      const signature = await signTypedDataAsync(
+        actionTypedData(action, prepared.chainId, prepared.addresses.matching),
+      );
+      if (Date.now() >= prepared.acceptBy) {
+        clearExpiryTimer();
+        setPhase("expired");
+        throw new Error("This quote expired before it could be submitted.");
+      }
+
+      setPhase("executing");
+      clearExpiryTimer();
+      submittedToEngine = true;
+      const accepted = await acceptRfq(
+        prepared.rfqId,
+        serializeAction(action),
+        signature,
+        prepared.chainId,
+      );
+      if (accepted.status !== "success") {
+        throw new Error(`Trade reverted on-chain (tx ${accepted.txHash})`);
+      }
+
+      const sellResult: SellResult = {
+        txHash: accepted.txHash,
+        chainId: prepared.chainId,
+        instrumentName: prepared.params.instrumentName,
+        totalPremium: unitToNumber(BigInt(accepted.fill.totalPremium)),
+        maker: accepted.fill.maker,
+      };
+      setResult(sellResult);
+      setPhase("done");
+      return sellResult;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      setError(message);
+      if (Date.now() >= prepared.acceptBy) {
+        setPhase("expired");
+      } else if (!submittedToEngine) {
+        setPhase("quoted");
+        armExpiryTimer(prepared.acceptBy);
+      } else {
+        setPhase("error");
+      }
+      throw err;
+    } finally {
+      busyRef.current = false;
+    }
+  }, [address, armExpiryTimer, clearExpiryTimer, signTypedDataAsync, switchChainAsync]);
+
+  // Backwards-compatible helper for the legacy CoveredCallFlow component.
+  const sell = useCallback(
+    async (params: SellParams): Promise<SellResult> => {
+      await requestQuote(params);
+      return acceptQuote();
+    },
+    [acceptQuote, requestQuote],
+  );
+
+  return {
+    requestQuote,
+    acceptQuote,
+    sell,
+    reset,
+    phase,
+    auction,
+    quote,
+    result,
+    error,
+  };
 }
 
 /**
- * Defense-in-depth before signing: re-derive the orderHash from the quoted
- * trades and check the trade matches the requested instrument exactly.
+ * Defense-in-depth before displaying a quote: re-derive the order hash and
+ * ensure the winning trade exactly matches the requested covered call.
  */
 function verifyBestQuote(
   best: PublicBestQuote,
   params: SellParams,
-  btcOptionAsset: Address
+  btcOptionAsset: Address,
 ): void {
-  const trades = best.trades.map((t) => ({
-    asset: t.asset as Address,
-    subId: BigInt(t.subId),
-    price: BigInt(t.price),
-    amount: BigInt(t.amount),
+  const trades = best.trades.map((trade) => ({
+    asset: trade.asset as Address,
+    subId: BigInt(trade.subId),
+    price: BigInt(trade.price),
+    amount: BigInt(trade.amount),
   }));
 
   const derived = hashRfqTrades(trades);

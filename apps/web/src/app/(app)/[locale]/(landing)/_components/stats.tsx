@@ -8,23 +8,23 @@ const steps = [
   {
     number: '01',
     numberClassName: 'text-orange-500',
-    title: 'Choose your BTC amount.',
+    title: 'Browse expiry and strike.',
     description:
-      'Commit only the BTCB slice you would be comfortable selling at a higher strike. The rest of your wallet stays outside the position.',
+      'Compare weekly covered-call targets by distance above spot, indicative premium, and projected APR.',
   },
   {
     number: '02',
     numberClassName: 'text-blue-500',
-    title: 'Set strike and expiry.',
+    title: 'Set your BTCB amount.',
     description:
-      'Pick a covered-call strike and weekly expiry. Hedge shows the indicative premium, effective exit price, and committed collateral.',
+      'Enter only the BTCB slice you want to cover, then simulate BTC prices at expiry and review the cash-settlement outcome.',
   },
   {
     number: '03',
     numberClassName: 'text-green-500',
-    title: 'Review and request quotes.',
+    title: 'Get and accept a live quote.',
     description:
-      'Review both settlement outcomes, then open the RFQ auction and sign the winning order from your wallet.',
+      'Open the RFQ auction, inspect the winning executable premium and countdown, then sign from your wallet.',
   },
 ] as const
 

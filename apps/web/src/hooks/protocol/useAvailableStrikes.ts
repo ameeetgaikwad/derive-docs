@@ -163,6 +163,9 @@ export function useAvailableStrikes(selectedExpiry: number | null) {
     selectedExpiry: effectiveExpiry,
     strikes,
     spotPrice,
-    isLoading: spotLoading || (boardStrikes.length > 0 && feedReads.isLoading),
+    // The board can price immediately with the documented feed fallbacks.
+    // Keep those rows mounted while the multicall refreshes so periodic
+    // repricing never swaps the board back to its initial skeleton.
+    isLoading: strikes.length === 0 && (spotLoading || feedReads.isLoading),
   };
 }

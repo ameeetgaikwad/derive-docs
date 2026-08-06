@@ -56,6 +56,8 @@ export interface PublicRfq {
   amount: string;
   createdAt: number;
   auctionEndsAt: number;
+  /** ms epoch; populated after the auction closes with a winner */
+  acceptDeadlineAt: number | null;
   status: RfqStatus;
 }
 

@@ -8,7 +8,7 @@ const faqs = [
   {
     question: 'What is Hedge?',
     answer:
-      'Hedge is a covered-call interface for BTCB. You choose the BTC amount, strike, and expiry, then review the indicative premium before opening an RFQ auction.',
+      'Hedge is a covered-call interface for BTCB. You browse an expiry and strike, enter the BTCB amount, then review the indicative outcome before opening an RFQ auction.',
   },
   {
     question: 'Is this options trading?',
@@ -18,7 +18,7 @@ const faqs = [
   {
     question: 'How does selling BTC higher work?',
     answer:
-      'You commit only the BTCB slice you would be comfortable selling at a higher strike. If BTC settles above it, that slice can be sold at the strike. Otherwise you keep the BTCB and the premium.',
+      'You commit only the BTCB slice you want to cover. The BTCB remains held in the subaccount; if BTC settles above the strike, gains above it are offset through USDT cash settlement. Below the strike, you keep the BTCB and premium.',
   },
   {
     question: 'Where does the premium come from?',
@@ -28,7 +28,7 @@ const faqs = [
   {
     question: 'Can I lose my whole BTC stack?',
     answer:
-      'The covered call only applies to the BTCB amount you deposit into the target account. Anything outside that slice remains outside the position, though the covered slice gives up upside above the strike.',
+      'The covered call only applies to the BTCB amount deposited into the target account. Anything outside that slice remains outside the position, while gains above the strike on the covered slice are offset through USDT settlement.',
   },
   {
     question: 'Is this just a limit order?',

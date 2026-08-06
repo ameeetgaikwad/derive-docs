@@ -61,7 +61,7 @@ export function MarketingFooter({ t }: { t: (value: string) => string }) {
               className="mt-[25px] tracking-[-0.025em] text-zinc-500"
             >
               {t(
-                'Hedge is a Sats Terminal covered-call interface. Choose a BTCB amount, strike, and expiry; executable premiums come from RFQ market makers and every order is wallet signed.',
+                'Hedge is a Sats Terminal covered-call interface. Browse a strike and expiry, choose your BTCB amount, then review and sign an executable RFQ market-maker quote.',
               )}
             </Text>
           </div>
