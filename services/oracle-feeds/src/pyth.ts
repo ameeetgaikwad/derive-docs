@@ -1,6 +1,10 @@
 import type { Address, Hex, PublicClient, WalletClient } from "viem";
 import type { LocalAccount } from "viem";
 import { getDeployedAddress, requireDeployments } from "@hedge/shared";
+import {
+  immediateTransactionQueue,
+  type TransactionQueue,
+} from "./transactionQueue.js";
 
 /** Hermes price-service endpoint (override with HERMES_URL). */
 export const DEFAULT_HERMES_URL = "https://hermes.pyth.network";
@@ -124,6 +128,7 @@ export async function pushPythUpdate(opts: {
   account: LocalAccount;
   addresses: PythAddresses;
   hermesUrl?: string;
+  transactionQueue?: TransactionQueue;
 }): Promise<{ txHash: Hex; spot?: { spotPrice: bigint; confidence: bigint } }> {
   const { publicClient, walletClient, account, addresses } = opts;
 
@@ -145,20 +150,25 @@ export async function pushPythUpdate(opts: {
   });
   console.log(`[oracle-feeds] updatePriceFeeds fee=${fee} wei`);
 
-  const txHash = await walletClient.writeContract({
-    address: addresses.pyth,
-    abi: pythAbi,
-    functionName: "updatePriceFeeds",
-    args: [[update.data]],
-    value: fee,
-    account,
-    chain: walletClient.chain,
+  const queue = opts.transactionQueue ?? immediateTransactionQueue;
+  const submitted = await queue.run(async () => {
+    const hash = await walletClient.writeContract({
+      address: addresses.pyth,
+      abi: pythAbi,
+      functionName: "updatePriceFeeds",
+      args: [[update.data]],
+      value: fee,
+      account,
+      chain: walletClient.chain,
+    });
+    const receipt = await publicClient.waitForTransactionReceipt({ hash });
+    if (receipt.status !== "success") {
+      throw new Error(`updatePriceFeeds reverted: ${hash}`);
+    }
+    return { hash, blockNumber: receipt.blockNumber };
   });
-  const receipt = await publicClient.waitForTransactionReceipt({ hash: txHash });
-  if (receipt.status !== "success") {
-    throw new Error(`updatePriceFeeds reverted: ${txHash}`);
-  }
-  console.log(`[oracle-feeds] updatePriceFeeds mined: ${txHash} (block ${receipt.blockNumber})`);
+  const txHash = submitted.hash;
+  console.log(`[oracle-feeds] updatePriceFeeds mined: ${txHash} (block ${submitted.blockNumber})`);
 
   let spot: { spotPrice: bigint; confidence: bigint } | undefined;
   if (addresses.adapter) {

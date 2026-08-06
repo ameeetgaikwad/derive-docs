@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+import "dotenv/config";
+
 /**
  * maker-bot — reference market maker for hedge.
  *

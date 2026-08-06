@@ -27,6 +27,24 @@ export async function getFeedSignerAccount(chainId: number): Promise<LocalAccoun
   });
 }
 
+/**
+ * Funded account that submits Pyth updates. Production should configure a
+ * separate PYTH_PUSHER KMS key; local/testnet may explicitly fall back to the
+ * feed signer. The Pyth contract does not require this account to be an oracle
+ * signer—it only pays gas and the update fee.
+ */
+export async function getPythPusherAccount(
+  chainId: number,
+  fallback?: LocalAccount,
+): Promise<LocalAccount> {
+  const raw = process.env.PYTH_PUSHER_KEY?.trim() || process.env.PYTH_PUSHER_PRIVATE_KEY?.trim();
+  const key = raw ? ((raw.startsWith("0x") ? raw : `0x${raw}`) as Hex) : undefined;
+  if (!key && !process.env.PYTH_PUSHER_KMS_KEY_ID) {
+    return fallback ?? getFeedSignerAccount(chainId);
+  }
+  return resolveAccount({ role: "PYTH_PUSHER", privateKey: key });
+}
+
 /** Signature deadline horizon in seconds (FEED_DEADLINE_SEC, default 1h). */
 export function getDeadlineSec(): bigint {
   return BigInt(process.env.FEED_DEADLINE_SEC ?? 3600);

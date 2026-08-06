@@ -53,6 +53,14 @@ chain_id        = "56"                              # 56 = BNB mainnet, 97 = tes
 Other tuning vars (with defaults) live in `variables.tf`: task CPU/memory,
 desired counts, `oracle_feeds_command`, `log_retention_days`, KMS aliases.
 
+> **Oracle state gate:** the current Fargate task definition does not yet mount
+> durable storage for `ORACLE_STATE_PATH` and `ORACLE_TWAP_STATE_PATH`. Do not
+> use this Terraform configuration for public/mainnet trading until an encrypted
+> persistent volume, backup/restore procedure, and single-writer failover are
+> implemented and rehearsed. The active-expiry index can replay from chain, but
+> a lost in-window settlement-TWAP accumulator cannot be reconstructed from the
+> container filesystem.
+
 If `certificate_arn` is **not** set, the ALB serves plain HTTP on `:80` (fine for
 bring-up and `validate`). Production WSS needs an ACM cert — provision one for
 your domain and set `certificate_arn` to add the `:443` HTTPS listener (HTTP then

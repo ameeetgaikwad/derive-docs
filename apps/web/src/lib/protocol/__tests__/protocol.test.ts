@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { hashTypedData } from "viem";
+import { actionTypedData, buildAction } from "../actions";
 import {
   ACTION_TYPEHASH,
   computeDomainSeparator,
@@ -29,6 +31,33 @@ describe("EIP-712 constants vs on-chain-verified deployment values", () => {
       expect(ACTION_TYPEHASH).toBe(getExpectedActionTypehash(chainId));
     });
   }
+});
+
+describe("EIP-712 Action wallet payload", () => {
+  it("serializes uint fields without bigint suffixes and preserves the digest", () => {
+    const owner = "0x93104E260cb74E94038F4325098d31EE426C6F85" as const;
+    const matching = "0x0c412a552cbfD904C202E205380DF6444d81f49f" as const;
+    const action = buildAction({
+      subaccountId: 5n,
+      module: "0x50DF99440De3ECae422E3481291809451232636a",
+      data: "0x",
+      owner,
+      nonce: 123n,
+      expiry: 456n,
+    });
+    const walletPayload = actionTypedData(action, 97, matching);
+
+    expect(walletPayload.message.subaccountId).toBe("5");
+    expect(walletPayload.message.nonce).toBe("123");
+    expect(walletPayload.message.expiry).toBe("456");
+
+    const bigintDigest = hashTypedData({
+      ...walletPayload,
+      message: action,
+    });
+    const stringDigest = hashTypedData(walletPayload as never);
+    expect(stringDigest).toBe(bigintDigest);
+  });
 });
 
 describe("option subId encoding", () => {

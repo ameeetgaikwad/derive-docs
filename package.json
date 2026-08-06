@@ -7,7 +7,7 @@
     "node": ">=22"
   },
   "scripts": {
-    "dev": "turbo run dev",
+    "dev": "turbo run dev --filter=@hedge/shared --filter=@hedge/oracle-feeds --filter=@hedge/rfq-engine --filter=@hedge/maker-bot --filter=@hedge/web",
     "build": "turbo run build",
     "lint": "turbo run lint",
     "test": "turbo run test",

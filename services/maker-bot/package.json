@@ -20,6 +20,7 @@
   },
   "dependencies": {
     "@hedge/shared": "workspace:*",
+    "dotenv": "^17.4.2",
     "viem": "^2.21.0"
   },
   "devDependencies": {

@@ -76,7 +76,15 @@ export function actionTypedData(
     },
     types: ACTION_TYPES,
     primaryType: "Action" as const,
-    message: action,
+    // Send uint fields as decimal strings at the wallet boundary. They hash to
+    // the same EIP-712 values as bigint inputs, while avoiding providers that
+    // serialize JavaScript bigint values as invalid strings such as `"5n"`.
+    message: {
+      ...action,
+      subaccountId: action.subaccountId.toString(),
+      nonce: action.nonce.toString(),
+      expiry: action.expiry.toString(),
+    } as unknown as Action,
   };
 }
 

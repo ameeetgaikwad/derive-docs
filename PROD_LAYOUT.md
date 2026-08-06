@@ -33,6 +33,19 @@ Signing uses the existing `alias/hedge-feed-signer` and
 `EXECUTOR_KMS_KEY_ID`. No session keys or raw private keys belong in images,
 Terraform variables, GitHub configuration, or frontend environment variables.
 
+The oracle container has two correctness-critical checkpoints: the finalized
+active-option index and the rolling settlement-TWAP accumulator. Production
+must mount writable durable storage and point `ORACLE_STATE_PATH` and
+`ORACLE_TWAP_STATE_PATH` at it. Before enabling RFQs after any rollout, run the
+image's read-only `status` command and verify every held expiry is covered.
+
+## Production readiness
+
+The consolidated pre-mainnet launch gates, including dynamic USDT/USD and
+separate BTC-vs-BTCB oracle requirements, live in
+[`PRODUCTION.md`](PRODUCTION.md). Treat its P0 checklist as blocking for public
+deposits and trading.
+
 ## Validation
 
 ```sh

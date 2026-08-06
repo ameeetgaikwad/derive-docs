@@ -9,6 +9,7 @@
 #   docker run hedge-oracle-feeds daemon --source deribit
 #   docker run hedge-oracle-feeds pyth-push
 #   docker run hedge-oracle-feeds settle
+#   docker run hedge-oracle-feeds status              # read-only expiry coverage check
 #
 # Runtime env (see services/oracle-feeds/src/env.ts):
 #   CHAIN_ID                  target chain id (e.g. 56). anvil default only on 31337.
@@ -17,6 +18,8 @@
 #                             (alias/hedge-feed-signer). Required off-chain of 31337;
 #                             the key never leaves the HSM.
 #   FEED_SIGNER_KMS_REGION    AWS region for the feed-signer KMS key (else standard AWS chain).
+# Mount a writable persistent volume and set ORACLE_STATE_PATH plus
+# ORACLE_TWAP_STATE_PATH into it. Container-local state is not restart durable.
 # Contract addresses are read from protocol/deployments/<CHAIN_ID>.json — mount that
 # dir and point SATS_DEPLOYMENTS_DIR at it (it is intentionally NOT baked into the image).
 #

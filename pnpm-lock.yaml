@@ -142,6 +142,9 @@ importers:
       '@hedge/shared':
         specifier: workspace:*
         version: link:../shared
+      dotenv:
+        specifier: ^17.4.2
+        version: 17.4.2
       viem:
         specifier: ^2.21.0
         version: 2.54.2(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@5.0.10)(zod@4.4.3)
@@ -170,6 +173,9 @@ importers:
       '@hedge/shared':
         specifier: workspace:*
         version: link:../shared
+      dotenv:
+        specifier: ^17.4.2
+        version: 17.4.2
       viem:
         specifier: ^2.21.0
         version: 2.54.2(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@5.0.10)(zod@4.4.3)
@@ -192,6 +198,9 @@ importers:
       '@hedge/shared':
         specifier: workspace:*
         version: link:../shared
+      dotenv:
+        specifier: ^17.4.2
+        version: 17.4.2
       viem:
         specifier: ^2.21.0
         version: 2.54.2(bufferutil@4.1.0)(typescript@5.9.3)(utf-8-validate@5.0.10)(zod@4.4.3)
@@ -4141,6 +4150,10 @@ packages:
   doctrine@2.1.0:
     resolution: {integrity: sha512-35mSku4ZXK0vfCuHEDAwt55dg2jNajHZ1odvF+8SSr82EsZY4QmXfuWso8oEd8zRhVObSN18aM0CjSdoBX7zIw==}
     engines: {node: '>=0.10.0'}
+
+  dotenv@17.4.2:
+    resolution: {integrity: sha512-nI4U3TottKAcAD9LLud4Cb7b2QztQMUEfHbvhTH09bqXTxnSie8WnjPALV/WMCrJZ6UV/qHJ6L03OqO3LcdYZw==}
+    engines: {node: '>=12'}
 
   dunder-proto@1.0.1:
     resolution: {integrity: sha512-KIN/nDJBQRcXw0MLVhZE9iQHmG68qAVIBg9CqmUYjmQIhgij9U5MFvrqkUL5FbtyyzZuOeOt0zdeRe4UY7ct+A==}
@@ -12856,6 +12869,8 @@ snapshots:
   doctrine@2.1.0:
     dependencies:
       esutils: 2.0.3
+
+  dotenv@17.4.2: {}
 
   dunder-proto@1.0.1:
     dependencies:

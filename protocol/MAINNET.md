@@ -7,7 +7,8 @@ real-BTCB smoke trade, Safe handover, focused diff audit, hosted services, and
 production frontend/RFQ configuration. Do not rerun the deploy sequence.
 
 Companion docs: [`TESTNET.md`](TESTNET.md) (the live chain-97 stack this reproduces),
-[`../services/shared/KMS.md`](../services/shared/KMS.md) (KMS key inventory).
+[`../services/shared/KMS.md`](../services/shared/KMS.md) (KMS key inventory), and
+[`../PRODUCTION.md`](../PRODUCTION.md) (P0 launch gates and production sign-off).
 
 ## ⚠️ Warnings — read before broadcasting
 
