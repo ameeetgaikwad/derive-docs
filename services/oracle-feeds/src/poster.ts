@@ -1,4 +1,4 @@
-import type { Address, Hex, PublicClient, WalletClient } from "viem";
+import { encodeFunctionData, type Address, type Hex, type PublicClient, type WalletClient } from "viem";
 import type { LocalAccount } from "viem";
 import {
   encodeForwardData,
@@ -16,8 +16,42 @@ import {
   type FeedKind,
 } from "@hedge/shared";
 import { annualise, flatIvSviParams, type SviParams } from "./svi.js";
+import {
+  immediateTransactionQueue,
+  type TransactionQueue,
+} from "./transactionQueue.js";
 
 const ONE = 10n ** 18n;
+const MULTICALL3 = "0xcA11bde05977b3631167028862bE2a173976CA11" as Address;
+
+const multicall3Abi = [
+  {
+    type: "function",
+    name: "aggregate3",
+    stateMutability: "payable",
+    inputs: [
+      {
+        name: "calls",
+        type: "tuple[]",
+        components: [
+          { name: "target", type: "address" },
+          { name: "allowFailure", type: "bool" },
+          { name: "callData", type: "bytes" },
+        ],
+      },
+    ],
+    outputs: [
+      {
+        name: "returnData",
+        type: "tuple[]",
+        components: [
+          { name: "success", type: "bool" },
+          { name: "returnData", type: "bytes" },
+        ],
+      },
+    ],
+  },
+] as const;
 
 /** 30 minutes — LyraForwardFeed.SETTLEMENT_TWAP_DURATION. */
 export const SETTLEMENT_TWAP_DURATION = 1800n;
@@ -27,6 +61,7 @@ export interface FeedAddresses {
   forwardFeed: Address;
   volFeed: Address;
   rateFeed: Address;
+  stableFeed: Address;
 }
 
 /** Resolve the BTC market's feed addresses from protocol/deployments/<chainId>.json. */
@@ -37,6 +72,7 @@ export function feedAddressesFromDeployments(chainId: number): FeedAddresses {
     forwardFeed: getDeployedAddress(d, "btcForwardFeed"),
     volFeed: getDeployedAddress(d, "btcVolFeed"),
     rateFeed: getDeployedAddress(d, "btcRateFeed"),
+    stableFeed: getDeployedAddress(d, "stableFeed"),
   };
 }
 
@@ -57,12 +93,19 @@ export interface SnapshotExpiryParams {
   rate?: bigint;
   /** Fitted SVI params (e.g. from a Deribit surface). When set, posted verbatim instead of a flat-IV curve. */
   svi?: SviParams;
+  /** Required by LyraForwardFeed during the final 30-minute TWAP window. */
+  settlement?: {
+    settlementStartAggregate: bigint;
+    currentSpotAggregate: bigint;
+  };
 }
 
 export interface SnapshotParams {
   spot: bigint; // 18dp
   confidence?: bigint; // 18dp, default 1e18
   expiries?: SnapshotExpiryParams[];
+  /** Observation timestamp used by the atomic daemon path. Must not be in the future. */
+  timestamp?: bigint;
 }
 
 /**
@@ -78,6 +121,7 @@ export class FeedPoster {
     private readonly chainId: number,
     private readonly addresses: FeedAddresses,
     private readonly deadlineSec: bigint = 3600n,
+    private readonly transactionQueue: TransactionQueue = immediateTransactionQueue,
   ) {}
 
   /** Latest block timestamp — chain time, NOT wall clock (anvil warps). */
@@ -86,32 +130,50 @@ export class FeedPoster {
     return block.timestamp;
   }
 
-  private async acceptData(kind: FeedKind, data: Hex, timestamp: bigint): Promise<Hex> {
+  private async acceptData(
+    kind: FeedKind,
+    data: Hex,
+    timestamp: bigint,
+    targetAddress: Address = this.addressFor(kind),
+  ): Promise<Hex> {
     const now = await this.chainNow();
-    const encoded = await signFeedData({
+    const encoded = await this.signAcceptData(kind, data, timestamp, targetAddress, now);
+    return this.transactionQueue.run(async () => {
+      // acceptData is permissionless (BaseLyraFeed only verifies the embedded
+      // signer signatures), so the tx is sent from the wallet client's account.
+      // That poster account must be funded for gas; it may be the same account as
+      // the embedded feed signer (the CLI's current configuration) or a separate
+      // funded poster supplied by another caller.
+      const hash = await this.walletClient.writeContract({
+        address: targetAddress,
+        abi: FEED_ABIS[kind],
+        functionName: "acceptData",
+        args: [encoded],
+        account: this.walletClient.account ?? this.signer,
+        chain: this.walletClient.chain ?? null,
+      });
+      const receipt = await this.publicClient.waitForTransactionReceipt({ hash });
+      if (receipt.status !== "success") {
+        throw new Error(`${kind} feed acceptData reverted (tx ${hash})`);
+      }
+      return hash;
+    });
+  }
+
+  private async signAcceptData(
+    kind: FeedKind,
+    data: Hex,
+    timestamp: bigint,
+    targetAddress: Address,
+    now: bigint,
+  ): Promise<Hex> {
+    return signFeedData({
       kind,
       payload: { data, deadline: now + this.deadlineSec, timestamp },
       signers: [this.signer],
       chainId: this.chainId,
-      feedAddress: this.addressFor(kind),
+      feedAddress: targetAddress,
     });
-    // acceptData is permissionless (BaseLyraFeed only verifies the embedded
-    // signer signatures), so the tx is sent from the wallet client's account
-    // (the funded poster, e.g. the deployer on testnet) — the feed signer key
-    // only signs the FeedData payload and needs no gas.
-    const hash = await this.walletClient.writeContract({
-      address: this.addressFor(kind),
-      abi: FEED_ABIS[kind],
-      functionName: "acceptData",
-      args: [encoded],
-      account: this.walletClient.account ?? this.signer,
-      chain: this.walletClient.chain ?? null,
-    });
-    const receipt = await this.publicClient.waitForTransactionReceipt({ hash });
-    if (receipt.status !== "success") {
-      throw new Error(`${kind} feed acceptData reverted (tx ${hash})`);
-    }
-    return hash;
   }
 
   private addressFor(kind: FeedKind): Address {
@@ -133,6 +195,17 @@ export class FeedPoster {
     return this.acceptData("spot", encodeSpotData({ price, confidence }), timestamp);
   }
 
+  /** Post the cash asset's USD price to the independently deployed stable feed. */
+  async postStable(price: bigint, confidence: bigint = ONE): Promise<Hex> {
+    const timestamp = await this.chainNow();
+    return this.acceptData(
+      "spot",
+      encodeSpotData({ price, confidence }),
+      timestamp,
+      this.addresses.stableFeed,
+    );
+  }
+
   /**
    * Post a forward price for an expiry (pre-settlement path: aggregates 0).
    * fwdSpotDifference = forward - currentSpot, vs the spot stored in the feed.
@@ -141,19 +214,23 @@ export class FeedPoster {
     expiry: bigint,
     forwardPrice: bigint,
     confidence: bigint = ONE,
+    settlement?: SnapshotExpiryParams["settlement"],
   ): Promise<Hex> {
     const timestamp = await this.chainNow();
-    if (timestamp >= expiry - SETTLEMENT_TWAP_DURATION) {
+    if (timestamp >= expiry) {
+      throw new Error(`postForward: chain time ${timestamp} is at/past expiry ${expiry}`);
+    }
+    if (timestamp >= expiry - SETTLEMENT_TWAP_DURATION && !settlement) {
       throw new Error(
         `postForward: within ${SETTLEMENT_TWAP_DURATION}s of expiry ${expiry} — ` +
-          `the feed requires settlement aggregates now; use postSettlement instead`,
+          `the feed requires rolling settlement aggregates`,
       );
     }
     const spot = await this.readSpot();
     const data = encodeForwardData({
       expiry,
-      settlementStartAggregate: 0n,
-      currentSpotAggregate: 0n,
+      settlementStartAggregate: settlement?.settlementStartAggregate ?? 0n,
+      currentSpotAggregate: settlement?.currentSpotAggregate ?? 0n,
       fwdSpotDifference: forwardPrice - spot, // int96
       confidence,
     });
@@ -229,7 +306,7 @@ export class FeedPoster {
 
     for (const e of params.expiries ?? []) {
       const fwd = e.forwardPrice ?? params.spot;
-      const fwdTx = await this.postForward(e.expiry, fwd, conf);
+      const fwdTx = await this.postForward(e.expiry, fwd, conf, e.settlement);
       log(`fwd    expiry=${e.expiry} ${fmt(fwd)}  tx=${fwdTx}`);
 
       const rate = e.rate ?? toUnit("0.05");
@@ -245,6 +322,100 @@ export class FeedPoster {
         log(`vol    expiry=${e.expiry} flatIV=${fmt(iv)}  tx=${volTx}`);
       }
     }
+  }
+
+  /**
+   * Atomically publish spot + every forward/rate/vol payload through Multicall3.
+   * This is the production daemon path on BSC: all signed data gets one block
+   * timestamp and one transaction, avoiding partial snapshots and heartbeat
+   * expiry while many series are active.
+   */
+  async postSnapshotBatched(params: SnapshotParams): Promise<Hex> {
+    if (this.chainId !== 56 && this.chainId !== 97) {
+      throw new Error(`batched snapshots are not configured for chain ${this.chainId}`);
+    }
+    const now = await this.chainNow();
+    const timestamp = params.timestamp ?? now;
+    if (timestamp > now) {
+      throw new Error(`snapshot timestamp ${timestamp} is ahead of chain time ${now}`);
+    }
+    const conf = params.confidence ?? ONE;
+    const calls: { target: Address; allowFailure: false; callData: Hex }[] = [];
+
+    const append = async (kind: FeedKind, target: Address, data: Hex): Promise<void> => {
+      const signed = await this.signAcceptData(kind, data, timestamp, target, now);
+      calls.push({
+        target,
+        allowFailure: false,
+        callData: encodeFunctionData({
+          abi: FEED_ABIS[kind],
+          functionName: "acceptData",
+          args: [signed],
+        }),
+      });
+    };
+
+    await append("spot", this.addresses.spotFeed, encodeSpotData({ price: params.spot, confidence: conf }));
+    for (const expiryParams of params.expiries ?? []) {
+      const { expiry, settlement } = expiryParams;
+      if (timestamp >= expiry) {
+        throw new Error(`snapshot expiry ${expiry} is at/past chain time ${timestamp}`);
+      }
+      if (timestamp >= expiry - SETTLEMENT_TWAP_DURATION && !settlement) {
+        throw new Error(`snapshot expiry ${expiry} requires rolling settlement aggregates`);
+      }
+      const forward = expiryParams.forwardPrice ?? params.spot;
+      await append(
+        "forward",
+        this.addresses.forwardFeed,
+        encodeForwardData({
+          expiry,
+          settlementStartAggregate: settlement?.settlementStartAggregate ?? 0n,
+          currentSpotAggregate: settlement?.currentSpotAggregate ?? 0n,
+          fwdSpotDifference: forward - params.spot,
+          confidence: conf,
+        }),
+      );
+      await append(
+        "rate",
+        this.addresses.rateFeed,
+        encodeRateData({ expiry, rate: expiryParams.rate ?? toUnit("0.05"), confidence: conf }),
+      );
+      const svi =
+        expiryParams.svi ??
+        flatIvSviParams(
+          expiryParams.iv ?? toUnit("0.6"),
+          forward,
+          annualise(expiry - timestamp),
+        );
+      await append(
+        "vol",
+        this.addresses.volFeed,
+        encodeVolData({ expiry, ...svi, confidence: conf }),
+      );
+    }
+
+    const hash = await this.transactionQueue.run(async () => {
+      const transactionHash = await this.walletClient.writeContract({
+        address: MULTICALL3,
+        abi: multicall3Abi,
+        functionName: "aggregate3",
+        args: [calls],
+        account: this.walletClient.account ?? this.signer,
+        chain: this.walletClient.chain ?? null,
+      });
+      const receipt = await this.publicClient.waitForTransactionReceipt({ hash: transactionHash });
+      if (receipt.status !== "success") {
+        throw new Error(`batched feed snapshot reverted (tx ${transactionHash})`);
+      }
+      return transactionHash;
+    });
+    log(
+      `snapshot spot=${fmt(params.spot)} expiries=[${(params.expiries ?? [])
+        .map((entry) => entry.expiry)
+        .join(",")}] calls=${calls.length} tx=${hash}`,
+    );
+    return hash;
   }
 
   async readSpot(): Promise<bigint> {

@@ -17,7 +17,7 @@ import { useNetwork } from "./useNetwork";
  *
  * Onboarding is a single regular tx: Matching.createSubAccount(StandardManager).
  * The new subaccount id is read from the SubAccounts.AccountCreated event in
- * the receipt and persisted to localStorage per EOA (re-verified on-chain via
+ * the receipt and persisted to localStorage per EOA and chain (re-verified on-chain via
  * Matching.subAccountToOwner on every load).
  */
 export function useCoveredCallSubaccount() {
@@ -27,7 +27,8 @@ export function useCoveredCallSubaccount() {
   const { getSubaccount, setSubaccount, clearSubaccount } = useAccountStore();
   const { addresses, chainId } = useNetwork();
 
-  const storedId = getSubaccount(address);
+  const stored = getSubaccount(address, chainId);
+  const storedId = stored?.id ?? null;
 
   // Guard against stale/foreign localStorage: the stored subaccount must be
   // owned (via Matching) by the connected EOA.
@@ -45,8 +46,9 @@ export function useCoveredCallSubaccount() {
     !!address &&
     ownerQuery.data?.toLowerCase() === address.toLowerCase();
 
-  // Stored id does not belong to this wallet (cleared cache, imported
-  // localStorage, ...) — drop it.
+  // A chain-specific id that does not belong to this wallet is stale. A legacy
+  // id is deliberately preserved on mismatch because it may belong to the same
+  // wallet on the other chain.
   const mismatch =
     storedId !== null &&
     !!address &&
@@ -54,8 +56,18 @@ export function useCoveredCallSubaccount() {
     ownerQuery.data.toLowerCase() !== address.toLowerCase();
 
   useEffect(() => {
-    if (mismatch && address) clearSubaccount(address);
-  }, [mismatch, address, clearSubaccount]);
+    if (mismatch && address && stored?.source === "network") {
+      clearSubaccount(address, chainId);
+    }
+  }, [mismatch, address, chainId, clearSubaccount, stored?.source]);
+
+  // Safely promote the old unscoped key after this chain has proven ownership.
+  // Keep the legacy entry so the other chain can independently probe it too.
+  useEffect(() => {
+    if (verified && address && stored?.source === "legacy" && storedId !== null) {
+      setSubaccount(address, chainId, storedId);
+    }
+  }, [verified, address, chainId, setSubaccount, stored?.source, storedId]);
 
   const ensureChain = useCallback(async () => {
     await switchChainAsync({ chainId }).catch(() => {
@@ -103,7 +115,7 @@ export function useCoveredCallSubaccount() {
       throw new Error("Subaccount created but id not found in receipt logs");
     }
 
-    setSubaccount(address, accountId);
+    setSubaccount(address, chainId, accountId);
     return accountId;
   }, [address, verified, storedId, ensureChain, config, setSubaccount, addresses, chainId]);
 
@@ -121,7 +133,7 @@ export function useCoveredCallSubaccount() {
       if (owner.toLowerCase() !== address.toLowerCase()) {
         throw new Error(`Subaccount ${id} is not owned by ${address}`);
       }
-      setSubaccount(address, id);
+      setSubaccount(address, chainId, id);
     },
     [address, config, setSubaccount, addresses, chainId]
   );

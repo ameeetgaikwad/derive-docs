@@ -60,11 +60,15 @@ encodings differ in places.
 ## Commands
 
 ```sh
-pnpm install        # from services/
-pnpm build          # regenerates src/abis from forge artifacts, then tsc
-pnpm test           # vitest: typehash-vs-bytecode, subId round-trip, sign+recover, rfq/feed encodings, mocked-KMS account
-pnpm smoke          # build + test
+corepack pnpm install --frozen-lockfile                 # from the repository root
+corepack pnpm --filter @hedge/shared extract-abis       # refresh committed ABIs
+corepack pnpm --filter @hedge/shared build              # compile ABI snapshot + TypeScript
+corepack pnpm --filter @hedge/shared test               # unit/integration tests
+corepack pnpm --filter @hedge/shared smoke              # build + test
 ```
 
 ABI extraction requires the vendored repos to be `forge build`-built
 (`protocol/lib/*/out` present); they are at the pinned commits.
+The bytecode/source typehash integration checks run when those vendor artifacts
+are present. Ordinary JS-only checkouts still run the deterministic type-string
+hash tests; CI repeats the integration checks after the Foundry build.

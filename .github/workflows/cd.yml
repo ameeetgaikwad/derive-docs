@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       services:
-        description: "Comma-separated services to deploy (rfq-engine,oracle-feeds,maker-bot)"
+        description: "Comma-separated services to publish (rfq-engine,oracle-feeds,maker-bot)"
         required: false
         default: "rfq-engine,oracle-feeds"
 
@@ -50,24 +50,25 @@ jobs:
       - name: Build service matrix
         id: matrix
         env:
-          # push to main deploys the two default services; workflow_dispatch
-          # lets an operator override the list. maker-bot is manual-only.
+          # Push to main deploys both ECS services; workflow_dispatch may also
+          # publish maker-bot, whose runtime is operator-managed outside ECS.
           REQUESTED: ${{ github.event.inputs.services }}
         run: |
           if [ -z "$REQUESTED" ]; then
             REQUESTED="rfq-engine,oracle-feeds"
           fi
-          # turn "a,b, c" into a JSON array ["a","b","c"]
+          # Turn "a,b, c" into a validated JSON array ["a","b","c"].
           JSON=$(printf '%s' "$REQUESTED" \
             | tr ',' '\n' \
             | sed 's/[[:space:]]//g' \
             | grep -v '^$' \
-            | python3 -c 'import json,sys; print(json.dumps([l.strip() for l in sys.stdin if l.strip()]))')
+            | python3 -c 'import json,sys; xs=[l.strip() for l in sys.stdin if l.strip()]; allowed={"rfq-engine","oracle-feeds","maker-bot"}; bad=[x for x in xs if x not in allowed]; bad and sys.exit(f"unsupported service(s): {chr(44).join(bad)}"); print(json.dumps(xs))')
           echo "matrix=$JSON" >> "$GITHUB_OUTPUT"
           echo "Deploy targets: $JSON"
 
   # ---------------------------------------------------------------------------
-  # Build + push each service image to ECR, then force a new ECS deployment.
+  # Build + push each service image to ECR. ECS-managed services are then
+  # rolled; maker-bot is image-publish-only for its external operator runtime.
   # Context is the repo root; Dockerfile lives at services/<svc>/Dockerfile.
   # We push both :<sha> (immutable, auditable) and :latest (moving tag the ECS
   # task definition references) so `--force-new-deployment` picks up the image.
@@ -119,6 +120,7 @@ jobs:
           docker push "$IMAGE:latest"
 
       - name: Force new ECS deployment
+        if: matrix.service != 'maker-bot'
         env:
           SERVICE: ${{ matrix.service }}
         run: |
@@ -130,6 +132,7 @@ jobs:
             --no-cli-pager
 
       - name: Wait for ECS service to stabilize
+        if: matrix.service != 'maker-bot'
         env:
           SERVICE: ${{ matrix.service }}
         run: |

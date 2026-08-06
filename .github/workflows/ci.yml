@@ -79,11 +79,38 @@ jobs:
         with:
           version: stable
 
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install shared-library dependencies
+        run: pnpm install --frozen-lockfile --filter @hedge/shared...
+
       # Restores lib/v2-core and lib/v2-matching at the pinned commits and
       # inits their nested submodules (forge-std, openzeppelin, lyra-utils, ...).
       - name: Restore vendored protocol dependencies
         working-directory: protocol
         run: ./setup-vendor.sh
+
+      - name: Build vendored protocol dependencies
+        working-directory: protocol
+        run: |
+          (cd lib/v2-core && forge build)
+          (cd lib/v2-matching && forge build)
+
+      - name: Verify generated TypeScript ABIs are current
+        run: |
+          pnpm --filter @hedge/shared extract-abis
+          git diff --exit-code -- services/shared/src/abis
+
+      - name: forge fmt
+        working-directory: protocol
+        run: forge fmt --check src script test
 
       - name: forge build
         working-directory: protocol
@@ -92,3 +119,8 @@ jobs:
       - name: forge test
         working-directory: protocol
         run: forge test -vvv
+
+      - name: Verify TypeScript typehashes against vendored protocol
+        env:
+          REQUIRE_BUILT_VENDOR: "1"
+        run: pnpm --filter @hedge/shared test typehash.test.ts

@@ -1,8 +1,10 @@
-# DEV — local runbook (frontend on Hedge, BSC testnet)
+# DEV — local stack runbook (Turborepo + BSC testnet)
 
-The frontend is a Next.js app that talks to the **Hedge** protocol on
-**BSC testnet (chainId 97)** — addresses in `protocol/deployments/97.json`,
-deployment notes in `protocol/TESTNET.md`. The user's EOA does everything:
+This runbook starts the local services against **BSC testnet (chainId 97)**.
+The Next.js frontend supports both BSC testnet and BSC mainnet (chainId 56),
+using `protocol/deployments/{97,56}.json` and the network switcher in its header.
+See `protocol/TESTNET.md` and `protocol/MAINNET.md` for chain-specific operations.
+The user's EOA does everything:
 regular transactions for setup (subaccount, approve, deposit, faucet mint) and
 EIP-712 typed-data signatures for protocol Actions (the RFQ taker order).
 No AA wallets, session keys, paymaster or bridging.
@@ -14,7 +16,7 @@ No AA wallets, session keys, paymaster or bridging.
 | services/oracle-feeds | posts signed spot/forward/vol/rate to the on-chain feeds; runs settlement at expiry | — |
 | services/rfq-engine | RFQ auction REST/WS + on-chain trade executor | 3030 |
 | services/maker-bot | reference market maker that quotes the RFQs | — |
-| frontend (`pnpm dev`) | the covered-call UI | 3000 |
+| frontend (`corepack pnpm --filter @hedge/web dev`) | the covered-call UI | 3000 |
 
 All keys live in **`protocol/.env`** (testnet-only, never committed to the
 frontend): `PRIVATE_KEY` (deployer = trade executor = feed poster),
@@ -24,8 +26,8 @@ frontend): `PRIVATE_KEY` (deployer = trade executor = feed poster),
 ## 0. One-time
 
 ```sh
-cd services && pnpm install && pnpm build      # builds shared + all services
-cd ..       && pnpm install                    # frontend deps
+corepack pnpm install --frozen-lockfile
+corepack pnpm build
 ```
 
 ## 1. oracle-feeds — post feeds for the expiries the UI shows
@@ -46,10 +48,9 @@ One-shot snapshot (spot + forward + flat 60% IV surface + 5% rate per expiry;
 `--expiry` is repeatable):
 
 ```sh
-cd services
-source ../protocol/.env
+source protocol/.env
 export CHAIN_ID=97 RPC_URL=$RPC_URL_97_THIRDWEB FEED_SIGNER_KEY
-pnpm --filter @hedge/oracle-feeds post -- \
+corepack pnpm --filter @hedge/oracle-feeds post -- \
   --spot 62790 --iv 0.6 --rate 0.05 \
   --expiry <fri1> --expiry <fri2> --expiry <fri3> --expiry <fri4>
 ```
@@ -59,7 +60,7 @@ stale spot makes `getSpot` revert and the UI will show "No on-chain spot
 price" and fall back to defaults for IV):
 
 ```sh
-SPOT_PRICE=62790 pnpm --filter @hedge/oracle-feeds daemon -- \
+SPOT_PRICE=62790 corepack pnpm --filter @hedge/oracle-feeds daemon -- \
   --interval 60 --expiry <fri1> --expiry <fri2> --expiry <fri3> --expiry <fri4>
 ```
 
@@ -69,19 +70,18 @@ for a live BTC/USD price instead of `SPOT_PRICE`.)
 Settlement after an expiry passes (anyone can call it; needs the feed signer):
 
 ```sh
-pnpm --filter @hedge/oracle-feeds settle -- \
+corepack pnpm --filter @hedge/oracle-feeds settle -- \
   --expiry <epoch> --price <BTC fix> --subaccounts <makerSub>,<takerSub>
 ```
 
 ## 2. rfq-engine
 
 ```sh
-cd services
-source ../protocol/.env
+source protocol/.env
 CHAIN_ID=97 RPC_URL=$RPC_URL_97_THIRDWEB \
 EXECUTOR_PRIVATE_KEY=$PRIVATE_KEY \
 RFQ_PORT=3030 AUCTION_WINDOW_MS=8000 \
-pnpm --filter @hedge/rfq-engine dev
+corepack pnpm --filter @hedge/rfq-engine dev
 ```
 
 It refuses to start unless the executor key is registered via
@@ -91,19 +91,18 @@ the browser calls it directly.
 ## 3. maker-bot
 
 ```sh
-cd services
-source ../protocol/.env
+source protocol/.env
 # one-time: create the maker subaccount + deposit USDT cash
 # (the smoke-test maker 0x5c9C... already has subaccount 5 with 150k USDT,
 #  recorded in services/maker-bot/maker-state.97.json if you ran setup before;
 #  otherwise:)
 CHAIN_ID=97 RPC_URL=$RPC_URL_97_THIRDWEB PRIVATE_KEY=$TESTNET_MAKER_KEY \
-DEPOSIT_USDT=100000 pnpm --filter @hedge/maker-bot setup
+DEPOSIT_USDT=100000 corepack pnpm --filter @hedge/maker-bot setup
 
 # run the quoting bot
 CHAIN_ID=97 RPC_URL=$RPC_URL_97_THIRDWEB PRIVATE_KEY=$TESTNET_MAKER_KEY \
 RFQ_ENGINE_WS=ws://127.0.0.1:3030/maker \
-pnpm --filter @hedge/maker-bot dev
+corepack pnpm --filter @hedge/maker-bot dev
 ```
 
 If you skipped `setup` but the maker already has a subaccount, pass
@@ -114,15 +113,19 @@ feeds (`MAKER_BID_RATIO=0.95` by default) — make sure step 1 ran or set
 ## 4. frontend
 
 ```sh
-# repo root — optional .env.local:
-#   NEXT_PUBLIC_RFQ_ENGINE_URL=http://localhost:3030   (default)
+# repo root — optional apps/web/.env.local:
+#   NEXT_PUBLIC_RFQ_ENGINE_URL_97=http://localhost:3030
+#   NEXT_PUBLIC_RFQ_ENGINE_URL_56=https://rfq.example.com
+#   NEXT_PUBLIC_RFQ_ENGINE_URL=http://localhost:3030   (legacy fallback)
 #   NEXT_PUBLIC_BSC_TESTNET_RPC_URL=https://bsc-testnet.bnbchain.org  (default)
+#   NEXT_PUBLIC_BSC_MAINNET_RPC_URL=https://bsc-dataseed.bnbchain.org (default)
 #   NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID=...  (only needed for WalletConnect wallets)
-pnpm dev
+corepack pnpm --filter @hedge/web dev
 ```
 
-Open http://localhost:3000, connect an EOA on BSC testnet (the UI prompts to
-switch/add the chain), then:
+Open http://localhost:3000. Testnet is the default persisted selection; use the
+header switcher to select chain 97 or 56. For the testnet flow, connect an EOA
+(the UI prompts to switch/add the chain), then:
 
 1. **Gas**: get tBNB from https://www.bnbchain.org/en/testnet-faucet.
 2. **Collateral**: "Get test BTCB" in the header mints 1 mock BTCB
@@ -158,8 +161,11 @@ switch/add the chain), then:
 ## Checks
 
 ```sh
-pnpm build   # Next build + typecheck — must pass clean
-pnpm lint
-pnpm test    # vitest: EIP-712 domain/typehash vs deployments/97.json,
-             # subId encoding vs the live smoke trade, board generation
+corepack pnpm turbo lint test build typecheck
+
+# Contract checks require Foundry and the pinned gitignored vendor sources.
+(cd protocol && ./setup-vendor.sh)
+(cd protocol/lib/v2-core && forge build)
+(cd protocol/lib/v2-matching && forge build)
+(cd protocol && forge fmt --check src script test && forge build && forge test -vvv)
 ```

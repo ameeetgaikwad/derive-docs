@@ -1,4 +1,4 @@
-import type { Address, PublicClient } from "viem";
+import { isAddress, type Address, type PublicClient } from "viem";
 import { toUnit } from "@hedge/shared";
 
 /** Spot price source. Prices are 18dp (the protocol's internal unit). */
@@ -110,4 +110,81 @@ export function priceSourceFromEnv(client: PublicClient): PriceSource {
     return new StaticPriceSource(toUnit(spot));
   }
   throw new Error(`Unknown PRICE_SOURCE "${kind}" (expected static | chainlink)`);
+}
+
+export interface StablePriceConfig {
+  priceSource: PriceSource;
+  intervalSec: number;
+}
+
+const STABLE_FEED_HEARTBEAT_SEC = 3600;
+
+/**
+ * Stable-feed configuration is intentionally separate from BTC PRICE_SOURCE.
+ * Static $1 pricing is a local/testnet aid only; chain 56 must use a live source.
+ */
+export function stablePriceConfigFromEnv(
+  client: PublicClient,
+  chainId: number,
+  env: NodeJS.ProcessEnv = process.env,
+): StablePriceConfig {
+  const kind = env.STABLE_PRICE_SOURCE?.toLowerCase() ?? (chainId === 31337 ? "static" : undefined);
+  if (!kind) {
+    throw new Error(
+      "STABLE_PRICE_SOURCE is required (static for local/testnet, chainlink for production)",
+    );
+  }
+
+  const intervalSec = parsePositiveInteger(
+    "STABLE_FEED_INTERVAL_SEC",
+    env.STABLE_FEED_INTERVAL_SEC ?? "300",
+  );
+  if (intervalSec >= STABLE_FEED_HEARTBEAT_SEC) {
+    throw new Error(
+      `STABLE_FEED_INTERVAL_SEC must be below the ${STABLE_FEED_HEARTBEAT_SEC}s stable-feed heartbeat`,
+    );
+  }
+
+  if (kind === "static") {
+    if (chainId === 56) {
+      throw new Error("STABLE_PRICE_SOURCE=static is forbidden on BSC mainnet (chainId 56)");
+    }
+    const rawPrice = env.STABLE_PRICE ?? (chainId === 31337 ? "1" : undefined);
+    if (!rawPrice) {
+      throw new Error("STABLE_PRICE_SOURCE=static requires STABLE_PRICE");
+    }
+    return {
+      priceSource: new StaticPriceSource(toUnit(rawPrice)),
+      intervalSec,
+    };
+  }
+
+  if (kind === "chainlink") {
+    const aggregator = env.STABLE_CHAINLINK_AGGREGATOR;
+    if (!aggregator || !isAddress(aggregator)) {
+      throw new Error(
+        "STABLE_PRICE_SOURCE=chainlink requires a valid STABLE_CHAINLINK_AGGREGATOR",
+      );
+    }
+    const maxStaleSec = BigInt(
+      parsePositiveInteger(
+        "STABLE_CHAINLINK_MAX_STALE_SEC",
+        env.STABLE_CHAINLINK_MAX_STALE_SEC ?? "3600",
+      ),
+    );
+    return {
+      priceSource: new ChainlinkBscPriceSource(client, aggregator, maxStaleSec),
+      intervalSec,
+    };
+  }
+
+  throw new Error(`Unknown STABLE_PRICE_SOURCE "${kind}" (expected static | chainlink)`);
+}
+
+function parsePositiveInteger(name: string, raw: string): number {
+  const value = Number(raw);
+  if (!Number.isSafeInteger(value) || value <= 0) {
+    throw new Error(`${name} must be a positive integer (received "${raw}")`);
+  }
+  return value;
 }

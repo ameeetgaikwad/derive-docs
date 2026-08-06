@@ -22,7 +22,10 @@ CI/CD for the Hedge Turborepo monorepo (`Sats-Terminal/derive`).
 - **`contracts` job** — installs Foundry (`foundry-rs/foundry-toolchain@v1`), then
   runs `protocol/setup-vendor.sh` to restore the vendored Derive v2 repos at their
   license-pinned commits (`protocol/lib` is **gitignored** and there are no committed
-  submodules), then `forge build` + `forge test` in `protocol/`.
+  submodules). It builds both vendor workspaces, checks the project Solidity format,
+  regenerates and diff-checks the committed TypeScript ABIs, runs `forge build` +
+  `forge test`, and fails closed while checking the TypeScript EIP-712 hashes against
+  the vendored sources and bytecode.
 
 ### `cd.yml`
 
@@ -32,10 +35,12 @@ CI/CD for the Hedge Turborepo monorepo (`Sats-Terminal/derive`).
 - **Guard:** if `vars.AWS_DEPLOY_ROLE_ARN` is unset, the workflow logs a notice and
   skips the deploy job — it will not fail before the AWS infra exists.
 - **Matrix:** builds `rfq-engine` and `oracle-feeds` by default on push to `main`.
-  `workflow_dispatch` accepts a `services` input (comma-separated) to pick which
-  services to deploy — including `maker-bot`, which is otherwise manual-only.
+  `workflow_dispatch` accepts a validated `services` input (comma-separated) to
+  pick either ECS service or `maker-bot`. The maker image is pushed to its ECR
+  repository, but its standalone operator runtime is not managed by ECS.
 - For each service: `docker build -f services/<svc>/Dockerfile -t <ecr>/hedge/<svc>:<sha> .`
-  (build context = repo root), push both `:<sha>` and `:latest` to ECR, then
+  (build context = repo root), then push both `:<sha>` and `:latest` to ECR. For
+  `rfq-engine` and `oracle-feeds`, CD also runs
   `aws ecs update-service --cluster hedge --service hedge-<svc> --force-new-deployment`.
   The ECS **task definition should reference the `:latest` tag**; `--force-new-deployment`
   makes ECS re-pull it. `:<sha>` is pushed alongside for auditability / rollback.
@@ -68,8 +73,7 @@ No AWS access-key secrets are required — CD uses OIDC.
 | ECS cluster | `hedge` |
 | ECS service (rfq-engine) | `hedge-rfq-engine` |
 | ECS service (oracle-feeds) | `hedge-oracle-feeds` |
-| ECS service (maker-bot, optional) | `hedge-maker-bot` |
-| ECR repository | `hedge/<svc>` (e.g. `hedge/rfq-engine`, `hedge/oracle-feeds`) |
+| ECR repository | `hedge/<svc>` (`rfq-engine`, `oracle-feeds`, or `maker-bot`) |
 | Full image URI | `985539774899.dkr.ecr.us-east-1.amazonaws.com/hedge/<svc>:{<sha>,latest}` |
 
 ### OIDC trust prerequisites (provisioned in `infra/` Terraform, not here)

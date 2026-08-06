@@ -115,16 +115,20 @@ export interface AcceptRfqResponse {
   };
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+async function request<T>(
+  baseUrl: string,
+  path: string,
+  init?: RequestInit,
+): Promise<T> {
   let res: Response;
   try {
-    res = await fetch(`${rfqEngineUrl()}${path}`, {
+    res = await fetch(`${baseUrl}${path}`, {
       ...init,
       headers: { "content-type": "application/json", ...init?.headers },
     });
   } catch {
     throw new Error(
-      `RFQ engine unreachable at ${rfqEngineUrl()} — is services/rfq-engine running?`
+      `RFQ engine unreachable at ${baseUrl} — is services/rfq-engine running?`,
     );
   }
   const body = (await res.json().catch(() => ({}))) as Record<string, unknown>;
@@ -135,50 +139,63 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return body as T;
 }
 
-export async function createRfq(params: {
-  subaccountId: bigint;
-  /** unix seconds */
-  expiry: number;
-  /** human decimal strike, e.g. "69000" */
-  strike: string;
-  /** human decimal option amount, e.g. "0.5" */
-  amount: string;
-}): Promise<PublicRfq> {
-  const { rfq } = await request<{ rfq: PublicRfq }>("/rfq", {
-    method: "POST",
-    body: JSON.stringify({
-      subaccountId: params.subaccountId.toString(),
-      instrument: {
-        asset: "BTC",
-        expiry: params.expiry,
-        strike: params.strike,
-        isCall: true,
-      },
-      amount: params.amount,
-      direction: "sell",
-    }),
-  });
+export async function createRfq(
+  params: {
+    subaccountId: bigint;
+    /** unix seconds */
+    expiry: number;
+    /** human decimal strike, e.g. "69000" */
+    strike: string;
+    /** human decimal option amount, e.g. "0.5" */
+    amount: string;
+  },
+  chainId: AppChainId = getActiveChainId(),
+): Promise<PublicRfq> {
+  const { rfq } = await request<{ rfq: PublicRfq }>(
+    rfqEngineUrl(chainId),
+    "/rfq",
+    {
+      method: "POST",
+      body: JSON.stringify({
+        subaccountId: params.subaccountId.toString(),
+        instrument: {
+          asset: "BTC",
+          expiry: params.expiry,
+          strike: params.strike,
+          isCall: true,
+        },
+        amount: params.amount,
+        direction: "sell",
+      }),
+    },
+  );
   return rfq;
 }
 
-export async function getRfq(id: string): Promise<RfqStatusResponse> {
-  return request<RfqStatusResponse>(`/rfq/${id}`);
+export async function getRfq(
+  id: string,
+  chainId: AppChainId = getActiveChainId(),
+): Promise<RfqStatusResponse> {
+  return request<RfqStatusResponse>(rfqEngineUrl(chainId), `/rfq/${id}`);
 }
 
 export async function acceptRfq(
   id: string,
   action: SerializedAction,
-  signature: Hex
+  signature: Hex,
+  chainId: AppChainId = getActiveChainId(),
 ): Promise<AcceptRfqResponse> {
-  return request<AcceptRfqResponse>(`/rfq/${id}/accept`, {
+  return request<AcceptRfqResponse>(rfqEngineUrl(chainId), `/rfq/${id}/accept`, {
     method: "POST",
     body: JSON.stringify({ action, signature }),
   });
 }
 
-export async function rfqEngineHealthy(): Promise<boolean> {
+export async function rfqEngineHealthy(
+  chainId: AppChainId = getActiveChainId(),
+): Promise<boolean> {
   try {
-    await request<{ ok: boolean }>("/health");
+    await request<{ ok: boolean }>(rfqEngineUrl(chainId), "/health");
     return true;
   } catch {
     return false;

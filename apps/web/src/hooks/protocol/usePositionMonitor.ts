@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useAccount, useReadContract, useReadContracts } from "wagmi";
 import { lyraForwardFeedAbi, subAccountsAbi } from "@/lib/protocol/abis";
 import { useNetwork } from "./useNetwork";
@@ -49,6 +49,15 @@ export interface SubaccountBalances {
  */
 export function usePositionMonitor(subaccountId: bigint | null) {
   const { addresses, chainId } = useNetwork();
+  const [now, setNow] = useState(0);
+
+  useEffect(() => {
+    const updateNow = () => setNow(Date.now() / 1000);
+    updateNow();
+    const intervalId = window.setInterval(updateNow, 60_000);
+    return () => window.clearInterval(intervalId);
+  }, []);
+
   const balancesQuery = useReadContract({
     abi: subAccountsAbi,
     address: addresses.subAccounts,
@@ -99,7 +108,6 @@ export function usePositionMonitor(subaccountId: bigint | null) {
   });
 
   const balances = useMemo<SubaccountBalances>(() => {
-    const now = Date.now() / 1000;
     const settlementByExpiry = new Map<number, { settled: boolean; price: number }>();
     expiries.forEach((expiry, i) => {
       const res = settlementReads.data?.[i];
@@ -131,7 +139,7 @@ export function usePositionMonitor(subaccountId: bigint | null) {
     });
 
     return { cash: raw.cash, btcb: raw.btcb, options };
-  }, [raw, expiries, settlementReads.data]);
+  }, [raw, expiries, settlementReads.data, now]);
 
   return {
     balances,
@@ -146,11 +154,12 @@ export function usePositionMonitor(subaccountId: bigint | null) {
  */
 export function usePositions() {
   const { address } = useAccount();
+  const { chainId } = useNetwork();
   const { subaccountId } = useCoveredCallSubaccount();
   const monitor = usePositionMonitor(subaccountId);
   const { tradesFor } = useCoveredCallStore();
 
-  const trades = tradesFor(address);
+  const trades = tradesFor(address, chainId);
 
   const options = useMemo(
     () =>

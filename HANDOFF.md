@@ -63,23 +63,25 @@ protocol/
   lib/v2-core, lib/v2-matching   # vendored, pinned, READ-ONLY (gitignored; setup-vendor.sh restores)
   src/PythSpotFeed.sol           # OUR Pyth+Chainlink spot adapter (GPL-3.0)
   script/                        # OUR deploy scripts: DeployAll, MarketDeployerBase, AddMarket
-  deployments/                   # 31337.json (anvil), 97.json (BSC testnet) + sidecars
-  PROVENANCE.md SPEC.md TESTNET.md E2E.md README.md
-services/                        # pnpm workspace, Node 22, viem, strict TS. Packages = @hedge/*
+  deployments/                   # 56.json (mainnet), 97.json (testnet), local anvil output
+  PROVENANCE.md SPEC.md MAINNET.md TESTNET.md E2E.md README.md
+services/                        # @hedge/* packages in the root pnpm workspace
   shared/        # ABIs, EIP-712 Action signing, RFQ encoding, viem clients (chain-97 legacy-gas forced)
   rfq-engine/    # WS/REST RFQ auction + on-chain executor (Matching.verifyAndMatch)
   oracle-feeds/  # signed feed poster (spot/forward/vol/rate/stable) + settlement + pyth-push
   maker-bot/     # reference market maker (Black-76 pricing off on-chain feeds, auto-quotes)
   e2e/           # anvil acceptance harness (run.ts) + testnet smoke (testnet-smoke.ts)
-src/             # Next.js 16 frontend (App Router, wagmi/RainbowKit, viem). src/lib/protocol/ = integration layer
+apps/web/        # Next.js 16 frontend; apps/web/src/lib/protocol/ = integration layer
 docs/            # market-maker-integration.md (full MM spec)
 docs-site/       # Mintlify docs site (20 pages, 3 tabs) — validated, not yet published
+.github/workflows/ # Turborepo/Foundry CI and AWS OIDC CD
+infra/           # Terraform: ECR, ECS, ALB, IAM/KMS access, SSM and GitHub OIDC
 DEV.md           # local runbook (how to start all services + frontend)
 ```
 
-Frontend integration lives in `src/lib/protocol/` (deployments, ABIs, EIP-712 signing
+Frontend integration lives in `apps/web/src/lib/protocol/` (deployments, ABIs, EIP-712 signing
 verified against vendored source, RFQ encoding, local strike-board, client-side Black-76,
-rfq-engine REST client). All old Derive plumbing (`src/lib/derive/*`, AA/session keys,
+rfq-engine REST client). All old Derive plumbing (`apps/web/src/lib/derive/*`, AA/session keys,
 paymaster, bridge, proxy API routes) was **deleted**.
 
 ---
@@ -88,6 +90,11 @@ paymaster, bridge, proxy API routes) was **deleted**.
 
 - **Contracts deployed + wired on BSC testnet (chainId 97)** — addresses in
   `protocol/deployments/97.json`, table in `protocol/TESTNET.md`.
+- **Mainnet contracts deployed on 2026-07-01 (chainId 56)** — repository deployment
+  record and remaining launch gates are in `protocol/MAINNET.md`; this does not by
+  itself confirm the services are currently running.
+- **Frontend supports both chain 56 and 97** with runtime network selection and
+  chain-specific deployments, RPCs, RFQ endpoints, explorers, and testnet-only faucets.
 - **Anvil E2E passed** (deploy → feeds → deposit → RFQ → on-chain fill → ITM+OTM settlement).
 - **First live covered-call trade on testnet** (`protocol/TESTNET.md` "Live smoke trade"):
   tx `0x2d5d7c88ca7ea1c7f8bf46760487c01331525666546903c41dda29d5c2d4d9d3`, premium 378.59 USDT.
@@ -101,7 +108,12 @@ paymaster, bridge, proxy API routes) was **deleted**.
   limiting + host binding, taker-accept deadline + maker failure/expiry notifications + fill
   reports, quote cancel/replace + connection dedupe, WS heartbeats, durable JSONL store with
   crash recovery, fee-aware collateral pre-check (reads live OI fee). maker-bot speaks it.
-- **Tests green**: services 69, Foundry 23, frontend 8. Frontend `pnpm build` clean.
+- **Monorepo validation**: `corepack pnpm turbo lint test build typecheck` covers the
+  web app and TypeScript services. Foundry validation restores the pinned vendor repos,
+  builds them, then runs `forge fmt --check src script test`, `forge build`, and `forge test`.
+- **Production infrastructure authored** for `rfq-engine` and `oracle-feeds`: Docker,
+  GitHub OIDC CI/CD, and Terraform/ECS/KMS. Repository presence does not prove AWS is
+  currently applied or healthy; use `infra/README.md` for the gated rollout.
 - **Docs**: `docs/market-maker-integration.md` + Mintlify `docs-site/` (validated, no broken links).
 
 ### Key testnet addresses (chainId 97)
@@ -125,61 +137,46 @@ paymaster, bridge, proxy API routes) was **deleted**.
 2. **Public BSC testnet RPCs are flaky.** Prefer the thirdweb endpoint in `.env`
    (`RPC_URL_97_THIRDWEB`), retry `--retries 12 --delay 5`.
 3. **Pyth staleness = 60s.** The SRM spot feed reverts if the Pyth price is >60s old →
-   trades fail. Run `pnpm --filter @hedge/oracle-feeds pyth-push` (or loop it) before/while trading.
+   trades fail. The `oracle-feeds daemon` refreshes Pyth and signed feeds by default.
 4. **Lyra signed feeds (forward/vol/rate) have heartbeats** → must be posted recently or
    `getSpot`/margin reverts. The `oracle-feeds daemon` keeps them fresh; **the feed signer
    needs tBNB** (it posts the txs — top it up from the deployer).
 5. **When verifying on-chain reads in bash**, an RPC error can look like success — check for
    non-empty, non-zero output explicitly (this caused a false "mint landed" earlier).
-6. To run the full stack locally: follow **`DEV.md`** (oracle-feeds daemon + pyth-push loop +
-   rfq-engine on :3030 + maker-bot + `pnpm dev` frontend on :3000).
-
-### Known open thread (last session, incomplete)
-A browser walkthrough of the frontend was in progress (recording a GIF of the full flow).
-The "Get test BTCB" mint via MetaMask did not confirm (user reported the wallet signing
-didn't go through). Nothing is broken — the live smoke trade already proved the flow via the
-services. To finish the browser demo: ensure feeds are fresh, connect wallet on BSC testnet,
-fund it with tBNB from the deployer, mint test BTCB, then drive deposit → RFQ → sign → settle.
+6. To run the full stack locally: follow **`DEV.md`** (oracle-feeds daemon,
+   rfq-engine on :3030, maker-bot, and `corepack pnpm --filter @hedge/web dev`
+   for the frontend on :3000).
 
 ---
 
-## 6. Next steps to go live (mainnet)
+## 6. Mainnet contracts are deployed; product launch is still gated
 
-**Pre-mainnet gates (require the user / external):**
-1. **Ownership → multisig.** Right now the deployer hot key (`0x6e15…`) owns every contract.
+**Launch gates (require the user / external):**
+1. **Real-BTCB smoke trade.** Complete the tiny mainnet end-to-end trade and
+   settlement rehearsal documented in `protocol/MAINNET.md` before opening the UI.
+2. **Ownership → multisig.** Right now the deployer hot key (`0x6e15…`) owns every contract.
    Move all owner roles to a Gnosis Safe the user controls. Disqualifying for mainnet otherwise.
-2. **Feed signer hardening.** Testnet is 1-of-1. Mainnet needs **N-of-M signers** (contracts
-   already support it) with HSM-held keys, and a **real vol/forward data source** (SVI fit
-   from Deribit/Binance options, or a vendor like Block Scholes; Stork is the Rysk approach).
-3. **Anchor settlement to Pyth/Chainlink.** Settlement still uses the signed forward print
-   (`LyraForwardFeed` wraps `LyraSpotFeed`). Anchor the expiry print to Pyth/Chainlink TWAP —
-   this is the number that moves money (cf. the KiloEx oracle exploit).
-4. **Diff-audit.** Sigma Prime audited the forked base; our deltas (PythSpotFeed adapter,
+3. **Diff-audit.** Sigma Prime audited the forked base; our deltas (PythSpotFeed adapter,
    deploy/config changes) are new code and should get a focused review.
-5. **MM onboarding.** Collect real market-maker addresses for `MAKER_ALLOWLIST`; have ≥1 MM
+4. **MM onboarding.** Collect real market-maker addresses for `MAKER_ALLOWLIST`; have ≥1 MM
    quote on testnet through the docs for a week of adversarial use before real money.
-6. **Real tokens + config.** Use canonical BSC BTCB/USDT addresses (both 18 decimals);
-   set sane caps/margin params; decide premium-leg stablecoin (USDT vs USD1/FDUSD).
-7. **Gasless UX** (optional but planned): wire MegaFuel paymaster + EIP-7702 for sponsored
-   plain-EOA transactions (replaces what was Derive's bundler/paymaster).
-8. **Service hosting**: rfq-engine + oracle-feeds (+ pyth-push loop) + maker-bot need a host
-   with TLS/wss (reverse proxy) and monitoring; durable store path configured.
-9. **Docs publish**: connect Mintlify GitHub app to the repo, content dir `docs-site/`
-   (hobby tier, `*.mintlify.app`). Steps in `docs-site/README.md`.
+5. **Service hosting**: apply/verify the authored AWS stack for rfq-engine +
+   oracle-feeds, configure TLS/wss and monitoring, and set a durable RFQ store path.
+   The maker-bot is a separate market-maker artifact, not an ECS service in `infra/`.
+6. **Frontend production config**: set the chain-56 RPC and RFQ endpoints, verify
+   the TLS domain, and run a wallet-level mainnet review before public release.
 
-**Near-term build items (can proceed on testnet now):**
-- Finish the browser walkthrough / demo GIF.
-- Settlement rehearsal for the live position (instrument expires **2026-06-19 08:00 UTC**;
-  `oracle-feeds settle --expiry 1781856000 --price <fix> --subaccounts 5,6`).
+**Near-term build items:**
 - Add cash-secured puts (nearly free on the deployed contracts — put seller deposits USDT
   into the same CashAsset, sells via the same RfqModule; mostly frontend + config).
 - Deploy the ETH market to testnet via `AddMarket.s.sol` to exercise multi-asset.
-- pyth-push as a proper daemon / pre-trade hook (not a one-shot loop).
+- Publish the Mintlify docs and consider gas sponsorship after the core launch gates.
 
 ---
 
 ## 7. Phase roadmap
-1. **Phase 1 (current)**: covered calls + RFQ, fully collateralized, BTC only, BSC testnet → mainnet.
+1. **Phase 1 (current)**: covered calls + RFQ, fully collateralized, BTC only;
+   testnet proven, mainnet contracts deployed, launch gates outstanding.
 2. **Phase 2**: cash-secured puts; cash-settled margin trading (SRM margin + DutchAuction
    liquidations — DutchAuction is deployed, dormant); more underlyings (ETH, BNB).
 3. **Phase 3**: optional CLOB via the dormant TradeModule + own matching engine; portfolio

@@ -1,11 +1,15 @@
 #!/usr/bin/env node
+import "dotenv/config";
+
 import {
+  fromUnit,
   getChainId,
+  instrumentNameFromSubId,
   makePublicClient,
   makeWalletClient,
   toUnit,
 } from "@hedge/shared";
-import { getDeadlineSec, getFeedSignerAccount } from "./env.js";
+import { getDeadlineSec, getFeedSignerAccount, getPythPusherAccount } from "./env.js";
 import {
   FeedPoster,
   feedAddressesFromDeployments,
@@ -13,9 +17,23 @@ import {
   type SnapshotParams,
 } from "./poster.js";
 import { buildDeribitSnapshot } from "./deribitSnapshot.js";
-import { priceSourceFromEnv, StaticPriceSource, type PriceSource } from "./priceSource.js";
+import {
+  priceSourceFromEnv,
+  stablePriceConfigFromEnv,
+  StaticPriceSource,
+  type PriceSource,
+  type StablePriceConfig,
+} from "./priceSource.js";
 import { SettlementRunner, settlementAddressesFromDeployments } from "./settlement.js";
 import { pushPythUpdate, pythAddressesFromDeployments, type PythAddresses } from "./pyth.js";
+import { ActiveExpiryIndex } from "./activeExpiryIndex.js";
+import {
+  buildOracleExpirySet,
+  parseExpiryList,
+  tradeableFridayExpiries,
+} from "./expiryPolicy.js";
+import { SettlementTwapTracker } from "./settlementTwap.js";
+import { SerialTransactionQueue } from "./transactionQueue.js";
 
 const USAGE = `oracle-feeds — signed feed poster + settlement runner (hedge)
 
@@ -25,15 +43,19 @@ Usage:
       One-shot: post spot (+ forward/rate/flat-IV SVI vol per --expiry).
       --spot falls back to the PRICE_SOURCE env config (static/chainlink).
 
-  oracle-feeds daemon [--interval 15] [--spot ...] [--expiry <unix>]... [--iv 0.6] [--rate 0.05]
-      Repost the same snapshot every --interval seconds (default 15).
+  oracle-feeds daemon [--interval 30] [--feed-interval 120]
+                      [--spot ...] [--expiry <unix>]... [--iv 0.6] [--rate 0.05]
+      Keep Pyth, signed BTC market feeds, and the stable feed fresh. Pyth is
+      refreshed every --interval seconds; BTC and stable feeds use independent
+      intervals from FEED_INTERVAL_SEC and STABLE_FEED_INTERVAL_SEC.
 
   oracle-feeds pyth-push [--pyth 0x..] [--price-id 0x..] [--adapter 0x..] [--hermes <url>]
       Fetch the latest signed BTC/USD update from Pyth Hermes and submit it to the
       on-chain Pyth contract via updatePriceFeeds (paying the update fee), then read
       getSpot() back through the PythSpotFeed adapter. Defaults come from the
       deployments JSON (keys: pyth, btcPythPriceId, btcPythSpotFeed); HERMES_URL env
-      overrides the Hermes endpoint. The sender (FEED_SIGNER_KEY) only needs gas.
+      overrides the Hermes endpoint. The sender (PYTH_PUSHER_*; feed signer
+      fallback) only needs gas.
 
   oracle-feeds settle --expiry <unix> --subaccounts 4,5
                       [--price <settlement price>] [--signed] [--skip-feed]
@@ -45,9 +67,18 @@ Usage:
       legacy signed forward-feed path (requires --price; use for deployments
       whose OptionAsset still settles against LyraForwardFeed, e.g. anvil).
 
+  oracle-feeds status
+      Read-only: sync the durable BalanceAdjusted index and print every held
+      option, active live-feed expiry, expired settlement candidate, and
+      finalized checkpoint. Does not require a signing key or send a tx.
+
 Env: RPC_URL (default http://127.0.0.1:8545), CHAIN_ID (default 31337),
      FEED_SIGNER_KEY (default: anvil key #0 on 31337), FEED_DEADLINE_SEC,
-     PRICE_SOURCE=static|chainlink, SPOT_PRICE, CHAINLINK_AGGREGATOR.
+     PRICE_SOURCE=static|chainlink, SPOT_PRICE, CHAINLINK_AGGREGATOR,
+     STABLE_PRICE_SOURCE=static|chainlink, STABLE_PRICE,
+     STABLE_CHAINLINK_AGGREGATOR, STABLE_FEED_INTERVAL_SEC,
+     ORACLE_DISCOVERY_FROM_BLOCK, ORACLE_EXTRA_EXPIRIES, ORACLE_BATCH,
+     AUTO_SETTLE, PYTH_PUSHER_KMS_KEY_ID or PYTH_PUSHER_PRIVATE_KEY.
 `;
 
 interface Args {
@@ -84,6 +115,7 @@ async function buildPoster() {
   const signer = await getFeedSignerAccount(chainId);
   const publicClient = makePublicClient({ chainId });
   const walletClient = makeWalletClient(signer, { chainId });
+  const transactionQueue = new SerialTransactionQueue();
   const addresses = feedAddressesFromDeployments(chainId);
   const poster = new FeedPoster(
     publicClient,
@@ -92,27 +124,9 @@ async function buildPoster() {
     chainId,
     addresses,
     getDeadlineSec(),
+    transactionQueue,
   );
-  return { chainId, signer, publicClient, walletClient, poster };
-}
-
-/**
- * Next `count` weekly expiries: Fridays 08:00 UTC, strictly >1 day out.
- * Mirrors apps/web board.ts so the daemon always posts for exactly the
- * expiries the UI shows. Recomputed each daemon cycle, so never stale.
- */
-function upcomingFridayExpiries(count: number, nowMs = Date.now()): bigint[] {
-  const out: bigint[] = [];
-  const d = new Date(nowMs);
-  const candidate = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 8, 0, 0));
-  const daysToFriday = (5 - candidate.getUTCDay() + 7) % 7;
-  candidate.setUTCDate(candidate.getUTCDate() + daysToFriday);
-  while (out.length < count) {
-    const epoch = Math.floor(candidate.getTime() / 1000);
-    if (epoch - nowMs / 1000 > 86400) out.push(BigInt(epoch));
-    candidate.setUTCDate(candidate.getUTCDate() + 7);
-  }
-  return out;
+  return { chainId, signer, publicClient, walletClient, poster, transactionQueue };
 }
 
 function expiriesFromArgs(args: Args): SnapshotExpiryParams[] {
@@ -138,6 +152,7 @@ async function cmdPost(args: Args): Promise<void> {
   const { poster, publicClient, signer, chainId } = await buildPoster();
   console.log(`[oracle-feeds] chain=${chainId} signer=${signer.address}`);
   const conf = one(args, "conf") ? toUnit(one(args, "conf")!) : undefined;
+  await postStableUpdate(poster, stablePriceConfigFromEnv(publicClient, chainId));
 
   if (one(args, "source") === "deribit") {
     const snapshot = await buildDeribitSnapshotFromArgs(args, poster);
@@ -153,24 +168,43 @@ async function cmdPost(args: Args): Promise<void> {
   });
 }
 
+async function postStableUpdate(
+  poster: Awaited<ReturnType<typeof buildPoster>>["poster"],
+  config: StablePriceConfig,
+): Promise<void> {
+  const price = await config.priceSource.getSpotPrice();
+  const tx = await poster.postStable(price);
+  console.log(
+    `[oracle-feeds] stable ${fromUnit(price)}  source=${config.priceSource.name}  tx=${tx}`,
+  );
+}
+
 /** Fetch the Deribit surface and build a fitted-SVI snapshot for the requested expiries. */
 async function buildDeribitSnapshotFromArgs(
   args: Args,
   poster: Awaited<ReturnType<typeof buildPoster>>["poster"],
+  requestedExpiries?: bigint[],
+  requestedNow?: bigint,
 ): Promise<SnapshotParams> {
   const explicit = (args.flags.get("expiry") ?? []).map((e) => BigInt(e));
-  // Default to the upcoming weekly expiries (matching the frontend board) when
-  // none are passed — so the deployed daemon needs no hardcoded/rolling expiries.
-  const count = Number(one(args, "expiry-count") ?? process.env.EXPIRY_COUNT ?? "4");
-  const expiries = explicit.length > 0 ? explicit : upcomingFridayExpiries(count);
+  const count = positiveInteger(
+    "EXPIRY_COUNT",
+    one(args, "expiry-count") ?? process.env.EXPIRY_COUNT ?? "4",
+  );
+  const now = requestedNow ?? (await poster.chainNow());
+  const expiries =
+    requestedExpiries ??
+    (explicit.length > 0 ? explicit : tradeableFridayExpiries(count, now));
   const rate = one(args, "rate");
   const tolerance = one(args, "expiry-tolerance");
-  const now = Number(await poster.chainNow());
   const { snapshot, fitted, indexPrice } = await buildDeribitSnapshot({
     expiries,
-    now,
+    now: Number(now),
     rate: rate ? toUnit(rate) : undefined,
     toleranceSec: tolerance ? Number(tolerance) : 0,
+    allowFlatFallback:
+      (process.env.DERIBIT_ALLOW_FLAT_FALLBACK ?? (getChainId() === 56 ? "false" : "true"))
+        .toLowerCase() === "true",
   });
   console.log(`[oracle-feeds] deribit index=${indexPrice}`);
   for (const f of fitted) {
@@ -180,82 +214,321 @@ async function buildDeribitSnapshotFromArgs(
 }
 
 async function cmdDaemon(args: Args): Promise<void> {
-  const { poster, publicClient, signer, chainId } = await buildPoster();
-  // Loop cadence = the Pyth-refresh cadence (must stay under the adapter's ~60s
-  // staleness). Signed feeds (forward/vol/rate) move slowly, so they post on a
-  // longer cadence — most loops are just one cheap Pyth tx. Keeps gas sane.
-  const intervalSec = Number(one(args, "interval") ?? process.env.INTERVAL_SEC ?? "45");
-  const feedIntervalSec = Number(one(args, "feed-interval") ?? process.env.FEED_INTERVAL_SEC ?? "300");
+  const { poster, publicClient, walletClient, signer, chainId, transactionQueue } =
+    await buildPoster();
+  const intervalSec = positiveInteger(
+    "INTERVAL_SEC",
+    one(args, "interval") ?? process.env.INTERVAL_SEC ?? "30",
+  );
+  const feedIntervalSec = positiveInteger(
+    "FEED_INTERVAL_SEC",
+    one(args, "feed-interval") ?? process.env.FEED_INTERVAL_SEC ?? "120",
+  );
+  if (intervalSec >= 60) {
+    throw new Error("INTERVAL_SEC must be below the Pyth adapter's 60-second staleness limit");
+  }
+  if (feedIntervalSec >= 180) {
+    throw new Error("FEED_INTERVAL_SEC must be below the signed spot feed's 180-second heartbeat");
+  }
+
   const useDeribit = one(args, "source") === "deribit";
-  // Only build a spot source for the non-Deribit path (Deribit brings its own index).
   const source = useDeribit
     ? null
     : one(args, "spot")
       ? new StaticPriceSource(toUnit(one(args, "spot")!))
       : priceSourceFromEnv(publicClient);
-  const expiries = expiriesFromArgs(args);
+  const stableConfig = stablePriceConfigFromEnv(publicClient, chainId);
+  const expiryCount = positiveInteger(
+    "EXPIRY_COUNT",
+    one(args, "expiry-count") ?? process.env.EXPIRY_COUNT ?? "4",
+  );
+  const maxExpiries = positiveInteger("ORACLE_MAX_EXPIRIES", process.env.ORACLE_MAX_EXPIRIES ?? "32");
+  const explicitExpiryParams = expiriesFromArgs(args);
+  const extraExpiries = parseExpiryList(process.env.ORACLE_EXTRA_EXPIRIES, "ORACLE_EXTRA_EXPIRIES");
+  for (const entry of explicitExpiryParams) extraExpiries.push(entry.expiry);
+  const useBatch =
+    (chainId === 56 || chainId === 97) &&
+    (process.env.ORACLE_BATCH ?? "true").toLowerCase() !== "false";
+  if (
+    chainId === 56 &&
+    !useBatch &&
+    (process.env.ORACLE_ALLOW_UNBATCHED ?? "false").toLowerCase() !== "true"
+  ) {
+    throw new Error(
+      "chain 56 requires atomic Multicall3 snapshots; set ORACLE_ALLOW_UNBATCHED=true only for a reviewed incident",
+    );
+  }
 
-  // Also refresh the on-chain Pyth adapter (the SRM's margin spot feed) each
-  // cycle so it never goes stale — the daemon keeps BOTH the signed feeds and
-  // the Pyth adapter fresh from one process. Default-on whenever the deployment
-  // has a Pyth adapter; disable with PYTH_PUSH=false or --no-pyth.
+  const activeIndex = activeExpiryIndexFromEnv(publicClient, chainId);
+  const twapTracker = new SettlementTwapTracker({
+    chainId,
+    ...(process.env.ORACLE_TWAP_STATE_PATH ? { statePath: process.env.ORACLE_TWAP_STATE_PATH } : {}),
+  });
+  const allowLateTwapBackfill =
+    (process.env.ORACLE_ALLOW_LATE_TWAP_BACKFILL ?? (chainId === 56 ? "false" : "true"))
+      .toLowerCase() === "true";
+  await activeIndex.sync();
+
   const pythDisabled =
     args.bools.has("no-pyth") || (process.env.PYTH_PUSH ?? "").toLowerCase() === "false";
+  if (chainId === 56 && pythDisabled) {
+    throw new Error("Pyth updates cannot be disabled on chain 56");
+  }
   let pythAddresses: PythAddresses | null = null;
   if (!pythDisabled) {
     try {
       pythAddresses = pythAddressesFromDeployments(chainId);
-    } catch {
-      pythAddresses = null; // no adapter on this chain — signed feeds only
+    } catch (error) {
+      if (chainId !== 31337) {
+        throw new Error(`Pyth deployment configuration is required on chain ${chainId}`, {
+          cause: error,
+        });
+      }
+      pythAddresses = null; // plain anvil has no Pyth adapter
     }
   }
-  const walletClient = pythAddresses ? makeWalletClient(signer, { chainId }) : null;
+  const pythAccount = pythAddresses ? await getPythPusherAccount(chainId, signer) : null;
+  const pythWalletClient = pythAccount ? makeWalletClient(pythAccount, { chainId }) : null;
+  const pythTransactionQueue =
+    pythAccount && pythAccount.address.toLowerCase() !== signer.address.toLowerCase()
+      ? new SerialTransactionQueue()
+      : transactionQueue;
+
+  const autoSettle = (process.env.AUTO_SETTLE ?? "false").toLowerCase() === "true";
+  const settlementIntervalSec = positiveInteger(
+    "SETTLEMENT_INTERVAL_SEC",
+    process.env.SETTLEMENT_INTERVAL_SEC ?? "60",
+  );
+  const settlementRetrySec = positiveInteger(
+    "SETTLEMENT_RETRY_SEC",
+    process.env.SETTLEMENT_RETRY_SEC ?? "300",
+  );
+  const settlementAddresses = settlementAddressesFromDeployments(chainId);
+  if (autoSettle && !settlementAddresses.anchoredSettlementFeed) {
+    throw new Error("AUTO_SETTLE=true requires an anchored settlement feed; signed fallback is not automatic");
+  }
+  const settlementRunner = autoSettle
+    ? new SettlementRunner(
+        publicClient,
+        walletClient,
+        signer,
+        poster,
+        settlementAddresses,
+        transactionQueue,
+      )
+    : null;
 
   console.log(
     `[oracle-feeds] daemon chain=${chainId} signer=${signer.address} ` +
       `source=${useDeribit ? "deribit" : source!.name} interval=${intervalSec}s ` +
       `feedInterval=${feedIntervalSec}s pyth=${pythAddresses ? "on" : "off"} ` +
-      `expiries=[${expiries.map((e) => e.expiry).join(",")}]`,
+      `stable=${stableConfig.priceSource.name}/${stableConfig.intervalSec}s ` +
+      `batch=${useBatch ? "on" : "off"} autoSettle=${autoSettle ? "on" : "off"}`,
   );
+  if (pythAccount) {
+    console.log(`[oracle-feeds] pyth sender=${pythAccount.address}`);
+  }
 
-  let lastFeedPost = 0;
-  // eslint-disable-next-line no-constant-condition
-  while (true) {
-    const nowMs = Date.now();
-    if (nowMs - lastFeedPost >= feedIntervalSec * 1000) {
-      try {
-        if (useDeribit) {
-          const snapshot = await buildDeribitSnapshotFromArgs(args, poster);
-          await poster.postSnapshot(snapshot);
-        } else {
-          const spot = await source!.getSpotPrice();
-          await poster.postSnapshot({ spot, expiries });
-        }
-        lastFeedPost = nowMs;
-      } catch (err) {
-        console.error(`[oracle-feeds] post failed: ${(err as Error).message}`);
+  const loops: Promise<never>[] = [];
+  loops.push(
+    runPeriodic("active-expiry discovery", positiveInteger(
+      "ORACLE_DISCOVERY_INTERVAL_SEC",
+      process.env.ORACLE_DISCOVERY_INTERVAL_SEC ?? "15",
+    ), async () => activeIndex.sync()),
+  );
+  loops.push(
+    runPeriodic("signed feed", feedIntervalSec, async () => {
+      await activeIndex.sync();
+      const policyNow = await poster.chainNow();
+      const expirySet = buildOracleExpirySet({
+        nowSec: policyNow,
+        tradeable: tradeableFridayExpiries(expiryCount, policyNow),
+        active: activeIndex.activeExpiries(policyNow),
+        extra: extraExpiries,
+      });
+      if (expirySet.posting.length > maxExpiries) {
+        throw new Error(
+          `oracle needs ${expirySet.posting.length} expiries, above ORACLE_MAX_EXPIRIES=${maxExpiries}; ` +
+            "raise the reviewed capacity limit rather than dropping live positions",
+        );
       }
-    }
-    if (pythAddresses && walletClient) {
-      try {
+      console.log(
+        `[oracle-feeds] expiries tradeable=[${expirySet.tradeable.join(",")}] ` +
+          `active=[${expirySet.active.join(",")}] extra=[${expirySet.extra.join(",")}]`,
+      );
+      const expiredBacklog = activeIndex.expiredSeries(policyNow);
+      if (!settlementRunner && expiredBacklog.length > 0) {
+        console.warn(
+          `[oracle-feeds] ${expiredBacklog.length} expired series await settlement; ` +
+            "run the settle command or enable reviewed AUTO_SETTLE",
+        );
+      }
+
+      let snapshot: SnapshotParams;
+      if (useDeribit) {
+        snapshot = await buildDeribitSnapshotFromArgs(args, poster, expirySet.posting, policyNow);
+      } else {
+        const spot = await source!.getSpotPrice();
+        snapshot = {
+          spot,
+          expiries: expiryParamsFor(expirySet.posting, args),
+        };
+      }
+      const observedAt = await poster.chainNow();
+      snapshot = await attachSettlementAggregates(
+        snapshot,
+        observedAt,
+        twapTracker,
+        allowLateTwapBackfill,
+      );
+      if (useBatch) await poster.postSnapshotBatched(snapshot);
+      else await poster.postSnapshot(snapshot);
+    }),
+  );
+  loops.push(
+    runPeriodic("stable feed", stableConfig.intervalSec, async () =>
+      postStableUpdate(poster, stableConfig),
+    ),
+  );
+  if (pythAddresses && pythWalletClient && pythAccount) {
+    loops.push(
+      runPeriodic("Pyth", intervalSec, async () => {
         await pushPythUpdate({
           publicClient,
-          walletClient,
-          account: signer,
+          walletClient: pythWalletClient,
+          account: pythAccount,
           addresses: pythAddresses,
           hermesUrl: one(args, "hermes"),
+          transactionQueue: pythTransactionQueue,
         });
-      } catch (err) {
-        console.error(`[oracle-feeds] pyth push failed: ${(err as Error).message}`);
-      }
-    }
-    await new Promise((r) => setTimeout(r, intervalSec * 1000));
+      }),
+    );
   }
+  if (settlementRunner) {
+    const cooldown = new Map<string, number>();
+    loops.push(
+      runPeriodic("settlement", settlementIntervalSec, async () => {
+        await activeIndex.sync();
+        const chainNow = await poster.chainNow();
+        for (const series of activeIndex.expiredSeries(chainNow)) {
+          const key = series.expiry.toString();
+          if ((cooldown.get(key) ?? 0) > Date.now()) continue;
+          // The durable balance index is the settlement source of truth. OptionAsset
+          // OI counts only positive balances, so it can reach zero after the long
+          // settles while a short balance still remains. settleOptions is idempotent;
+          // retry every indexed account until confirmed zero-balance events remove it.
+          await settlementRunner.run({
+            expiry: series.expiry,
+            subaccounts: series.subaccounts,
+          });
+          cooldown.set(key, Date.now() + settlementRetrySec * 1000);
+          console.log(
+            `[oracle-feeds] settlement ${series.expiry} submitted; retaining index entries ` +
+              "until confirmed zero-balance events are indexed",
+          );
+        }
+      }),
+    );
+  }
+
+  await Promise.all(loops);
+}
+
+function expiryParamsFor(expiries: readonly bigint[], args: Args): SnapshotExpiryParams[] {
+  const forward = one(args, "forward");
+  const iv = one(args, "iv");
+  const rate = one(args, "rate");
+  return expiries.map((expiry) => ({
+    expiry,
+    forwardPrice: forward ? toUnit(forward) : undefined,
+    iv: iv ? toUnit(iv) : undefined,
+    rate: rate ? toUnit(rate) : undefined,
+  }));
+}
+
+async function attachSettlementAggregates(
+  snapshot: SnapshotParams,
+  observedAt: bigint,
+  tracker: SettlementTwapTracker,
+  allowLateBackfill: boolean,
+): Promise<SnapshotParams> {
+  const expiries: SnapshotExpiryParams[] = [];
+  for (const entry of snapshot.expiries ?? []) {
+    // Crossing expiry while fetching a market surface is possible. Never sign
+    // an invalid post-expiry forward update; the settlement loop owns it now.
+    if (observedAt >= entry.expiry) continue;
+    const settlement = await tracker.observe(entry.expiry, observedAt, snapshot.spot);
+    if (settlement?.lateStart) {
+      if (!allowLateBackfill) {
+        throw new Error(
+          `settlement TWAP history is incomplete for expiry ${entry.expiry}; ` +
+            "late backfill is disabled",
+        );
+      }
+      console.warn(
+        `[oracle-feeds] TWAP tracker started late for expiry ${entry.expiry}; ` +
+          "backfilled the missing interval and requires operator review",
+      );
+    }
+    expiries.push({
+      ...entry,
+      ...(settlement
+        ? {
+            settlement: {
+              settlementStartAggregate: settlement.settlementStartAggregate,
+              currentSpotAggregate: settlement.currentSpotAggregate,
+            },
+          }
+        : {}),
+    });
+  }
+  return { ...snapshot, timestamp: observedAt, expiries };
+}
+
+async function runPeriodic(
+  name: string,
+  intervalSec: number,
+  operation: () => Promise<unknown>,
+): Promise<never> {
+  // eslint-disable-next-line no-constant-condition
+  while (true) {
+    const started = Date.now();
+    try {
+      await operation();
+    } catch (error) {
+      console.error(`[oracle-feeds] ${name} failed: ${(error as Error).message}`);
+    }
+    const remainingMs = intervalSec * 1000 - (Date.now() - started);
+    await new Promise((resolve) => setTimeout(resolve, Math.max(1_000, remainingMs)));
+  }
+}
+
+function positiveInteger(name: string, raw: string): number {
+  const value = Number(raw);
+  if (!Number.isSafeInteger(value) || value <= 0) {
+    throw new Error(`${name} must be a positive integer (received "${raw}")`);
+  }
+  return value;
+}
+
+function nonNegativeInteger(name: string, raw: string): number {
+  const value = Number(raw);
+  if (!Number.isSafeInteger(value) || value < 0) {
+    throw new Error(`${name} must be a non-negative integer (received "${raw}")`);
+  }
+  return value;
+}
+
+function optionalBigIntEnv(name: string): bigint | undefined {
+  const raw = process.env[name]?.trim();
+  if (!raw) return undefined;
+  if (!/^\d+$/.test(raw)) throw new Error(`${name} must be a non-negative integer`);
+  return BigInt(raw);
 }
 
 async function cmdPythPush(args: Args): Promise<void> {
   const chainId = getChainId();
-  const account = await getFeedSignerAccount(chainId);
+  const account = await getPythPusherAccount(chainId);
   const publicClient = makePublicClient({ chainId });
   const walletClient = makeWalletClient(account, { chainId });
 
@@ -286,6 +559,58 @@ async function cmdPythPush(args: Args): Promise<void> {
   });
 }
 
+async function cmdStatus(): Promise<void> {
+  const chainId = getChainId();
+  const publicClient = makePublicClient({ chainId });
+  const index = activeExpiryIndexFromEnv(publicClient, chainId);
+  await index.sync();
+  const block = await publicClient.getBlock();
+  const checkpoint = index.checkpoint();
+  console.log(
+    `[oracle-feeds] status chain=${chainId} chainTime=${block.timestamp} ` +
+      `checkpoint=${checkpoint.lastScannedBlock} fromBlock=${checkpoint.fromBlock} ` +
+      `positions=${checkpoint.positionCount}`,
+  );
+  for (const position of index.positions()) {
+    console.log(
+      `[oracle-feeds] account=${position.accountId} ${instrumentNameFromSubId(position.subId)} ` +
+        `subId=${position.subId} balance=${fromUnit(position.balance)}`,
+    );
+  }
+  console.log(`[oracle-feeds] active expiries=[${index.activeExpiries(block.timestamp).join(",")}]`);
+  for (const series of index.expiredSeries(block.timestamp)) {
+    console.log(
+      `[oracle-feeds] expired expiry=${series.expiry} subaccounts=[${series.subaccounts.join(",")}] ` +
+        `subIds=[${series.subIds.join(",")}]`,
+    );
+  }
+}
+
+function activeExpiryIndexFromEnv(
+  publicClient: ReturnType<typeof makePublicClient>,
+  chainId: number,
+): ActiveExpiryIndex {
+  const discoveryFromBlock = optionalBigIntEnv("ORACLE_DISCOVERY_FROM_BLOCK");
+  return new ActiveExpiryIndex({
+    publicClient,
+    chainId,
+    ...(process.env.ORACLE_STATE_PATH ? { statePath: process.env.ORACLE_STATE_PATH } : {}),
+    ...(discoveryFromBlock !== undefined ? { fromBlock: discoveryFromBlock } : {}),
+    confirmations: BigInt(
+      nonNegativeInteger(
+        "ORACLE_DISCOVERY_CONFIRMATIONS",
+        process.env.ORACLE_DISCOVERY_CONFIRMATIONS ?? (chainId === 31337 ? "0" : "6"),
+      ),
+    ),
+    chunkSize: BigInt(
+      positiveInteger(
+        "ORACLE_DISCOVERY_BLOCK_CHUNK",
+        process.env.ORACLE_DISCOVERY_BLOCK_CHUNK ?? "2000",
+      ),
+    ),
+  });
+}
+
 async function cmdSettle(args: Args): Promise<void> {
   const expiry = one(args, "expiry");
   const price = one(args, "price");
@@ -297,13 +622,15 @@ async function cmdSettle(args: Args): Promise<void> {
   if (signed && !price) {
     throw new Error("settle --signed requires --price (the signed path posts the price)");
   }
-  const { poster, publicClient, walletClient, signer, chainId } = await buildPoster();
+  const { poster, publicClient, walletClient, signer, chainId, transactionQueue } =
+    await buildPoster();
   const runner = new SettlementRunner(
     publicClient,
     walletClient,
     signer,
     poster,
     settlementAddressesFromDeployments(chainId),
+    transactionQueue,
   );
   await runner.run({
     expiry: BigInt(expiry),
@@ -330,6 +657,8 @@ async function main(): Promise<void> {
       return cmdPythPush(args);
     case "settle":
       return cmdSettle(args);
+    case "status":
+      return cmdStatus();
     default:
       console.log(USAGE);
       throw new Error(`Unknown command: ${cmd}`);

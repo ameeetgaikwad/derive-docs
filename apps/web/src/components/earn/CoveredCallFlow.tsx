@@ -22,6 +22,7 @@ import { AmountInput } from "./AmountInput";
 import { OutcomePreview } from "./OutcomePreview";
 import { EarnSummary } from "./EarnSummary";
 import { cn } from "@/lib/utils";
+import type { AppChainId } from "@/stores/network";
 
 type FlowStep = "select" | "subaccount" | "deposit" | "selling" | "done";
 
@@ -90,6 +91,7 @@ export function CoveredCallFlow() {
     premium: number;
     txHash: string;
     instrumentName: string;
+    chainId: AppChainId;
   } | null>(null);
 
   const { expiries, strikes, spotPrice, isLoading } =
@@ -183,6 +185,7 @@ export function CoveredCallFlow() {
 
       addTrade({
         address,
+        chainId: result.chainId,
         subaccountId: subId.toString(),
         instrumentName: result.instrumentName,
         strike: selectedStrikeData.strike,
@@ -197,6 +200,7 @@ export function CoveredCallFlow() {
         premium: result.totalPremium,
         txHash: result.txHash,
         instrumentName: result.instrumentName,
+        chainId: result.chainId,
       });
       toast.success(
         `Call sold — earned $${result.totalPremium.toLocaleString(undefined, { maximumFractionDigits: 2 })} premium`
@@ -329,7 +333,7 @@ export function CoveredCallFlow() {
                 {doneInfo.instrumentName} · Subaccount #{subaccountId?.toString()}
               </div>
               <a
-                href={explorerTxUrl(doneInfo.txHash)}
+                href={explorerTxUrl(doneInfo.txHash, doneInfo.chainId)}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="mb-6 inline-block text-xs text-accent underline-offset-2 hover:underline"
@@ -395,13 +399,13 @@ export function CoveredCallFlow() {
                 />
                 {isConnected && amountNum > btcBalance && (
                   <div className="mt-2 flex items-center gap-3 text-[10px] text-muted-foreground">
-                    <span>Need test BTCB?</span>
+                    <span>Need BTCB?</span>
                     <button
                       onClick={() => mintBtcb.mutate()}
                       disabled={mintBtcb.isPending}
                       className="rounded-md border border-accent/30 bg-accent/10 px-2 py-1 font-semibold text-accent transition-colors hover:bg-accent/20 disabled:opacity-50"
                     >
-                      {mintBtcb.isPending ? "Minting…" : "Mint 1 BTCB"}
+                      {mintBtcb.isPending ? "Adding…" : "Add 1 BTCB"}
                     </button>
                     <a
                       href={TBNB_FAUCET_URL}
@@ -409,7 +413,7 @@ export function CoveredCallFlow() {
                       rel="noopener noreferrer"
                       className="text-accent underline-offset-2 hover:underline"
                     >
-                      tBNB faucet (gas)
+                      Gas faucet
                     </a>
                   </div>
                 )}

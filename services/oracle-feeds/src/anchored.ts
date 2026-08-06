@@ -1,6 +1,10 @@
 import type { Address, Hex, PublicClient, WalletClient } from "viem";
 import type { LocalAccount } from "viem";
 import { getDeployedAddress, type DeploymentsFile } from "@hedge/shared";
+import {
+  immediateTransactionQueue,
+  type TransactionQueue,
+} from "./transactionQueue.js";
 
 /**
  * Minimal ABI for protocol/src/AnchoredSettlementFeed.sol — the Chainlink/Pyth-anchored
@@ -67,6 +71,7 @@ export async function ensureAnchoredSettlementPrice(opts: {
   account: LocalAccount;
   feed: Address;
   expiry: bigint;
+  transactionQueue?: TransactionQueue;
 }): Promise<AnchoredFixResult> {
   const { publicClient, walletClient, account, feed, expiry } = opts;
 
@@ -78,17 +83,34 @@ export async function ensureAnchoredSettlementPrice(opts: {
   });
   if (settled) return { price: existing };
 
-  const txHash = await walletClient.writeContract({
-    address: feed,
-    abi: anchoredSettlementFeedAbi,
-    functionName: "fixSettlementPrice",
-    args: [expiry],
-    account,
-    chain: walletClient.chain ?? null,
-  });
-  const receipt = await publicClient.waitForTransactionReceipt({ hash: txHash });
-  if (receipt.status !== "success") {
-    throw new Error(`fixSettlementPrice(${expiry}) reverted (tx ${txHash})`);
+  let txHash: Hex;
+  try {
+    txHash = await (opts.transactionQueue ?? immediateTransactionQueue).run(async () => {
+      const hash = await walletClient.writeContract({
+        address: feed,
+        abi: anchoredSettlementFeedAbi,
+        functionName: "fixSettlementPrice",
+        args: [expiry],
+        account,
+        chain: walletClient.chain ?? null,
+      });
+      const receipt = await publicClient.waitForTransactionReceipt({ hash });
+      if (receipt.status !== "success") {
+        throw new Error(`fixSettlementPrice(${expiry}) reverted (tx ${hash})`);
+      }
+      return hash;
+    });
+  } catch (error) {
+    // Another permissionless keeper may have won the read-before-write race.
+    // Treat that as success only after verifying immutable on-chain state.
+    const [wonByPeer, peerPrice] = await publicClient.readContract({
+      address: feed,
+      abi: anchoredSettlementFeedAbi,
+      functionName: "getSettlementPrice",
+      args: [expiry],
+    });
+    if (wonByPeer) return { price: peerPrice };
+    throw error;
   }
 
   const [nowSettled, price] = await publicClient.readContract({

@@ -54,6 +54,8 @@ export interface DeribitSnapshotOptions {
   client?: DeribitClient;
   /** Minimum fittable points per expiry; below this we fall back to flat. Default 4. */
   minPoints?: number;
+  /** False makes a missing/unfittable surface fail closed instead of inventing flat IV. */
+  allowFlatFallback?: boolean;
 }
 
 export interface DeribitSnapshotResult {
@@ -73,6 +75,7 @@ export async function buildDeribitSnapshot(
   const client = opts.client ?? new DeribitClient();
   const minPoints = opts.minPoints ?? 4;
   const toleranceSec = opts.toleranceSec ?? 0;
+  const allowFlatFallback = opts.allowFlatFallback ?? true;
   const board = await client.getBoard("BTC", opts.now);
 
   const spot = toUnit(board.indexPrice.toString());
@@ -97,13 +100,17 @@ export async function buildDeribitSnapshot(
         .map((o) => ({ strike: o.strike, iv: o.markIv as number })) ?? [];
 
     if (!slice || points.length < minPoints) {
+      const reason = slice
+        ? `only ${points.length} Deribit points (< ${minPoints})`
+        : "no Deribit expiry within tolerance";
+      if (!allowFlatFallback) {
+        throw new Error(`expiry ${expiry}: ${reason}; flat-IV fallback is disabled`);
+      }
       expiryParams.push(base); // flat fallback
       fitted.push({
         expiry,
         used: false,
-        note: slice
-          ? `only ${points.length} Deribit points (< ${minPoints}) — flat fallback`
-          : "no Deribit expiry within tolerance — flat fallback",
+        note: `${reason} — flat fallback`,
       });
       continue;
     }
@@ -118,6 +125,11 @@ export async function buildDeribitSnapshot(
         note: `fitted ${fit.n} pts, rmseVol=${(fit.rmseVol * 100).toFixed(2)}%`,
       });
     } catch (err) {
+      if (!allowFlatFallback) {
+        throw new Error(`expiry ${expiry}: SVI fit failed and flat-IV fallback is disabled`, {
+          cause: err,
+        });
+      }
       expiryParams.push(base); // flat fallback on fit failure
       fitted.push({ expiry, used: false, note: `fit failed: ${(err as Error).message}` });
     }

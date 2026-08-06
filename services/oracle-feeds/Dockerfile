@@ -9,6 +9,7 @@
 #   docker run hedge-oracle-feeds daemon --source deribit
 #   docker run hedge-oracle-feeds pyth-push
 #   docker run hedge-oracle-feeds settle
+#   docker run hedge-oracle-feeds status              # read-only expiry coverage check
 #
 # Runtime env (see services/oracle-feeds/src/env.ts):
 #   CHAIN_ID                  target chain id (e.g. 56). anvil default only on 31337.
@@ -17,6 +18,8 @@
 #                             (alias/hedge-feed-signer). Required off-chain of 31337;
 #                             the key never leaves the HSM.
 #   FEED_SIGNER_KMS_REGION    AWS region for the feed-signer KMS key (else standard AWS chain).
+# Mount a writable persistent volume and set ORACLE_STATE_PATH plus
+# ORACLE_TWAP_STATE_PATH into it. Container-local state is not restart durable.
 # Contract addresses are read from protocol/deployments/<CHAIN_ID>.json — mount that
 # dir and point SATS_DEPLOYMENTS_DIR at it (it is intentionally NOT baked into the image).
 #
@@ -29,6 +32,9 @@ WORKDIR /app
 
 # --- build stage: install oracle-feeds + its workspace dep (shared), compile ---
 FROM base AS build
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends python3 make g++ \
+ && rm -rf /var/lib/apt/lists/*
 # Workspace manifests first for better layer caching of the install graph.
 COPY pnpm-workspace.yaml pnpm-lock.yaml turbo.json package.json ./
 COPY apps/web/package.json apps/web/package.json
@@ -45,9 +51,7 @@ COPY services/shared services/shared
 COPY services/oracle-feeds services/oracle-feeds
 # Deployment address books (public, not secret) — read at startup via SATS_DEPLOYMENTS_DIR.
 COPY protocol/deployments /app/protocol/deployments
-# Build @hedge/shared via tsc directly (its `build` re-extracts ABIs from forge
-# artifacts that live outside this context; the extracted src/abis are committed,
-# so a plain tsc is correct), then build oracle-feeds.
+# Build @hedge/shared from the committed ABI snapshot, then build oracle-feeds.
 RUN pnpm --filter @hedge/shared exec tsc -p tsconfig.json \
  && pnpm --filter @hedge/oracle-feeds build
 

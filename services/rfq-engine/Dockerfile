@@ -27,6 +27,9 @@ WORKDIR /app
 
 # --- build stage: install rfq-engine + its workspace dep (shared), compile ---
 FROM base AS build
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends python3 make g++ \
+ && rm -rf /var/lib/apt/lists/*
 # Workspace manifests first for better layer caching of the install graph.
 COPY pnpm-workspace.yaml pnpm-lock.yaml turbo.json package.json ./
 COPY apps/web/package.json apps/web/package.json
@@ -44,9 +47,7 @@ COPY services/rfq-engine services/rfq-engine
 # Deployment address books (public, not secret) — services read
 # protocol/deployments/<CHAIN_ID>.json at startup via SATS_DEPLOYMENTS_DIR.
 COPY protocol/deployments /app/protocol/deployments
-# Build @hedge/shared via tsc directly (its `build` re-extracts ABIs from forge
-# artifacts that live outside this context; the extracted src/abis are committed,
-# so a plain tsc is correct), then build the rfq-engine.
+# Build @hedge/shared from the committed ABI snapshot, then build the rfq-engine.
 RUN pnpm --filter @hedge/shared exec tsc -p tsconfig.json \
  && pnpm --filter @hedge/rfq-engine build
 

@@ -11,16 +11,18 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "dev": "tsx src/cli.ts",
+    "dev": "tsx src/cli.ts daemon --source deribit",
     "post": "tsx src/cli.ts post",
     "daemon": "tsx src/cli.ts daemon",
     "settle": "tsx src/cli.ts settle",
     "pyth-push": "tsx src/cli.ts pyth-push",
+    "status": "tsx src/cli.ts status",
     "test": "vitest run",
     "smoke": "pnpm build && vitest run"
   },
   "dependencies": {
     "@hedge/shared": "workspace:*",
+    "dotenv": "^17.4.2",
     "viem": "^2.21.0"
   },
   "devDependencies": {

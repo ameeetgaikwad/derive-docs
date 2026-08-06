@@ -10,6 +10,8 @@ import { persist } from "zustand/middleware";
 export interface CoveredCallTrade {
   /** lowercased seller EOA */
   address: string;
+  /** BSC deployment the trade was executed against. */
+  chainId: 56 | 97;
   subaccountId: string;
   /** e.g. BTC-20260619-69000-C */
   instrumentName: string;
@@ -29,7 +31,7 @@ export interface CoveredCallTrade {
 interface CoveredCallState {
   trades: CoveredCallTrade[];
   addTrade: (trade: CoveredCallTrade) => void;
-  tradesFor: (address: string | undefined) => CoveredCallTrade[];
+  tradesFor: (address: string | undefined, chainId: 56 | 97) => CoveredCallTrade[];
   reset: () => void;
 }
 
@@ -43,10 +45,18 @@ export const useCoveredCallStore = create<CoveredCallState>()(
           trades: [...state.trades, { ...trade, address: trade.address.toLowerCase() }],
         })),
 
-      tradesFor: (address) => {
+      tradesFor: (address, chainId) => {
         if (!address) return [];
         const a = address.toLowerCase();
-        return get().trades.filter((t) => t.address === a);
+        return get()
+          .trades.filter(
+            (t) =>
+              t.address === a &&
+              // Old records have no chain. Let the on-chain position join in
+              // usePositions determine whether their metadata is relevant.
+              (t.chainId === undefined || t.chainId === chainId),
+          )
+          .map((t) => ({ ...t, chainId: t.chainId ?? chainId }));
       },
 
       reset: () => set({ trades: [] }),

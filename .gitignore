@@ -2,6 +2,7 @@
 
 # dependencies
 /node_modules
+**/node_modules/
 /.pnp
 .pnp.*
 .yarn/*
@@ -15,6 +16,7 @@
 
 # next.js
 /.next/
+**/.next/
 /out/
 
 # production
@@ -30,8 +32,10 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
-# env files (can opt-in for committing if needed)
+# env files (templates can be committed explicitly)
 .env*
+!.env.example
+!.env.*.example
 
 # vercel
 .vercel
@@ -51,6 +55,8 @@ next-env.d.ts
 /services/*/dist/
 /protocol/.env
 /services/**/.env
+/services/oracle-feeds/.data/
+/services/rfq-engine/.data/
 
 # terraform
 infra/.terraform/
@@ -58,6 +64,7 @@ infra/*.tfstate
 infra/*.tfstate.*
 infra/*.tfvars
 infra/.terraform.tfstate.lock.info
+infra/tfplan
 
 # turbo
 .turbo/

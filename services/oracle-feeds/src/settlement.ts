@@ -10,6 +10,10 @@ import {
 } from "@hedge/shared";
 import { anchoredFeedFromDeployments, ensureAnchoredSettlementPrice } from "./anchored.js";
 import type { FeedPoster } from "./poster.js";
+import {
+  immediateTransactionQueue,
+  type TransactionQueue,
+} from "./transactionQueue.js";
 
 export interface SettlementAddresses {
   standardManager: Address;
@@ -72,6 +76,7 @@ export class SettlementRunner {
     private readonly account: LocalAccount,
     private readonly poster: FeedPoster,
     private readonly addresses: SettlementAddresses,
+    private readonly transactionQueue: TransactionQueue = immediateTransactionQueue,
   ) {}
 
   async run(params: {
@@ -101,6 +106,7 @@ export class SettlementRunner {
         account: this.account,
         feed: anchored,
         expiry,
+        transactionQueue: this.transactionQueue,
       });
       log(
         result.txHash
@@ -147,18 +153,21 @@ export class SettlementRunner {
     log(`getSettlementPrice(${expiry}) = ${fromUnit(fixed.price)} (settled)`);
 
     for (const acc of subaccounts) {
-      const hash = await this.walletClient.writeContract({
-        address: this.addresses.standardManager,
-        abi: standardManagerAbi,
-        functionName: "settleOptions",
-        args: [this.addresses.optionAsset, acc],
-        account: this.account,
-        chain: this.walletClient.chain ?? null,
+      const hash = await this.transactionQueue.run(async () => {
+        const transactionHash = await this.walletClient.writeContract({
+          address: this.addresses.standardManager,
+          abi: standardManagerAbi,
+          functionName: "settleOptions",
+          args: [this.addresses.optionAsset, acc],
+          account: this.account,
+          chain: this.walletClient.chain ?? null,
+        });
+        const receipt = await this.publicClient.waitForTransactionReceipt({ hash: transactionHash });
+        if (receipt.status !== "success") {
+          throw new Error(`settleOptions(${acc}) reverted (tx ${transactionHash})`);
+        }
+        return transactionHash;
       });
-      const receipt = await this.publicClient.waitForTransactionReceipt({ hash });
-      if (receipt.status !== "success") {
-        throw new Error(`settleOptions(${acc}) reverted (tx ${hash})`);
-      }
       log(`settled subaccount ${acc}  tx=${hash}`);
     }
 

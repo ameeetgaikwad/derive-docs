@@ -19,6 +19,7 @@ import {
 } from "@/lib/protocol/rfq-engine";
 import { encodeOptionSubId } from "@/lib/protocol/instruments";
 import { toUnit, unitToNumber } from "@/lib/protocol/units";
+import type { AppChainId } from "@/stores/network";
 import { useNetwork } from "./useNetwork";
 
 export type SellPhase =
@@ -43,6 +44,7 @@ export interface AuctionState {
 
 export interface SellResult {
   txHash: Hex;
+  chainId: AppChainId;
   instrumentName: string;
   /** total premium received, USD */
   totalPremium: number;
@@ -104,20 +106,27 @@ export function useSellCall() {
       setResult(null);
 
       try {
+        // Keep one network context for the complete async flow even if the UI
+        // network toggle changes while the auction is open.
+        const saleChainId = chainId;
+
         // 1. Open the auction
         setPhase("requesting");
-        const rfq = await createRfq({
-          subaccountId: params.subaccountId,
-          expiry: params.expiry,
-          strike: params.strike.toString(),
-          amount: params.amount,
-        });
+        const rfq = await createRfq(
+          {
+            subaccountId: params.subaccountId,
+            expiry: params.expiry,
+            strike: params.strike.toString(),
+            amount: params.amount,
+          },
+          saleChainId,
+        );
 
         // 2. Poll until the window closes
         setPhase("auction");
         let status: RfqStatusResponse;
         for (;;) {
-          status = await getRfq(rfq.id);
+          status = await getRfq(rfq.id, saleChainId);
           setAuction({
             rfqId: rfq.id,
             endsAt: status.rfq.auctionEndsAt,
@@ -144,7 +153,7 @@ export function useSellCall() {
 
         // 3. Sign the TakerOrder Action with the wallet (EIP-712)
         setPhase("signing");
-        await switchChainAsync({ chainId }).catch(() => {});
+        await switchChainAsync({ chainId: saleChainId }).catch(() => {});
         const action = buildAction({
           subaccountId: params.subaccountId,
           module: addresses.rfqModule,
@@ -153,18 +162,24 @@ export function useSellCall() {
           expiry: getActionExpiry(600),
         });
         const signature = await signTypedDataAsync(
-          actionTypedData(action, chainId, addresses.matching)
+          actionTypedData(action, saleChainId, addresses.matching)
         );
 
         // 4. Accept — engine executes verifyAndMatch on-chain
         setPhase("executing");
-        const accepted = await acceptRfq(rfq.id, serializeAction(action), signature);
+        const accepted = await acceptRfq(
+          rfq.id,
+          serializeAction(action),
+          signature,
+          saleChainId,
+        );
         if (accepted.status !== "success") {
           throw new Error(`Trade reverted on-chain (tx ${accepted.txHash})`);
         }
 
         const sellResult: SellResult = {
           txHash: accepted.txHash,
+          chainId: saleChainId,
           instrumentName: params.instrumentName,
           totalPremium: unitToNumber(BigInt(accepted.fill.totalPremium)),
           maker: accepted.fill.maker,

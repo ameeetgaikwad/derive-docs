@@ -1,36 +1,37 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Hedge web
 
-## Getting Started
+Next.js frontend for the Hedge covered-call RFQ protocol. It supports BSC
+mainnet (56) and testnet (97), with deployment addresses imported from
+`protocol/deployments/` and runtime network selection in the header.
 
-First, run the development server:
+From the repository root:
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+```sh
+corepack pnpm install --frozen-lockfile
+corepack pnpm --filter @hedge/web dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+The app opens at <http://localhost:3000>. Optional configuration belongs in
+`apps/web/.env.local`:
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```text
+NEXT_PUBLIC_RFQ_ENGINE_URL_56=https://rfq.example.com
+NEXT_PUBLIC_RFQ_ENGINE_URL_97=http://localhost:3030
+NEXT_PUBLIC_BSC_MAINNET_RPC_URL=https://bsc-dataseed.bnbchain.org
+NEXT_PUBLIC_BSC_TESTNET_RPC_URL=https://bsc-testnet.bnbchain.org
+NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID=...
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+`NEXT_PUBLIC_RFQ_ENGINE_URL` is supported as a legacy fallback. Never put a
+private key in this app or in any `NEXT_PUBLIC_*` variable.
 
-## Learn More
+## Checks
 
-To learn more about Next.js, take a look at the following resources:
+```sh
+corepack pnpm --filter @hedge/web lint
+corepack pnpm --filter @hedge/web test
+corepack pnpm --filter @hedge/web typecheck
+corepack pnpm --filter @hedge/web build
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+For the local oracle/RFQ/maker stack, use the repository-level `DEV.md`.

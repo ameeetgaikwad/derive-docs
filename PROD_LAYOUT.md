@@ -1,47 +1,67 @@
-# Productionization target layout (branch: prod/monorepo-cicd)
+# Production monorepo layout
 
-Goal: Turborepo monorepo + Dockerized services + GitHub Actions CI/CD + AWS ECS
-deploy (IAM role → KMS signing, no session/keys on any host). Work happens in
-this worktree: `/Users/brahma/Projects/sats/derive-prod`. The main checkout
-(`/Users/brahma/Projects/sats/derive`) runs the live services — DO NOT touch it.
+The repository is a Turborepo/pnpm monorepo. The web application, backend
+services, contracts, documentation, CI/CD, and AWS infrastructure are kept in
+one reviewable tree:
 
-## Target monorepo layout
-
+```text
+/
+  package.json               # root scripts delegate to Turbo
+  pnpm-workspace.yaml        # apps/*, services/*, docs-site
+  turbo.json                 # build, lint, test, typecheck and dev task graph
+  apps/web/                  # Next.js frontend; supports BSC 56 and 97
+  services/
+    shared/                  # ABIs, protocol encoding, clients and KMS signing
+    rfq-engine/              # public REST/WS RFQ engine and executor
+    oracle-feeds/            # signed/Pyth feed daemon and settlement runner
+    maker-bot/               # standalone reference MM artifact
+    e2e/                     # local Anvil acceptance harness
+  protocol/                  # Foundry workspace and deployment address books
+  docs-site/                 # Mintlify documentation workspace
+  .github/workflows/         # Turborepo/Foundry CI and AWS OIDC CD
+  infra/                     # Terraform for ECR, ECS, ALB, SSM, IAM and OIDC
 ```
-/ (repo root — Turborepo)
-  turbo.json                 # task pipeline (build, lint, test, typecheck, dev)
-  package.json               # private root; devDep: turbo; scripts delegate to turbo
-  pnpm-workspace.yaml        # packages: apps/*, services/*, docs-site
-  apps/
-    web/                     # the Next.js frontend, MOVED from repo root
-  services/                  # existing @hedge/* packages (shared, rfq-engine, oracle-feeds, maker-bot, e2e)
-  protocol/                  # Foundry (not a JS workspace member; referenced by path)
-  docs-site/                 # Mintlify
-  .github/workflows/         # CI + CD
-  infra/                     # Terraform (ECR, ECS, IAM, ALB, logs, GitHub OIDC)
+
+The deployable platform services are `rfq-engine` and `oracle-feeds`. Terraform
+creates their ECS services and KMS-scoped runtime identity; GitHub Actions builds
+their images from the repository root and rolls those services through OIDC.
+`maker-bot` has a root-context Docker image for market-maker operators, but it is
+not an ECS service managed by `infra/`.
+
+Signing uses the existing `alias/hedge-feed-signer` and
+`alias/hedge-executor` KMS keys via `FEED_SIGNER_KMS_KEY_ID` and
+`EXECUTOR_KMS_KEY_ID`. No session keys or raw private keys belong in images,
+Terraform variables, GitHub configuration, or frontend environment variables.
+
+The oracle container has two correctness-critical checkpoints: the finalized
+active-option index and the rolling settlement-TWAP accumulator. Production
+must mount writable durable storage and point `ORACLE_STATE_PATH` and
+`ORACLE_TWAP_STATE_PATH` at it. Before enabling RFQs after any rollout, run the
+image's read-only `status` command and verify every held expiry is covered.
+
+## Production readiness
+
+The consolidated pre-mainnet launch gates, including dynamic USDT/USD and
+separate BTC-vs-BTCB oracle requirements, live in
+[`PRODUCTION.md`](PRODUCTION.md). Treat its P0 checklist as blocking for public
+deposits and trading.
+
+## Validation
+
+```sh
+corepack pnpm install --frozen-lockfile
+corepack pnpm turbo lint test build typecheck
+
+(cd protocol && ./setup-vendor.sh)
+(cd protocol/lib/v2-core && forge build)
+(cd protocol/lib/v2-matching && forge build)
+(cd protocol && forge fmt --check src script test && forge build && forge test -vvv)
+
+docker build -f services/rfq-engine/Dockerfile -t hedge-rfq-engine:review .
+docker build -f services/oracle-feeds/Dockerfile -t hedge-oracle-feeds:review .
+docker build -f services/maker-bot/Dockerfile -t hedge-maker-bot:review .
 ```
 
-## Hard rules
-- Everything builds: `pnpm install` at root, then `pnpm turbo build lint test` green
-  (frontend + all services + forge tests where wired).
-- The frontend keeps working: after moving to apps/web, fix the deployment JSON
-  import depth (`src/lib/protocol/deployments.ts` imports `protocol/deployments/{56,97}.json`
-  by relative path — recompute from apps/web) and any other `../protocol` refs.
-- Services stay in `services/` at the same paths (the live processes don't run from
-  this worktree, but keep the layout stable so the main checkout still matches after merge).
-- The two AWS KMS keys already exist: `alias/hedge-feed-signer`
-  (0x7dFC96d1b08eF29a99957EF99BF68F631348C667) and `alias/hedge-executor`
-  (0x915949FeEBedE7196Ed5F35b5b23997be790171B), account 985539774899, us-east-1.
-- Services adopt KMS via env: `FEED_SIGNER_KMS_KEY_ID`, `EXECUTOR_KMS_KEY_ID`
-  (shared `resolveAccount` already supports this).
-- Nothing is applied to AWS in this branch work (session-gated); Terraform is authored + `validate`d only.
-- Don't commit secrets. Don't start long-lived processes.
-
-## Deployable services (long-running, need KMS)
-- **rfq-engine**: WS + REST auction server + on-chain executor (EXECUTOR_KMS_KEY_ID). Public via ALB/TLS (wss).
-- **oracle-feeds**: `daemon --source deribit` (posts SVI surface) + a periodic `pyth-push`; signs with FEED_SIGNER_KMS_KEY_ID. (Run as an ECS service loop and/or scheduled task.)
-- **maker-bot**: reference MM (already has a Dockerfile) — NOT part of protocol infra; ships as the MM artifact, optionally deployed for beta.
-
-## CI/CD intent
-- **CI** (PR + push): `pnpm turbo lint test build typecheck` + `forge test` in protocol/.
-- **CD** (push to main, or manual): build + push service images to ECR, update ECS services. Auth via GitHub OIDC → AWS role (no long-lived keys in GitHub).
+Terraform apply is deliberately credential-gated. See `infra/README.md` for
+bootstrap and offline validation, and `.github/workflows/README.md` for CI/CD
+triggers and required repository variables.

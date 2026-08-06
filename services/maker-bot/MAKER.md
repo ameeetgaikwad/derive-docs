@@ -26,7 +26,7 @@ spec.
 
 ## Quick start (testnet, ~5 min)
 
-From the `services/` directory:
+From the repository root:
 
 ```sh
 # 1. one-time: create the maker subaccount and deposit USDT collateral
@@ -35,20 +35,20 @@ RPC_URL=https://bsc-testnet.bnbchain.org \
 RFQ_ENGINE_WS=ws://127.0.0.1:3030/maker \
 PRIVATE_KEY=0x<your-maker-key> \
 DEPOSIT_USDT=100000 \
-docker compose -f maker-bot/docker-compose.yml run --rm maker-bot --setup
+docker compose -f services/maker-bot/docker-compose.yml run --rm maker-bot --setup
 
 # 2. run the quoting bot
 CHAIN_ID=97 \
 RPC_URL=https://bsc-testnet.bnbchain.org \
 RFQ_ENGINE_WS=ws://127.0.0.1:3030/maker \
 PRIVATE_KEY=0x<your-maker-key> \
-docker compose -f maker-bot/docker-compose.yml up --build
+docker compose -f services/maker-bot/docker-compose.yml up --build
 ```
 
 Or without compose:
 
 ```sh
-docker build -f maker-bot/Dockerfile -t hedge-maker-bot .
+docker build -f services/maker-bot/Dockerfile -t hedge-maker-bot .
 docker run --rm \
   -e CHAIN_ID=97 -e RPC_URL=https://bsc-testnet.bnbchain.org \
   -e RFQ_ENGINE_WS=ws://127.0.0.1:3030/maker \
@@ -57,9 +57,9 @@ docker run --rm \
   hedge-maker-bot            # append --setup for the one-time subaccount step
 ```
 
-The image is built from the `services/` workspace root, so always build with
-that as the Docker context (the compose file and the `-f` commands above do
-this for you).
+The image is built from the repository root so it can use the root pnpm
+workspace and committed protocol deployment address books. The compose file
+and commands above use that context.
 
 ## Environment
 

@@ -1,10 +1,14 @@
 # BSC MAINNET deployment (chainId 56) — launch runbook
 
-Status: **NOT DEPLOYED** — config verified + full deploy simulated 2026-07-01; the
-deployer is not funded yet. Nothing has been broadcast to chain 56.
+Status: **CONTRACTS DEPLOYED 2026-07-01** — addresses are committed in
+`deployments/56.json`; the on-chain genesis checks and oracle bootstrap are
+recorded in [LIVE](#live-deployed-2026-07-01). Product launch gates remain:
+real-BTCB smoke trade, Safe handover, focused diff audit, hosted services, and
+production frontend/RFQ configuration. Do not rerun the deploy sequence.
 
 Companion docs: [`TESTNET.md`](TESTNET.md) (the live chain-97 stack this reproduces),
-[`../services/shared/KMS.md`](../services/shared/KMS.md) (KMS key inventory).
+[`../services/shared/KMS.md`](../services/shared/KMS.md) (KMS key inventory), and
+[`../PRODUCTION.md`](../PRODUCTION.md) (P0 launch gates and production sign-off).
 
 ## ⚠️ Warnings — read before broadcasting
 
@@ -130,7 +134,7 @@ setup/trade ~0.002 + margin for retries): **≲ 0.01 BNB**. Fund the deployer wi
 **0.05 BNB** for comfortable headroom, plus ~0.01 BNB to the KMS executor address for
 trade execution gas.
 
-## 5. Deploy sequence
+## 5. Completed deploy sequence (reference only — do not repeat)
 
 ### 5.0 Preconditions
 
@@ -139,7 +143,7 @@ trade execution gas.
   executor `0x915949FeEBedE7196Ed5F35b5b23997be790171B`; executor funded ~0.01 BNB.
 - `RPC_URL_56=https://56.rpc.thirdweb.com/<key>` exported.
 
-### 5.1 Deploy — one command
+### 5.1 Historical deploy command
 
 `FEED_SIGNER`/`TRADE_EXECUTOR` are set to the **KMS addresses at deploy time**, so the
 KMS signer is whitelisted on every signed feed and the KMS executor registered on

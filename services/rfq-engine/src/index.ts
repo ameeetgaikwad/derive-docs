@@ -1,3 +1,5 @@
+import "dotenv/config";
+
 import { resolveAccount } from "@hedge/shared";
 import { AuctionEngine } from "./auction.js";
 import { makeViemChain } from "./chain.js";

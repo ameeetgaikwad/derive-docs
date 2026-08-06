@@ -51,7 +51,10 @@ function PositionCard({ position }: { position: OptionPosition }) {
                 premium earned
               </span>
               <a
-                href={explorerTxUrl(position.trade.txHash)}
+                href={explorerTxUrl(
+                  position.trade.txHash,
+                  position.trade.chainId,
+                )}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="text-accent underline-offset-2 hover:underline"
@@ -100,44 +103,51 @@ export function CoveredCallPositions() {
   if (subaccountId === null) return null;
 
   return (
-    <div className="mx-auto max-w-6xl px-6 pb-10">
-      <div className="mb-3 flex flex-wrap items-center gap-3">
-        <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-          Positions · Subaccount #{subaccountId.toString()}
+    <section
+      id="positions"
+      className="scroll-mt-24 border-t-[0.5px] border-zinc-200 bg-zinc-50 py-14 sm:py-20"
+    >
+      <div className="mx-auto max-w-6xl px-5 sm:px-8">
+        <div className="mb-5 flex flex-wrap items-center gap-3">
+          <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+            Positions · Subaccount #{subaccountId.toString()}
+          </div>
+          <div className="flex-1" />
+          <div className="rounded-md border-[0.5px] border-border bg-card px-3 py-1.5 text-xs text-muted-foreground">
+            BTCB collateral:{" "}
+            <span className="font-semibold text-foreground">
+              {btcb.toFixed(6)}
+            </span>
+          </div>
+          <div className="rounded-md border-[0.5px] border-border bg-card px-3 py-1.5 text-xs text-muted-foreground">
+            USDT cash:{" "}
+            <span
+              className={cn(
+                "font-semibold",
+                cash < 0 ? "text-warning" : "text-foreground",
+              )}
+            >
+              {cash.toLocaleString(undefined, { maximumFractionDigits: 2 })}
+            </span>
+          </div>
         </div>
-        <div className="flex-1" />
-        <div className="rounded-md border-[0.5px] border-border bg-card px-3 py-1.5 text-xs text-muted-foreground">
-          BTCB collateral:{" "}
-          <span className="font-semibold text-foreground">{btcb.toFixed(6)}</span>
-        </div>
-        <div className="rounded-md border-[0.5px] border-border bg-card px-3 py-1.5 text-xs text-muted-foreground">
-          USDT cash:{" "}
-          <span
-            className={cn(
-              "font-semibold",
-              cash < 0 ? "text-warning" : "text-foreground"
-            )}
-          >
-            {cash.toLocaleString(undefined, { maximumFractionDigits: 2 })}
-          </span>
-        </div>
-      </div>
 
-      {isLoading ? (
-        <div className="py-6 text-center text-xs text-muted-foreground">
-          Loading positions…
-        </div>
-      ) : options.length === 0 ? (
-        <div className="rounded-[10px] border-[0.5px] border-border bg-card p-4 text-center text-xs text-muted-foreground">
-          No open option positions
-        </div>
-      ) : (
-        <div className="space-y-3">
-          {options.map((p) => (
-            <PositionCard key={p.subId.toString()} position={p} />
-          ))}
-        </div>
-      )}
-    </div>
+        {isLoading ? (
+          <div className="py-6 text-center text-xs text-muted-foreground">
+            Loading positions…
+          </div>
+        ) : options.length === 0 ? (
+          <div className="rounded-[10px] border-[0.5px] border-border bg-card p-4 text-center text-xs text-muted-foreground">
+            No open option positions
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {options.map((p) => (
+              <PositionCard key={p.subId.toString()} position={p} />
+            ))}
+          </div>
+        )}
+      </div>
+    </section>
   );
 }

@@ -1,14 +1,14 @@
 # Reference market-maker for Hedge. Fill in the env and run:
-#   docker compose -f maker-bot/docker-compose.yml up --build
-# (run from the services/ directory so the build context is the workspace root)
+#   docker compose -f services/maker-bot/docker-compose.yml up --build
+# (run from the repository root)
 #
 # One-time, create the maker subaccount + deposit USDT before quoting:
-#   docker compose -f maker-bot/docker-compose.yml run --rm maker-bot --setup
+#   docker compose -f services/maker-bot/docker-compose.yml run --rm maker-bot --setup
 services:
   maker-bot:
     build:
-      context: .
-      dockerfile: maker-bot/Dockerfile
+      context: ../..
+      dockerfile: services/maker-bot/Dockerfile
     image: hedge-maker-bot
     restart: unless-stopped
     environment:
