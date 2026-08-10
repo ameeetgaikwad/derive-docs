@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   amount18ToToken,
   getMarkets,
+  getSelectableMarkets,
   rawAmount18ToUi18,
   tokenAmountTo18,
   uiAmount18ToRaw18,
@@ -12,6 +13,15 @@ describe("multi-asset amount conversion", () => {
     const markets = getMarkets(56);
     expect(markets.map((market) => market.id)).toEqual(["BTC", "XAU", "SPY", "NVDA", "SPCX"]);
     expect(markets.filter((market) => market.enabled).map((market) => market.id)).toEqual(["BTC"]);
+  });
+
+  it("keeps SpaceX out of the user-facing market selector", () => {
+    expect(getSelectableMarkets(97).map((market) => market.id)).toEqual([
+      "BTC",
+      "XAU",
+      "SPY",
+      "NVDA",
+    ]);
   });
 
   it("round-trips BEP-8056 display and raw amounts", () => {

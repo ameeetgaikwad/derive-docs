@@ -22,7 +22,7 @@ import { usePositionMonitor } from "@/hooks/protocol/usePositionMonitor";
 import { useSellCall } from "@/hooks/protocol/useSellCall";
 import { explorerTxUrl } from "@/lib/protocol/deployments";
 import { fromUnit, toUnit } from "@/lib/protocol/units";
-import { getMarkets, uiAmount18ToRaw18, type MarketId } from "@/lib/protocol/markets";
+import { getSelectableMarkets, uiAmount18ToRaw18, type MarketId } from "@/lib/protocol/markets";
 import { cn } from "@/lib/utils";
 import { useCoveredCallStore } from "@/stores/covered-call";
 import { useNetwork } from "@/hooks/protocol/useNetwork";
@@ -69,7 +69,7 @@ export default function TargetComposer({
   const { isConnected, address } = useAccount();
   const { openConnectModal } = useConnectModal();
   const { chainId } = useNetwork();
-  const markets = useMemo(() => getMarkets(chainId), [chainId]);
+  const markets = useMemo(() => getSelectableMarkets(chainId), [chainId]);
   const [selectedMarketId, setSelectedMarketId] = useState<MarketId>("BTC");
   const [amounts, setAmounts] = useState<Record<MarketId, string>>({
     BTC: DEFAULT_AMOUNT,

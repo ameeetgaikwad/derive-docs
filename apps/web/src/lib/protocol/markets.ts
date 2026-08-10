@@ -35,6 +35,7 @@ export interface AppMarket {
 }
 
 const RAW = { 56: markets56, 97: markets97 } as const;
+const HIDDEN_MARKET_IDS = new Set<MarketId>(["SPCX"]);
 
 function normalize(raw: (typeof RAW)[AppChainId]): AppMarket[] {
   return raw.markets as unknown as AppMarket[];
@@ -42,6 +43,11 @@ function normalize(raw: (typeof RAW)[AppChainId]): AppMarket[] {
 
 export function getMarkets(chainId: AppChainId): AppMarket[] {
   return normalize(RAW[chainId]);
+}
+
+/** Markets intentionally exposed in the contract browser. */
+export function getSelectableMarkets(chainId: AppChainId): AppMarket[] {
+  return getMarkets(chainId).filter((market) => !HIDDEN_MARKET_IDS.has(market.id));
 }
 
 export function getMarket(chainId: AppChainId, marketId: MarketId): AppMarket {
