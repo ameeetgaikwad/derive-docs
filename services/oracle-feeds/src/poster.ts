@@ -11,6 +11,8 @@ import {
   lyraSpotFeedAbi,
   lyraVolFeedAbi,
   requireDeployments,
+  readMarketManifest,
+  marketById,
   signFeedData,
   toUnit,
   type FeedKind,
@@ -64,14 +66,19 @@ export interface FeedAddresses {
   stableFeed: Address;
 }
 
-/** Resolve the BTC market's feed addresses from protocol/deployments/<chainId>.json. */
-export function feedAddressesFromDeployments(chainId: number): FeedAddresses {
+/** Resolve one enabled market's feed addresses from the canonical manifest. */
+export function feedAddressesFromDeployments(
+  chainId: number,
+  marketId: string = process.env.ORACLE_MARKET ?? "BTC",
+): FeedAddresses {
   const d = requireDeployments(chainId);
+  const market = marketById(readMarketManifest(chainId), marketId);
+  if (!market?.enabled || !market.contracts) throw new Error(`${marketId} market is not enabled on chain ${chainId}`);
   return {
-    spotFeed: getDeployedAddress(d, "btcSpotFeed"),
-    forwardFeed: getDeployedAddress(d, "btcForwardFeed"),
-    volFeed: getDeployedAddress(d, "btcVolFeed"),
-    rateFeed: getDeployedAddress(d, "btcRateFeed"),
+    spotFeed: market.contracts.spotFeed,
+    forwardFeed: market.contracts.forwardFeed,
+    volFeed: market.contracts.volFeed,
+    rateFeed: market.contracts.rateFeed,
     stableFeed: getDeployedAddress(d, "stableFeed"),
   };
 }

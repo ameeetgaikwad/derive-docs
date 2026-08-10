@@ -108,6 +108,9 @@ export interface AcceptRfqResponse {
     takerSubaccountId: string;
     /** 18dp */
     amount: string;
+    marketId?: string;
+    rawAmount?: string;
+    protocolStrike?: string;
     /** 18dp per-unit premium */
     premium: string;
     /** 18dp cash maker -> taker */
@@ -115,6 +118,19 @@ export interface AcceptRfqResponse {
     makerFee: string;
     takerFee: string;
   };
+}
+
+export interface PublicMarketStatus {
+  id: string;
+  displayName: string;
+  collateralSymbol: string;
+  collateralDecimals: number;
+  scaledUi: boolean;
+  enabled: boolean;
+  status: "open" | "closed" | "disabled";
+  disableReason: string | null;
+  feedUpdatedAt: number | null;
+  supportedExpiries: number[];
 }
 
 async function request<T>(
@@ -150,6 +166,9 @@ export async function createRfq(
     strike: string;
     /** human decimal option amount, e.g. "0.5" */
     amount: string;
+    marketId?: string;
+    rawAmount?: string;
+    protocolStrike?: string;
   },
   chainId: AppChainId = getActiveChainId(),
 ): Promise<PublicRfq> {
@@ -161,12 +180,12 @@ export async function createRfq(
       body: JSON.stringify({
         subaccountId: params.subaccountId.toString(),
         instrument: {
-          asset: "BTC",
+          asset: params.marketId ?? "BTC",
           expiry: params.expiry,
-          strike: params.strike,
+          strike: params.protocolStrike ?? params.strike,
           isCall: true,
         },
-        amount: params.amount,
+        amount: params.rawAmount ?? params.amount,
         direction: "sell",
       }),
     },
@@ -179,6 +198,13 @@ export async function getRfq(
   chainId: AppChainId = getActiveChainId(),
 ): Promise<RfqStatusResponse> {
   return request<RfqStatusResponse>(rfqEngineUrl(chainId), `/rfq/${id}`);
+}
+
+export async function getRfqMarkets(
+  chainId: AppChainId = getActiveChainId(),
+): Promise<PublicMarketStatus[]> {
+  const response = await request<{ markets: PublicMarketStatus[] }>(rfqEngineUrl(chainId), "/markets");
+  return response.markets;
 }
 
 export async function acceptRfq(

@@ -118,6 +118,13 @@ export const wrappedErc20AssetAbi = [
 export const mockErc20Abi = [
   {
     type: "function",
+    name: "decimals",
+    inputs: [],
+    outputs: [{ name: "", type: "uint8", internalType: "uint8" }],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
     name: "allowance",
     inputs: [
       { name: "owner", type: "address", internalType: "address" },
@@ -152,6 +159,26 @@ export const mockErc20Abi = [
     ],
     outputs: [],
     stateMutability: "nonpayable",
+  },
+] as const;
+
+export const scaledUiTokenAbi = [
+  {
+    type: "function",
+    name: "uiMultiplier",
+    inputs: [],
+    outputs: [{ name: "", type: "uint256", internalType: "uint256" }],
+    stateMutability: "view",
+  },
+] as const;
+
+export const multiplierRegistryAbi = [
+  {
+    type: "function",
+    name: "multiplierAt",
+    inputs: [{ name: "timestamp", type: "uint64", internalType: "uint64" }],
+    outputs: [{ name: "", type: "uint256", internalType: "uint256" }],
+    stateMutability: "view",
   },
 ] as const;
 

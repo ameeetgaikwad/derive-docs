@@ -1,10 +1,12 @@
 "use client";
 
 import { useReadContract } from "wagmi";
+import { zeroAddress } from "viem";
 import { useQuery } from "@tanstack/react-query";
-import { lyraSpotFeedAbi } from "@/lib/protocol/abis";
+import { lyraSpotFeedAbi, scaledUiTokenAbi } from "@/lib/protocol/abis";
 import { unitToNumber } from "@/lib/protocol/units";
 import { useNetwork } from "./useNetwork";
+import { getMarket, type MarketId } from "@/lib/protocol/markets";
 
 /** Hermes (Pyth) public price endpoint — display-only fallback. */
 const HERMES_URL = "https://hermes.pyth.network/v2/updates/price/latest";
@@ -31,27 +33,42 @@ async function fetchHermesSpot(priceId: string): Promise<number> {
  *      REST price — the same source, fetched off-chain — labelled `indicative`.
  * Executable pricing always comes from the RFQ auction, never this value.
  */
-export function useSpotPrice() {
+export function useSpotPrice(marketId: MarketId = "BTC") {
   const { addresses, chainId } = useNetwork();
-  const onchainFeed = addresses.btcPythSpotFeed ?? addresses.btcSpotFeed;
+  const market = getMarket(chainId, marketId);
+  const marketReady = market.enabled && market.contracts !== null;
+  const onchainFeed = market.contracts?.spotFeed ?? zeroAddress;
+
+  const multiplierRead = useReadContract({
+    abi: scaledUiTokenAbi,
+    address: market.collateral.address ?? zeroAddress,
+    functionName: "uiMultiplier",
+    chainId,
+    query: { enabled: marketReady && market.collateral.scaledUi && !!market.collateral.address, refetchInterval: 15_000 },
+  });
+  const multiplier = market.collateral.scaledUi ? multiplierRead.data ?? null : null;
 
   const onchain = useReadContract({
     abi: lyraSpotFeedAbi,
     address: onchainFeed,
     functionName: "getSpot",
     chainId,
-    query: { refetchInterval: 15_000, retry: false },
+    query: { enabled: marketReady, refetchInterval: 15_000, retry: false },
   });
 
   const onchainOk = !!onchain.data && onchain.data[0] > 0n;
-  const onchainSpot = onchainOk ? unitToNumber(onchain.data![0]) : 0;
+  const rawOnchainSpot = onchainOk ? unitToNumber(onchain.data![0]) : 0;
+  const onchainSpot =
+    onchainOk && market.collateral.scaledUi && multiplier
+      ? rawOnchainSpot / (Number(multiplier) / 1e18)
+      : rawOnchainSpot;
 
   // Off-chain display fallback: only when the on-chain read failed and a price id exists.
-  const priceId = addresses.btcPythPriceId;
+  const priceId = market.pythPriceId ?? (marketId === "BTC" ? addresses.btcPythPriceId : undefined);
   const hermes = useQuery({
     queryKey: ["hermes-spot", priceId, chainId],
     queryFn: () => fetchHermesSpot(priceId as string),
-    enabled: !onchainOk && onchain.isError && !!priceId,
+    enabled: marketReady && !onchainOk && onchain.isError && !!priceId,
     refetchInterval: 20_000,
     retry: 1,
     staleTime: 15_000,
@@ -62,10 +79,13 @@ export function useSpotPrice() {
 
   return {
     spotPrice,
+    multiplier,
+    market,
     /** true when the on-chain feed was stale and we're showing the Hermes price */
     indicative: usingFallback,
-    isLoading: onchain.isLoading || (onchain.isError && hermes.isLoading),
+    isLoading: marketReady && (onchain.isLoading || (onchain.isError && hermes.isLoading)),
     isStale: onchain.isError && !usingFallback,
+    isUnavailable: !marketReady,
     error: onchain.error,
   };
 }

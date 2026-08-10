@@ -4,6 +4,8 @@ import { WebSocketServer, WebSocket } from "ws";
 import { verifyMessage, type Address } from "viem";
 import { AuctionEngine } from "./auction.js";
 import { QuoteValidationError } from "./quotes.js";
+import { marketStatus, type PublicMarketStatus } from "./markets.js";
+import type { MarketDefinition } from "@hedge/shared";
 import {
   addressEq,
   asAddress,
@@ -59,6 +61,10 @@ export interface RfqEngineServerOptions {
   rfqRateLimitPerMin?: number;
   /** WS ping interval; a connection missing a pong for one full interval is dropped. 0 disables. */
   heartbeatMs?: number;
+  /** canonical registry returned by GET /markets */
+  markets?: MarketDefinition[];
+  /** Optional live readiness projection used by GET /markets and /health. */
+  marketStatusProvider?: (market: MarketDefinition) => Promise<PublicMarketStatus>;
 }
 
 /** Fixed-window-ish per-key rate limiter (sliding 60s window of timestamps). */
@@ -110,6 +116,8 @@ export class RfqEngineServer {
   private readonly rfqLimiter: RateLimiter;
   private readonly heartbeatMs: number;
   private heartbeatTimer: NodeJS.Timeout | null = null;
+  private readonly markets: MarketDefinition[];
+  private readonly marketStatusProvider: (market: MarketDefinition) => Promise<PublicMarketStatus>;
 
   constructor(opts: RfqEngineServerOptions) {
     this.engine = opts.engine;
@@ -122,6 +130,8 @@ export class RfqEngineServer {
     this.takerOpen = opts.takerOpen ?? true;
     this.rfqLimiter = new RateLimiter(opts.rfqRateLimitPerMin ?? DEFAULT_RFQ_RATE_LIMIT_PER_MIN);
     this.heartbeatMs = opts.heartbeatMs ?? DEFAULT_HEARTBEAT_MS;
+    this.markets = opts.markets ?? [];
+    this.marketStatusProvider = opts.marketStatusProvider ?? (async (market) => marketStatus(market));
 
     this.httpServer = createServer((req, res) => {
       this.handleHttp(req, res).catch((err) => {
@@ -244,7 +254,17 @@ export class RfqEngineServer {
     }
 
     if (req.method === "GET" && path === "/health") {
-      return sendJson(res, 200, { ok: true, service: "rfq-engine" });
+      return sendJson(res, 200, {
+        ok: true,
+        service: "rfq-engine",
+        markets: await Promise.all(this.markets.map((market) => this.marketStatusProvider(market))),
+      });
+    }
+
+    if (req.method === "GET" && path === "/markets") {
+      return sendJson(res, 200, {
+        markets: await Promise.all(this.markets.map((market) => this.marketStatusProvider(market))),
+      });
     }
 
     if (req.method === "POST" && path === "/rfq") {

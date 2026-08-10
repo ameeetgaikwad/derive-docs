@@ -1,12 +1,13 @@
 import "dotenv/config";
 
-import { resolveAccount } from "@hedge/shared";
+import { lyraSpotFeedAbi, resolveAccount } from "@hedge/shared";
 import { AuctionEngine } from "./auction.js";
 import { makeViemChain } from "./chain.js";
 import { loadConfig } from "./config.js";
 import { Executor } from "./executor.js";
 import { RfqEngineServer } from "./server.js";
 import { InMemoryRfqStore, JsonlRfqStore } from "./store.js";
+import { assertMarketFeedsReady, marketFeedUpdatedAt, marketStatus } from "./markets.js";
 
 export * from "./types.js";
 export * from "./store.js";
@@ -16,6 +17,7 @@ export * from "./auction.js";
 export * from "./executor.js";
 export * from "./server.js";
 export * from "./config.js";
+export * from "./markets.js";
 
 async function main(): Promise<void> {
   const config = loadConfig();
@@ -25,7 +27,7 @@ async function main(): Promise<void> {
     privateKey: config.executorPrivateKey,
   });
 
-  const { reader, submitter } = makeViemChain({
+  const { reader, submitter, publicClient } = makeViemChain({
     chainId: config.chainId,
     rpcUrl: config.rpcUrl,
     account,
@@ -61,6 +63,9 @@ async function main(): Promise<void> {
     rfqModule: config.rfqModule,
     optionAssets: config.optionAssets,
     forwardFeeds: config.forwardFeeds,
+    markets: config.markets,
+    marketReadiness: (market, expiry, strike) =>
+      assertMarketFeedsReady(publicClient, market, expiry, strike),
     auctionWindowMs: config.auctionWindowMs,
     acceptDeadlineMs: config.takerAcceptDeadlineMs,
   });
@@ -83,6 +88,30 @@ async function main(): Promise<void> {
     takerOpen: config.takerOpen,
     rfqRateLimitPerMin: config.rfqRateLimitPerMin,
     heartbeatMs: config.heartbeatMs,
+    markets: config.markets,
+    marketStatusProvider: async (market) => {
+      const status = marketStatus(market);
+      if (status.status !== "open" || market.marketHours !== "24/5" || !market.contracts) {
+        return status;
+      }
+      try {
+        const [spot] = await publicClient.readContract({
+          address: market.contracts.spotFeed,
+          abi: lyraSpotFeedAbi,
+          functionName: "getSpot",
+        });
+        const expiry = status.supportedExpiries[0];
+        if (!expiry) throw new Error("no supported expiry is available");
+        await assertMarketFeedsReady(publicClient, market, BigInt(expiry), spot);
+        return { ...status, feedUpdatedAt: await marketFeedUpdatedAt(publicClient, market) };
+      } catch (error) {
+        return {
+          ...status,
+          status: "closed" as const,
+          disableReason: error instanceof Error ? error.message : String(error),
+        };
+      }
+    },
   });
   const { port } = await server.start();
 

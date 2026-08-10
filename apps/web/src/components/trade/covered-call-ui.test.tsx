@@ -38,6 +38,35 @@ const snapshot: OrderSnapshot = {
 };
 
 describe("covered-call contract browser", () => {
+  it("switches assets and exposes staged markets without inventing prices", async () => {
+    const user = userEvent.setup();
+    const onMarketChange = vi.fn();
+    render(
+      <ContractBrowser
+        title="Target Composer"
+        markets={[
+          { id: "BTC", displayName: "Bitcoin", kind: "crypto", enabled: true, collateral: { symbol: "BTCB", address: null, decimals: 18, scaledUi: false }, contracts: null, pythPriceId: null, marketHours: "24/7", strikeIncrement: 500, riskVolFloor: 0.4, maxSize: "5" },
+          { id: "NVDA", displayName: "NVIDIA", kind: "equity", enabled: false, collateral: { symbol: "NVDAB", address: null, decimals: 18, scaledUi: true }, contracts: null, pythPriceId: null, marketHours: "24/5", strikeIncrement: 5, riskVolFloor: 0.35, maxSize: "100" },
+        ]}
+        selectedMarketId="NVDA"
+        marketUnavailable
+        expiries={[]}
+        activeExpiry={null}
+        strikes={[]}
+        selectedStrike={null}
+        spotPrice={0}
+        isLoading={false}
+        disabled={false}
+        onExpiryChange={vi.fn()}
+        onStrikeSelect={vi.fn()}
+        onMarketChange={onMarketChange}
+      />,
+    );
+    expect(screen.getByText(/staged and will appear/i)).toBeTruthy();
+    await user.click(screen.getByRole("option", { name: "Bitcoin" }));
+    expect(onMarketChange).toHaveBeenCalledWith("BTC");
+  });
+
   it("selects expiries and strikes with keyboard-accessible buttons", async () => {
     const user = userEvent.setup();
     const onExpiryChange = vi.fn();
@@ -168,6 +197,13 @@ describe("covered-call order ticket", () => {
           expiry: strike.expiry,
           strike: strike.strike,
           amount: "0.5",
+          marketId: "BTC",
+          rawAmount: "0.5",
+          tokenDecimals: 18,
+          uiMultiplier: null,
+          optionAsset: "0x2222222222222222222222222222222222222222",
+          spot: 70_000,
+          indicativePremium: 1_000,
           quoteCount: 3,
           premium: 1_050,
           totalPremium: 525,
@@ -235,6 +271,13 @@ describe("covered-call order ticket", () => {
           expiry: strike.expiry,
           strike: strike.strike,
           amount: "0.5",
+          marketId: "BTC",
+          rawAmount: "0.5",
+          tokenDecimals: 18,
+          uiMultiplier: null,
+          optionAsset: "0x2222222222222222222222222222222222222222",
+          spot: 70_000,
+          indicativePremium: 1_000,
           quoteCount: 3,
           premium: 1_050,
           totalPremium: 525,

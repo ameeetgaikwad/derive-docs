@@ -1,9 +1,11 @@
-import type { Address, PublicClient, WalletClient } from "viem";
+import type { Address, Hex, PublicClient, WalletClient } from "viem";
 import type { LocalAccount } from "viem";
 import {
   fromUnit,
   getDeployedAddress,
   instrumentNameFromSubId,
+  marketById,
+  readMarketManifest,
   requireDeployments,
   standardManagerAbi,
   subAccountsAbi,
@@ -21,21 +23,54 @@ export interface SettlementAddresses {
   subAccounts: Address;
   cashAsset: Address;
   baseAsset: Address;
+  assetSymbol: string;
+  collateralSymbol: string;
   /** AnchoredSettlementFeed (btcSettlementFeed) — absent on signed-feed-only deployments */
   anchoredSettlementFeed?: Address;
+  /** PythBenchmarkSettlementFeed for RWA markets. */
+  benchmarkSettlementFeed?: Address;
 }
 
-export function settlementAddressesFromDeployments(chainId: number): SettlementAddresses {
+export function settlementAddressesFromDeployments(
+  chainId: number,
+  marketId: string = process.env.ORACLE_MARKET ?? "BTC",
+): SettlementAddresses {
   const d = requireDeployments(chainId);
+  const market = marketById(readMarketManifest(chainId), marketId);
+  if (!market?.enabled || !market.contracts) {
+    throw new Error(`${marketId} market is not enabled on chain ${chainId}`);
+  }
   return {
     standardManager: getDeployedAddress(d, "standardManager"),
-    optionAsset: getDeployedAddress(d, "btcOptionAsset"),
+    optionAsset: market.contracts.optionAsset,
     subAccounts: getDeployedAddress(d, "subAccounts"),
     cashAsset: getDeployedAddress(d, "cashAsset"),
-    baseAsset: getDeployedAddress(d, "btcBaseAsset"),
-    anchoredSettlementFeed: anchoredFeedFromDeployments(d),
+    baseAsset: market.contracts.baseAsset,
+    assetSymbol: market.id,
+    collateralSymbol: market.collateral.symbol,
+    anchoredSettlementFeed: market.kind === "crypto" ? anchoredFeedFromDeployments(d) : undefined,
+    benchmarkSettlementFeed: market.kind !== "crypto" ? market.contracts.settlementFeed : undefined,
   };
 }
+
+const benchmarkSettlementFeedAbi = [
+  { type: "function", name: "pyth", stateMutability: "view", inputs: [], outputs: [{ type: "address" }] },
+  {
+    type: "function", name: "fixSettlementPrice", stateMutability: "payable",
+    inputs: [{ type: "uint64", name: "expiry" }, { type: "bytes[]", name: "updateData" }],
+    outputs: [{ type: "uint256", name: "price" }],
+  },
+  {
+    type: "function", name: "getSettlementPrice", stateMutability: "view",
+    inputs: [{ type: "uint64", name: "expiry" }],
+    outputs: [{ type: "bool", name: "settled" }, { type: "uint256", name: "price" }],
+  },
+] as const;
+
+const pythFeeAbi = [{
+  type: "function", name: "getUpdateFee", stateMutability: "view",
+  inputs: [{ type: "bytes[]", name: "updateData" }], outputs: [{ type: "uint256" }],
+}] as const;
 
 export interface SubaccountBalance {
   asset: Address;
@@ -88,6 +123,8 @@ export class SettlementRunner {
     signed?: boolean;
     /** signed path only: skip posting feed data (already fixed on-chain) */
     skipFeed?: boolean;
+    /** Verified Pyth benchmark payload whose publish time is at/just after expiry. */
+    benchmarkUpdateData?: Hex[];
   }): Promise<SettlementReport> {
     const { expiry, subaccounts } = params;
 
@@ -120,6 +157,52 @@ export class SettlementRunner {
         );
       }
       fixed = { settled: true, price: result.price };
+    } else if (!params.signed && this.addresses.benchmarkSettlementFeed) {
+      const feed = this.addresses.benchmarkSettlementFeed;
+      fixed = await this.publicClient.readContract({
+        address: feed,
+        abi: benchmarkSettlementFeedAbi,
+        functionName: "getSettlementPrice",
+        args: [expiry],
+      }).then(([settled, price]) => ({ settled, price }));
+      if (!fixed.settled) {
+        const updateData = params.benchmarkUpdateData;
+        if (!updateData?.length) {
+          throw new Error("RWA settlement requires a verified Pyth benchmark update payload");
+        }
+        const pyth = await this.publicClient.readContract({
+          address: feed,
+          abi: benchmarkSettlementFeedAbi,
+          functionName: "pyth",
+        });
+        const fee = await this.publicClient.readContract({
+          address: pyth,
+          abi: pythFeeAbi,
+          functionName: "getUpdateFee",
+          args: [updateData],
+        });
+        const hash = await this.transactionQueue.run(async () => {
+          const transactionHash = await this.walletClient.writeContract({
+            address: feed,
+            abi: benchmarkSettlementFeedAbi,
+            functionName: "fixSettlementPrice",
+            args: [expiry, updateData],
+            value: fee,
+            account: this.account,
+            chain: this.walletClient.chain ?? null,
+          });
+          const receipt = await this.publicClient.waitForTransactionReceipt({ hash: transactionHash });
+          if (receipt.status !== "success") throw new Error(`benchmark settlement reverted (tx ${transactionHash})`);
+          return transactionHash;
+        });
+        fixed = await this.publicClient.readContract({
+          address: feed,
+          abi: benchmarkSettlementFeedAbi,
+          functionName: "getSettlementPrice",
+          args: [expiry],
+        }).then(([settled, price]) => ({ settled, price }));
+        log(`Pyth benchmark settlement fixed at ${fromUnit(fixed.price)}  tx=${hash}`);
+      }
     } else {
       if (!params.signed && !anchored) {
         log("no anchored settlement feed in deployments — falling back to the signed path");
@@ -198,10 +281,10 @@ export class SettlementRunner {
   private labelFor(asset: Address, subId: bigint): string {
     const a = asset.toLowerCase();
     if (a === this.addresses.cashAsset.toLowerCase()) return "USDT (cash)";
-    if (a === this.addresses.baseAsset.toLowerCase()) return "BTCB (base)";
+    if (a === this.addresses.baseAsset.toLowerCase()) return `${this.addresses.collateralSymbol} (base)`;
     if (a === this.addresses.optionAsset.toLowerCase()) {
       try {
-        return instrumentNameFromSubId(subId);
+        return instrumentNameFromSubId(subId, this.addresses.assetSymbol);
       } catch {
         return `option subId=${subId}`;
       }

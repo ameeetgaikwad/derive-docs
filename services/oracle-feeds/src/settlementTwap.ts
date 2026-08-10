@@ -39,11 +39,17 @@ export class SettlementTwapTracker {
   private readonly chainId: number;
   private state: TwapState | null = null;
 
-  constructor(options: { chainId: number; statePath?: string }) {
+  constructor(options: { chainId: number; statePath?: string; marketId?: string }) {
     this.chainId = options.chainId;
+    const marketId = options.marketId ?? "BTC";
     this.statePath =
       options.statePath ??
-      resolve(fileURLToPath(new URL("../.data", import.meta.url)), `settlement-twap.${options.chainId}.json`);
+      resolve(
+        fileURLToPath(new URL("../.data", import.meta.url)),
+        marketId === "BTC"
+          ? `settlement-twap.${options.chainId}.json`
+          : `settlement-twap.${options.chainId}.${marketId}.json`,
+      );
   }
 
   /** Record a spot observation and return aggregate fields when inside the TWAP window. */

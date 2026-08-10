@@ -50,7 +50,8 @@ pnpm --filter @hedge/maker-bot smoke
 | `DEPOSIT_USDT` | `100000` | USDT (token units) deposited by `--setup`. |
 | `MAKER_SUBACCOUNT_ID` | — | Overrides the state file. |
 | `MAKER_STATE_FILE` | `maker-state.<chainId>.json` | Where `--setup` records the subaccount. |
-| `FORWARD_PRICE`, `SPOT_PRICE`, `IV`, `RATE` | — | Pricing overrides. When `FORWARD_PRICE`/`SPOT_PRICE` **and** `IV` are set, on-chain feeds are not queried at all. |
+| `FORWARD_PRICE`, `SPOT_PRICE`, `IV`, `RATE` | — | Legacy BTC pricing overrides. When `FORWARD_PRICE`/`SPOT_PRICE` **and** `IV` are set, BTC on-chain feeds are not queried. |
+| `FORWARD_PRICE_<MARKET>`, `SPOT_PRICE_<MARKET>`, `IV_<MARKET>`, `RATE_<MARKET>` | — | Market-isolated overrides, for example `SPOT_PRICE_NVDA` and `IV_NVDA`. Unqualified price/IV overrides never apply to RWA markets. |
 | `QUOTE_TTL_SEC` | `300` | Signed Action validity. |
 
 Pricing inputs without overrides come from the deployed feeds (addresses from

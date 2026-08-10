@@ -12,21 +12,20 @@ import {
   type OrderSnapshot,
   type SetupPhase,
 } from "@/components/trade/covered-call-ui";
-import {
-  useCoveredCallSubaccount,
-  useDepositBtcb,
-} from "@/hooks/protocol/useCoveredCallSubaccount";
+import { useCoveredCallSubaccount } from "@/hooks/protocol/useCoveredCallSubaccount";
 import {
   useAvailableStrikes,
   type StrikeOption,
 } from "@/hooks/protocol/useAvailableStrikes";
-import { useBtcbBalance } from "@/hooks/protocol/useBtcb";
+import { useCollateralBalance, useDepositCollateral } from "@/hooks/protocol/useCollateral";
 import { usePositionMonitor } from "@/hooks/protocol/usePositionMonitor";
 import { useSellCall } from "@/hooks/protocol/useSellCall";
 import { explorerTxUrl } from "@/lib/protocol/deployments";
-import { toUnit } from "@/lib/protocol/units";
+import { fromUnit, toUnit } from "@/lib/protocol/units";
+import { getMarkets, uiAmount18ToRaw18, type MarketId } from "@/lib/protocol/markets";
 import { cn } from "@/lib/utils";
 import { useCoveredCallStore } from "@/stores/covered-call";
+import { useNetwork } from "@/hooks/protocol/useNetwork";
 
 const DEFAULT_AMOUNT = "0.05";
 
@@ -69,7 +68,20 @@ export default function TargetComposer({
   const isDesktop = useDesktopLayout();
   const { isConnected, address } = useAccount();
   const { openConnectModal } = useConnectModal();
-  const [amount, setAmount] = useState(DEFAULT_AMOUNT);
+  const { chainId } = useNetwork();
+  const markets = useMemo(() => getMarkets(chainId), [chainId]);
+  const [selectedMarketId, setSelectedMarketId] = useState<MarketId>("BTC");
+  const [amounts, setAmounts] = useState<Record<MarketId, string>>({
+    BTC: DEFAULT_AMOUNT,
+    XAU: "1",
+    SPY: "1",
+    NVDA: "1",
+    SPCX: "1",
+  });
+  const amount = amounts[selectedMarketId];
+  const setAmount = useCallback((value: string) => {
+    setAmounts((current) => ({ ...current, [selectedMarketId]: value }));
+  }, [selectedMarketId]);
   const [selectedExpiry, setSelectedExpiry] = useState<number | null>(null);
   const [selectedStrike, setSelectedStrike] = useState<number | null>(null);
   const [selectedStrikeSnapshot, setSelectedStrikeSnapshot] =
@@ -87,16 +99,20 @@ export default function TargetComposer({
     strikes,
     spotPrice,
     isLoading,
-  } = useAvailableStrikes(selectedExpiry);
+    market,
+    multiplier,
+    isUnavailable,
+    unavailableReason,
+  } = useAvailableStrikes(selectedExpiry, selectedMarketId);
   const { subaccountId, ensureSubaccount } = useCoveredCallSubaccount();
-  const depositBtcb = useDepositBtcb();
+  const depositCollateral = useDepositCollateral(selectedMarketId, multiplier);
   const sellCall = useSellCall();
-  const { balanceNumber: walletBtcb, refetch: refetchBtcb } = useBtcbBalance();
+  const { balanceNumber: walletCollateral, refetch: refetchCollateral } = useCollateralBalance(selectedMarketId, multiplier);
   const { balances: subBalances, refetch: refetchPositions } =
-    usePositionMonitor(subaccountId);
+    usePositionMonitor(subaccountId, selectedMarketId, multiplier);
   const { addTrade } = useCoveredCallStore();
 
-  const balance = walletBtcb + subBalances.btcb;
+  const balance = walletCollateral + subBalances.collateral;
   const amountNumber = Math.max(0, Number.parseFloat(amount) || 0);
   const liveSelectedStrike =
     strikes.find((strike) => strike.strike === selectedStrike) ?? null;
@@ -124,8 +140,11 @@ export default function TargetComposer({
       expiryLabel: expiryLabel(activeExpiry),
       spotPrice,
       indicativeTotalPremium: selectedStrikeData.premium * amountNumber,
+      marketId: selectedMarketId,
+      assetName: market.displayName,
+      collateralSymbol: market.collateral.symbol,
     };
-  }, [activeExpiry, amountNumber, selectedStrikeData, spotPrice]);
+  }, [activeExpiry, amountNumber, market, selectedMarketId, selectedStrikeData, spotPrice]);
   const displayOrder = frozenOrder ?? currentOrder;
 
   const sellBusy = [
@@ -163,6 +182,19 @@ export default function TargetComposer({
     },
     [controlsLocked, sellCall, setExpanded],
   );
+
+  const handleMarketChange = useCallback((marketId: MarketId) => {
+    if (controlsLocked || marketId === selectedMarketId) return;
+    sellCall.reset();
+    setSelectedMarketId(marketId);
+    setSelectedExpiry(null);
+    setSelectedStrike(null);
+    setSelectedStrikeSnapshot(null);
+    setFrozenOrder(null);
+    setDoneInfo(null);
+    setPreparedSubaccountId(null);
+    setExpanded(false);
+  }, [controlsLocked, selectedMarketId, sellCall, setExpanded]);
 
   const handleStrikeSelect = useCallback(
     (strike: number, trigger: HTMLButtonElement) => {
@@ -218,11 +250,11 @@ export default function TargetComposer({
     }
     const order = currentOrder ?? frozenOrder;
     if (!order || amountNumber <= 0) {
-      toast.error("Enter the BTCB amount you want to cover");
+      toast.error(`Enter the ${market.collateral.symbol} amount you want to cover`);
       return;
     }
     if (amountNumber > balance) {
-      toast.error("Not enough BTCB for this covered call");
+      toast.error(`Not enough ${market.collateral.symbol} for this covered call`);
       return;
     }
 
@@ -243,19 +275,26 @@ export default function TargetComposer({
       const subId = await ensureSubaccount();
       setPreparedSubaccountId(subId);
 
-      const deficit = amountNumber - subBalances.btcb;
+      const deficit = amountNumber - subBalances.collateral;
       if (deficit > 0) {
         setSetupPhase("deposit");
-        await depositBtcb(subId, toUnit(deficit.toFixed(18)));
-        refetchBtcb();
+        await depositCollateral(subId, deficit.toFixed(18));
+        refetchCollateral();
       }
 
       setSetupPhase("idle");
+      const rawAmount = fromUnit(uiAmount18ToRaw18(toUnit(submitted.amount.toString()), multiplier));
       await sellCall.requestQuote({
+        marketId: selectedMarketId,
         subaccountId: subId,
         expiry: submitted.strike.expiry,
         strike: submitted.strike.strike,
+        protocolStrike: fromUnit(submitted.strike.strike18),
         amount: submitted.amount.toString(),
+        rawAmount,
+        uiMultiplier: multiplier,
+        spot: submitted.spotPrice,
+        indicativePremium: submitted.strike.premium,
         instrumentName: submitted.strike.instrumentName,
       });
     } catch (error) {
@@ -268,14 +307,17 @@ export default function TargetComposer({
     amountNumber,
     balance,
     currentOrder,
-    depositBtcb,
+    depositCollateral,
     ensureSubaccount,
     frozenOrder,
     isConnected,
     openConnectModal,
-    refetchBtcb,
+    refetchCollateral,
     sellCall,
-    subBalances.btcb,
+    subBalances.collateral,
+    market.collateral.symbol,
+    multiplier,
+    selectedMarketId,
   ]);
 
   const handleAcceptQuote = useCallback(async () => {
@@ -288,6 +330,7 @@ export default function TargetComposer({
       addTrade({
         address,
         chainId: result.chainId,
+        marketId: selectedMarketId,
         subaccountId: subId.toString(),
         instrumentName: result.instrumentName,
         strike: submitted.strike.strike,
@@ -315,11 +358,11 @@ export default function TargetComposer({
     preparedSubaccountId,
     refetchPositions,
     sellCall,
+    selectedMarketId,
   ]);
 
   const handleCreateAnother = useCallback(() => {
     sellCall.reset();
-    setAmount(DEFAULT_AMOUNT);
     setSelectedStrike(null);
     setSelectedStrikeSnapshot(null);
     setFrozenOrder(null);
@@ -368,6 +411,11 @@ export default function TargetComposer({
         selectedStrike={selectedStrike}
         spotPrice={spotPrice}
         isLoading={isLoading}
+        markets={markets}
+        selectedMarketId={selectedMarketId}
+        onMarketChange={handleMarketChange}
+        marketUnavailable={isUnavailable}
+        unavailableReason={unavailableReason}
         disabled={controlsLocked}
         onExpiryChange={handleExpiryChange}
         onStrikeSelect={handleStrikeSelect}

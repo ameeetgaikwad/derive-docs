@@ -12,6 +12,7 @@ export interface CoveredCallTrade {
   address: string;
   /** BSC deployment the trade was executed against. */
   chainId: 56 | 97;
+  marketId?: "BTC" | "XAU" | "SPY" | "NVDA" | "SPCX";
   subaccountId: string;
   /** e.g. BTC-20260619-69000-C */
   instrumentName: string;

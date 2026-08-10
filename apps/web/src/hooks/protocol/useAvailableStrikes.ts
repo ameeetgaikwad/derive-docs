@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { ContractFunctionParameters } from "viem";
 import { useReadContracts } from "wagmi";
 import {
@@ -12,6 +12,7 @@ import {
   formatExpiryLabel,
   strikesForExpiry,
   weeklyExpiries,
+  rwaWeeklyExpiries,
   type BoardStrike,
 } from "@/lib/protocol/board";
 import { black76Price, yearsToExpiry } from "@/lib/protocol/black76";
@@ -19,6 +20,8 @@ import { calculateAPR, daysToExpiry } from "@/lib/protocol/apr";
 import { unitToNumber } from "@/lib/protocol/units";
 import { useSpotPrice } from "./useSpotPrice";
 import { useNetwork } from "./useNetwork";
+import { getMarket, type MarketId } from "@/lib/protocol/markets";
+import { getRfqMarkets, type PublicMarketStatus } from "@/lib/protocol/rfq-engine";
 
 /** Fallbacks when an expiry has no posted feed data yet (testnet reality). */
 const DEFAULT_IV = 0.6;
@@ -48,17 +51,56 @@ export interface StrikeOption extends BoardStrike {
  * the reference maker-bot quotes with. Executable pricing always comes from
  * the RFQ auction.
  */
-export function useAvailableStrikes(selectedExpiry: number | null) {
-  const { addresses, chainId } = useNetwork();
-  const { spotPrice, isLoading: spotLoading } = useSpotPrice();
+export function useAvailableStrikes(
+  selectedExpiry: number | null,
+  marketId: MarketId = "BTC",
+) {
+  const { chainId } = useNetwork();
+  const market = getMarket(chainId, marketId);
+  const { spotPrice, multiplier, isLoading: spotLoading, isUnavailable } = useSpotPrice(marketId);
+  const [serverMarket, setServerMarket] = useState<PublicMarketStatus | null>(null);
+  const [statusError, setStatusError] = useState(false);
+  useEffect(() => {
+    if (market.marketHours !== "24/5" || !market.enabled) {
+      return;
+    }
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const statuses = await getRfqMarkets(chainId);
+        if (!cancelled) {
+          setServerMarket(statuses.find((status) => status.id === marketId) ?? null);
+          setStatusError(false);
+        }
+      } catch {
+        if (!cancelled) setStatusError(true);
+      }
+    };
+    void load();
+    const interval = window.setInterval(load, 30_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [chainId, market.enabled, market.marketHours, marketId]);
+  const unavailableReason = !market.enabled
+    ? "Market deployment is staged but not enabled"
+    : market.marketHours === "24/5" && serverMarket?.status !== "open"
+      ? serverMarket?.disableReason ?? (statusError ? "Market readiness service is unavailable" : "Checking market readiness")
+      : null;
+  const marketUnavailable = isUnavailable || unavailableReason !== null;
 
   const expiries = useMemo<ExpiryInfo[]>(
     () =>
-      weeklyExpiries(4).map((epoch) => ({
+      (market.marketHours === "24/7"
+        ? weeklyExpiries(4)
+        : serverMarket?.supportedExpiries?.length
+          ? serverMarket.supportedExpiries
+          : rwaWeeklyExpiries(4)).map((epoch) => ({
         epoch,
         label: formatExpiryLabel(epoch),
       })),
-    []
+    [market.marketHours, serverMarket]
   );
 
   const effectiveExpiry = useMemo(() => {
@@ -71,38 +113,43 @@ export function useAvailableStrikes(selectedExpiry: number | null) {
   const boardStrikes = useMemo(
     () =>
       effectiveExpiry && spotPrice > 0
-        ? strikesForExpiry(spotPrice, effectiveExpiry)
+        ? strikesForExpiry(spotPrice, effectiveExpiry, {
+            currency: market.id,
+            strikeIncrement: market.strikeIncrement,
+            uiMultiplier: multiplier,
+          })
         : [],
-    [effectiveExpiry, spotPrice]
+    [effectiveExpiry, market.id, market.strikeIncrement, multiplier, spotPrice]
   );
 
   // Heterogeneous batch (multicall): [forward, rate, vol per strike].
   const feedContracts = useMemo<ContractFunctionParameters[]>(() => {
-    if (effectiveExpiry === null || boardStrikes.length === 0) return [];
+    if (effectiveExpiry === null || boardStrikes.length === 0 || !market.contracts) return [];
+    const contracts = market.contracts;
     return [
       {
         abi: lyraForwardFeedAbi,
-        address: addresses.btcForwardFeed,
+        address: contracts.forwardFeed,
         chainId,
         functionName: "getForwardPrice",
         args: [BigInt(effectiveExpiry)],
       },
       {
         abi: lyraRateFeedAbi,
-        address: addresses.btcRateFeed,
+        address: contracts.rateFeed,
         chainId,
         functionName: "getInterestRate",
         args: [BigInt(effectiveExpiry)],
       },
       ...boardStrikes.map((s) => ({
         abi: lyraVolFeedAbi,
-        address: addresses.btcVolFeed,
+        address: contracts.volFeed,
         chainId,
         functionName: "getVol",
         args: [s.strike18, BigInt(s.expiry)],
       })),
     ];
-  }, [effectiveExpiry, boardStrikes, addresses, chainId]);
+  }, [effectiveExpiry, boardStrikes, market.contracts, chainId]);
 
   const feedReads = useReadContracts({
     contracts: feedContracts,
@@ -121,10 +168,12 @@ export function useAvailableStrikes(selectedExpiry: number | null) {
     const forwardRes = results?.[0];
     const rateRes = results?.[1];
 
-    const forward =
+    const rawForward =
       forwardRes?.status === "success"
         ? unitToNumber((forwardRes.result as readonly [bigint, bigint])[0])
         : spotPrice;
+    const scale = multiplier === null ? 1 : Number(multiplier) / 1e18;
+    const forward = rawForward / scale;
     const rate =
       rateRes?.status === "success"
         ? unitToNumber((rateRes.result as readonly [bigint, bigint])[0])
@@ -156,13 +205,17 @@ export function useAvailableStrikes(selectedExpiry: number | null) {
         usedFallback: !volOk || forwardRes?.status !== "success",
       };
     });
-  }, [boardStrikes, effectiveExpiry, feedReads.data, spotPrice]);
+  }, [boardStrikes, effectiveExpiry, feedReads.data, multiplier, spotPrice]);
 
   return {
     expiries,
     selectedExpiry: effectiveExpiry,
     strikes,
     spotPrice,
+    market,
+    multiplier,
+    isUnavailable: marketUnavailable,
+    unavailableReason,
     // The board can price immediately with the documented feed fallbacks.
     // Keep those rows mounted while the multicall refreshes so periodic
     // repricing never swaps the board back to its initial skeleton.

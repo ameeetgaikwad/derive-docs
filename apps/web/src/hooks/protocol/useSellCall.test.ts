@@ -36,6 +36,7 @@ vi.mock("wagmi", () => ({
   }),
   useSignTypedData: () => ({ signTypedDataAsync: mocks.signTypedDataAsync }),
   useSwitchChain: () => ({ switchChainAsync: mocks.switchChainAsync }),
+  useConfig: () => ({}),
 }));
 
 vi.mock("./useNetwork", () => ({
@@ -53,6 +54,7 @@ vi.mock("@/lib/protocol/rfq-engine", async (importOriginal) => {
 });
 
 const params: SellParams = {
+  marketId: "BTC",
   subaccountId: 7n,
   expiry: 1_900_000_000,
   strike: 75_000,

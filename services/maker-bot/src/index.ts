@@ -15,6 +15,8 @@ import {
   makePublicClient,
   makeWalletClient,
   readDeployments,
+  readMarketManifest,
+  enabledMarkets,
   toUnit,
 } from "@hedge/shared";
 import type { PublicClient } from "viem";
@@ -102,13 +104,19 @@ async function cmdRun(): Promise<void> {
   }
   const matching = getDeployedAddress(deployments, "matching");
   const rfqModule = getDeployedAddress(deployments, "rfqModule");
+  const activeMarkets = enabledMarkets(readMarketManifest(cfg.chainId));
+  const marketsById = new Map<string, (typeof activeMarkets)[number]>(
+    activeMarkets.map((market) => [market.id, market]),
+  );
 
   const subaccountId = resolveSubaccountId(cfg, account.address);
-  const priceSource = makePriceSource(cfg, publicClient, deployments);
+  const priceSources = new Map<string, ReturnType<typeof makePriceSource>>(
+    activeMarkets.map((market) => [market.id, makePriceSource(cfg, publicClient, market)]),
+  );
   const maxFee = toUnit(cfg.maxFee);
 
   console.log(`[maker-bot] chain=${cfg.chainId} owner=${account.address} subaccount=${subaccountId}`);
-  console.log(`[maker-bot] quoting bid=${cfg.bidRatio}x ask=${cfg.askRatio}x theo, maxFee=${cfg.maxFee}`);
+  console.log(`[maker-bot] enabled markets=${activeMarkets.map((market) => market.id).join(",")} maxFee=${cfg.maxFee}`);
 
   const quoted = new Set<string>();
 
@@ -121,6 +129,12 @@ async function cmdRun(): Promise<void> {
         if (quoted.has(rfq.id)) return; // engine replays open RFQs after re-auth
         if (Date.now() >= rfq.auctionEndsAt) {
           console.log(`[maker-bot] skipping rfq ${rfq.id}: auction already over`);
+          return;
+        }
+        const market = marketsById.get(rfq.instrument.currency);
+        const priceSource = priceSources.get(rfq.instrument.currency);
+        if (!market || !priceSource) {
+          console.log(`[maker-bot] skipping rfq ${rfq.id}: ${rfq.instrument.currency} is not enabled locally`);
           return;
         }
         // v1: direction "sell" = taker sells, maker receives => positive amount.
@@ -138,8 +152,8 @@ async function cmdRun(): Promise<void> {
         const quote = await buildSignedQuote({
           legs,
           priceSource,
-          bidRatio: cfg.bidRatio,
-          askRatio: cfg.askRatio,
+          bidRatio: cfg.marketBidRatios[market.id] ?? cfg.bidRatio,
+          askRatio: cfg.marketAskRatios[market.id] ?? cfg.askRatio,
           maxFee,
           subaccountId,
           owner: account.address,
