@@ -1,35 +1,17 @@
 {
   "chainId": 97,
-  "marketCount": 5,
-  "markets": [
-    {
-      "id": "BTC",
-      "displayName": "Bitcoin",
-      "kind": "crypto",
-      "enabled": true,
-      "collateral": {
-        "symbol": "BTCB",
-        "address": "0x32fCF6a260Cdd2A3dc79cD0d4aD6B6c46bF6798A",
-        "decimals": 18,
-        "scaledUi": false
-      },
-      "contracts": {
-        "marketId": 1,
-        "optionAsset": "0x05E16b2cB43ce1a69865C276604CBDcfCAE82AcF",
-        "baseAsset": "0x3464351F36fb79Eb06a04785bDaF8DCb8FBC42bc",
-        "spotFeed": "0xBa978A13b1bb2B83922c1f5eB6B6F1CbF6c518Ff",
-        "forwardFeed": "0xF496d4696AE9F86A7e18B03389225Fad5246104e",
-        "volFeed": "0x33a30E6F51aEf99C45886098628857a66737769c",
-        "rateFeed": "0x88C7455d67eA9F79Ac3F69a8B96A998028d0C0AA",
-        "settlementFeed": "0xD4201944C1aa14AEAF6058c42dbf0A95917f452e"
-      },
-      "pythPriceId": "0xe62df6c8b4a85fe1a67db44dc12de5db330f7ac66b72dc658afedf0f4a415b43",
-      "marketHours": "24/7",
-      "strikeIncrement": 500,
-      "riskVolFloor": 0.4,
-      "maxSize": "5"
-    },
-    {
+  "generatedAt": "2026-08-07T20:18:47.231Z",
+  "deployer": "0x1DDAACC770033feCfcFE2a43e3C2a73b8fe3edFd",
+  "feedSigner": "0x7a5e6A644A97d1E4Be9a0cd87092C3e9d3b8400c",
+  "mocks": {
+    "chainId": 97,
+    "xaut": "0x9b25631fb874B7ae45675080FadE009B5f1C95FA",
+    "spyb": "0xaB06114a526054Cef31e57394d4C5895B5682976",
+    "nvdab": "0x7A94666eAD74c05aA53cc8da67683936C80BEED2",
+    "spcxb": "0xd9665CBBD1d48e796b0Ff0E946E6D46fDaA15Ee5"
+  },
+  "markets": {
+    "XAU": {
       "id": "XAU",
       "displayName": "Gold",
       "kind": "metal",
@@ -56,7 +38,7 @@
       "riskVolFloor": 0.18,
       "maxSize": "10"
     },
-    {
+    "SPY": {
       "id": "SPY",
       "displayName": "S&P 500",
       "kind": "equity",
@@ -84,7 +66,7 @@
       "riskVolFloor": 0.2,
       "maxSize": "100"
     },
-    {
+    "NVDA": {
       "id": "NVDA",
       "displayName": "NVIDIA",
       "kind": "equity",
@@ -111,24 +93,6 @@
       "strikeIncrement": 5,
       "riskVolFloor": 0.35,
       "maxSize": "100"
-    },
-    {
-      "id": "SPCX",
-      "displayName": "SpaceX",
-      "kind": "equity",
-      "enabled": false,
-      "collateral": {
-        "symbol": "SPCXB",
-        "address": null,
-        "decimals": 18,
-        "scaledUi": true
-      },
-      "contracts": null,
-      "pythPriceId": null,
-      "marketHours": "24/5",
-      "strikeIncrement": 5,
-      "riskVolFloor": 0.45,
-      "maxSize": "100"
     }
-  ]
+  }
 }

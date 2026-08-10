@@ -167,6 +167,10 @@ Required before mainnet operation:
   append-only store without coordination.
 - [ ] Require TLS/WSS, maker allowlisting, request limits, body limits, heartbeat
   enforcement, and authentication replay protection.
+- [ ] Terminate TLS at the RFQ engine's Application Load Balancer using an ACM
+  certificate and a production DNS name. Configure makers with
+  `RFQ_ENGINE_WS=wss://<production-rfq-domain>/maker`; do not use the raw
+  `ws://<alb-dns>/maker` testnet endpoint for production or chain-56 traffic.
 - [ ] Simulate `verifyAndMatch` immediately before submission and return decoded
   custom errors. Include feed and manager errors such as `BLF_DataTooOld`,
   `PSF_StalePythPrice`, and SRM margin failures in observability.
@@ -183,6 +187,10 @@ Required before mainnet operation:
   production services from a developer laptop.
 - [ ] Use scoped KMS/IAM roles for the feed signer and executor. Remove root and
   long-lived developer credentials.
+- [ ] Treat the SSM-injected `EXECUTOR_PRIVATE_KEY` configuration as testnet-only.
+  Before any chain-56 deployment, remove it and restore non-exportable KMS
+  signing through `EXECUTOR_KMS_KEY_ID` with an executor-scoped ECS task role;
+  never inject the production executor private key into a container environment.
 - [ ] Store RPC credentials and service secrets in the designated secret store,
   never images, Git, frontend variables, or Terraform state outputs.
 - [ ] Configure at least two validated BSC RPC providers with health-based

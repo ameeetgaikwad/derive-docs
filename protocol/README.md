@@ -41,6 +41,35 @@ PRIVATE_KEY=0x... BTCB_ADDRESS=0x... USDT_ADDRESS=0x... \
 forge script script/DeployAll.s.sol --rpc-url bsc_testnet --broadcast
 ```
 
+### BSC testnet RWA sidecars
+
+The root operator command wraps `DeployRwaMocks.s.sol` and the one-market
+`AddMarket.s.sol` flow:
+
+```sh
+pnpm deploy:rwa:testnet:plan # no transactions
+pnpm deploy:rwa:testnet      # deploy all mocks + XAU/SPY/NVDA markets
+```
+
+The broadcaster hard-fails unless the RPC reports chain 97, verifies contract
+ownership and transaction-sender gas, resumes from verified mock/market
+sidecars, and merges new addresses into `deployments/markets/97.json` with each
+market still disabled.
+
+Activate one market only after pushing a fresh Pyth update and configuring its
+reference volatility input:
+
+```sh
+RWA_IV_XAU=0.20 pnpm activate:rwa:testnet --market XAU       # readiness only
+RWA_IV_XAU=0.20 pnpm activate:rwa:testnet --market XAU --confirm
+```
+
+`--disable --confirm` is the fail-closed path and intentionally does not depend
+on RPC health. Restart the oracle, RFQ engine, maker, and web deployment after
+changing the manifest. SPCX remains undeployable until a reviewed SpaceX Pyth
+Core feed ID or a reviewed alternative adapter is available; never substitute
+another asset's feed ID.
+
 ## What gets deployed
 
 - 18-decimal mock `BTCB` + `USDT` with open `mint(address,uint)` (chainId 31337 only)
