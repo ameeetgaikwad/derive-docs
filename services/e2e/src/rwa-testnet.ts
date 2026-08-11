@@ -9,6 +9,7 @@ import {
 
 export const RWA_MARKET_IDS = ["XAU", "SPY", "NVDA", "SPCX"] as const;
 export type RwaMarketId = (typeof RWA_MARKET_IDS)[number];
+export const SUPPORTED_RWA_MARKET_IDS = ["XAU", "SPY", "NVDA"] as const satisfies readonly RwaMarketId[];
 
 export const TOKEN_ENV_BY_MARKET: Record<RwaMarketId, string> = {
   XAU: "XAUT_ADDRESS",
@@ -64,7 +65,7 @@ export function isRwaMarketId(value: string): value is RwaMarketId {
 }
 
 export function parseDeployMarkets(values: string[]): RwaMarketId[] {
-  if (values.length === 0) return [...RWA_MARKET_IDS];
+  if (values.length === 0) return [...SUPPORTED_RWA_MARKET_IDS];
   const parsed = values.flatMap((value) => value.split(","))
     .map((value) => value.trim().toUpperCase())
     .filter(Boolean);
@@ -188,6 +189,7 @@ export function mergeSidecarIntoManifest(
       optionAsset: sidecar.optionAsset,
       baseAsset: sidecar.baseAsset,
       spotFeed: sidecar.liveSpotFeed,
+      signedSpotFeed: sidecar.spotFeed,
       forwardFeed: sidecar.forwardFeed,
       volFeed: sidecar.volFeed,
       rateFeed: sidecar.rateFeed,

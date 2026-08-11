@@ -11,7 +11,7 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "dev": "tsx src/cli.ts daemon --source deribit",
+    "dev": "tsx src/cli.ts daemon --source deribit --interval 30 --feed-interval 120",
     "post": "tsx src/cli.ts post",
     "daemon": "tsx src/cli.ts daemon",
     "settle": "tsx src/cli.ts settle",

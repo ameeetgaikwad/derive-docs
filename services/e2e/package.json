@@ -10,6 +10,7 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "bootstrap:rwa:testnet": "tsx src/bootstrap-rwa-testnet.ts",
     "deploy:rwa:testnet": "tsx src/deploy-rwa-testnet.ts",
     "activate:rwa:testnet": "tsx src/activate-rwa-testnet.ts",
     "e2e": "tsx src/run.ts",

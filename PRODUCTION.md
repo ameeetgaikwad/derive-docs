@@ -10,6 +10,30 @@ commands, [`protocol/OWNERSHIP.md`](protocol/OWNERSHIP.md) for admin transfer,
 [`services/shared/KMS.md`](services/shared/KMS.md) for signing keys, and
 [`infra/README.md`](infra/README.md) for hosting.
 
+## Chain-56 staging deployment
+
+[`DeployMainnetStaging.s.sol`](protocol/script/DeployMainnetStaging.s.sol) is an
+isolated BSC mainnet deployment entrypoint for controlled testing with real
+chain-56 tokens, oracle contracts, and transaction behavior. It is not a
+production deployment and must not be exposed to public deposits or trading.
+
+The staging deployment:
+
+- requires chain ID 56 and the explicit
+  `MAINNET_STAGING_CONFIRM=DEPLOY_HEDGE_MAINNET_STAGING_CHAIN_56`
+  acknowledgement;
+- writes addresses to `protocol/deployments/56-staging.json` instead of
+  replacing the existing chain-56 deployment record;
+- may retain the dedicated staging deployer EOA as administrator so operators
+  can rapidly test and recover the isolated deployment; and
+- must use fresh staging accounts, minimal real funds, closed public taker
+  access, and deliberately small exposure caps.
+
+Do not promote the staging contracts or deployment record to production. A
+production launch still requires a separately reviewed deployment, Safe
+ownership, audited oracle and collateral changes, durable services, and every
+P0 gate below.
+
 ## P0 launch blockers
 
 - [ ] Replace the static USDT/USD assumption with a live, independently checked

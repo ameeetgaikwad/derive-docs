@@ -6,8 +6,8 @@ import {
   type TransactionQueue,
 } from "./transactionQueue.js";
 
-/** Hermes price-service endpoint (override with HERMES_URL). */
-export const DEFAULT_HERMES_URL = "https://pyth.dourolabs.app/hermes";
+/** Hermes endpoint matching the currently deployed Pyth Core contract. Override during a reviewed upgrade. */
+export const DEFAULT_HERMES_URL = "https://hermes.pyth.network";
 
 const PRICE_ID_RE = /^0x[0-9a-fA-F]{64}$/;
 
@@ -114,6 +114,41 @@ export async function fetchHermesUpdate(
 export interface HermesBatchUpdate {
   data: Hex[];
   prices: Map<string, NonNullable<HermesUpdate["price"]>>;
+}
+
+export interface PythFreshnessSelection {
+  fresh: PythMarketAddress[];
+  skipped: { marketId: string; age: bigint | null; reason: string }[];
+}
+
+/** Select only feeds whose source observation can still satisfy the on-chain adapter heartbeat. */
+export function selectFreshPythMarkets(
+  markets: PythMarketAddress[],
+  prices: ReadonlyMap<string, NonNullable<HermesUpdate["price"]>>,
+  now: bigint,
+  maxAge: bigint,
+): PythFreshnessSelection {
+  const fresh: PythMarketAddress[] = [];
+  const skipped: PythFreshnessSelection["skipped"] = [];
+  for (const market of markets) {
+    const price = prices.get(market.priceId.toLowerCase());
+    if (!price) {
+      skipped.push({ marketId: market.marketId, age: null, reason: "missing parsed Hermes price" });
+      continue;
+    }
+    if (BigInt(price.price) <= 0n) {
+      skipped.push({ marketId: market.marketId, age: null, reason: "non-positive Hermes price" });
+      continue;
+    }
+    const publishTime = BigInt(price.publishTime);
+    const age = now > publishTime ? now - publishTime : 0n;
+    if (publishTime === 0n || age > maxAge) {
+      skipped.push({ marketId: market.marketId, age, reason: "stale Hermes source" });
+      continue;
+    }
+    fresh.push(market);
+  }
+  return { fresh, skipped };
 }
 
 /** Fetch one aggregate Pyth update for all enabled market ids. */
@@ -254,6 +289,8 @@ export async function pushPythUpdates(opts: {
     functionName: "getUpdateFee",
     args: [update.data],
   });
+  const marketIds = addresses.markets.map((market) => market.marketId).join(",");
+  console.log(`[oracle-feeds] Pyth batch submitting markets=[${marketIds}] fee=${fee} wei`);
   const queue = opts.transactionQueue ?? immediateTransactionQueue;
   const txHash = await queue.run(async () => {
     const hash = await walletClient.writeContract({
@@ -280,6 +317,11 @@ export async function pushPythUpdates(opts: {
     });
     spots.set(market.marketId, { spotPrice, confidence });
   }));
+  console.log(
+    `[oracle-feeds] Pyth batch mined tx=${txHash} markets=[${marketIds}] spots=[${
+      [...spots.entries()].map(([marketId, spot]) => `${marketId}:${spot.spotPrice}`).join(",")
+    }]`,
+  );
   return { txHash, spots };
 }
 

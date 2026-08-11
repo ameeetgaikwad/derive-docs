@@ -60,7 +60,7 @@ function xauSidecar(): AddMarketSidecar {
 describe("RWA testnet deployment helpers", () => {
   it("parses a deduplicated deployment market selection", () => {
     assert.deepEqual(parseDeployMarkets(["xau,nvda", "XAU"]), ["XAU", "NVDA"]);
-    assert.deepEqual(parseDeployMarkets([]), ["XAU", "SPY", "NVDA", "SPCX"]);
+    assert.deepEqual(parseDeployMarkets([]), ["XAU", "SPY", "NVDA"]);
     assert.throws(() => parseDeployMarkets(["BTC"]), /unsupported RWA market/);
   });
 
@@ -70,6 +70,7 @@ describe("RWA testnet deployment helpers", () => {
     assert.equal(market.enabled, false);
     assert.equal(market.collateral.address, A("1"));
     assert.equal(market.contracts?.spotFeed, A("7"));
+    assert.equal(market.contracts?.signedSpotFeed, A("2"));
     assert.equal(market.contracts?.settlementFeed, A("6"));
     assert.equal(market.pythPriceId, PRICE_ID);
   });
@@ -84,4 +85,3 @@ describe("RWA testnet deployment helpers", () => {
     assert.equal(setManifestMarketEnabled(staged, "XAU", false).markets[0]!.enabled, false);
   });
 });
-

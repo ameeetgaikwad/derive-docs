@@ -8,7 +8,7 @@
       "kind": "crypto",
       "enabled": true,
       "collateral": { "symbol": "BTCB", "address": "0x7130d2A12B9BCbFAe4f2634d864A1Ee1Ce3Ead9c", "decimals": 18, "scaledUi": false },
-      "contracts": { "marketId": 1, "optionAsset": "0x165cc42f8C39F22f9Fe5f2Dc5BCCBE62D2EDABC2", "baseAsset": "0xb1896d516414f8B2F8dc6F6D982EfaAf259dE6dE", "spotFeed": "0x7AbcBc77B693b31B42F7f8F7ed31455130a5fd5B", "forwardFeed": "0xBC3d28613c8D44Aa946c63D01D2C66aB7AF677AE", "volFeed": "0x526A4D1C55D994aAbfdFd9Ae2da9efccDFc38922", "rateFeed": "0x755236519380e391223Bb3cD9d3bcf27380e4413", "settlementFeed": "0x60DA363fc601650AaB4fB28852F3B878CcdA2277" },
+      "contracts": { "marketId": 1, "optionAsset": "0x165cc42f8C39F22f9Fe5f2Dc5BCCBE62D2EDABC2", "baseAsset": "0xb1896d516414f8B2F8dc6F6D982EfaAf259dE6dE", "spotFeed": "0x7AbcBc77B693b31B42F7f8F7ed31455130a5fd5B", "signedSpotFeed": "0xA9033219829dd376F90824d431C3735B933645bC", "forwardFeed": "0xBC3d28613c8D44Aa946c63D01D2C66aB7AF677AE", "volFeed": "0x526A4D1C55D994aAbfdFd9Ae2da9efccDFc38922", "rateFeed": "0x755236519380e391223Bb3cD9d3bcf27380e4413", "settlementFeed": "0x60DA363fc601650AaB4fB28852F3B878CcdA2277" },
       "pythPriceId": "0xe62df6c8b4a85fe1a67db44dc12de5db330f7ac66b72dc658afedf0f4a415b43",
       "marketHours": "24/7",
       "strikeIncrement": 500,

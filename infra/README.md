@@ -51,7 +51,16 @@ chain_id        = "56"                              # 56 = BNB mainnet, 97 = tes
 ```
 
 Other tuning vars (with defaults) live in `variables.tf`: task CPU/memory,
-desired counts, `oracle_feeds_command`, `log_retention_days`, KMS aliases.
+desired counts, `oracle_feeds_command`, `oracle_rwa_iv`, `log_retention_days`,
+and KMS aliases. The RWA volatility values are non-secret reviewed inputs passed
+to `oracle-feeds` as `RWA_IV_<MARKET>` until sufficient close history is
+configured.
+
+The AWS `oracle-feeds` service is the canonical chain writer. The root
+`pnpm dev` command intentionally excludes a local oracle to avoid two processes
+using the same feed-signer account and racing transaction nonces. Run
+`pnpm dev:oracle` (or `pnpm dev:with-oracle`) only while the ECS oracle service
+is deliberately scaled to zero.
 
 > **Oracle state gate:** the current Fargate task definition does not yet mount
 > durable storage for `ORACLE_STATE_PATH` and `ORACLE_TWAP_STATE_PATH`. Do not
