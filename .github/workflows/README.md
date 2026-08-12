@@ -41,7 +41,8 @@ CI/CD for the Hedge Turborepo monorepo (`Sats-Terminal/derive`).
 - For each service: `docker build -f services/<svc>/Dockerfile -t <ecr>/hedge/<svc>:<sha> .`
   (build context = repo root), then push both `:<sha>` and `:latest` to ECR. For
   `rfq-engine` and `oracle-feeds`, CD also runs
-  `aws ecs update-service --cluster hedge --service hedge-<svc> --force-new-deployment`.
+  `aws ecs update-service --force-new-deployment` for both `hedge-<svc>` and,
+  when present, `hedge-mainnet-staging-<svc>`. Missing service names are skipped.
   The ECS **task definition should reference the `:latest` tag**; `--force-new-deployment`
   makes ECS re-pull it. `:<sha>` is pushed alongside for auditability / rollback.
 
@@ -73,6 +74,8 @@ No AWS access-key secrets are required — CD uses OIDC.
 | ECS cluster | `hedge` |
 | ECS service (rfq-engine) | `hedge-rfq-engine` |
 | ECS service (oracle-feeds) | `hedge-oracle-feeds` |
+| ECS service (mainnet-staging rfq-engine) | `hedge-mainnet-staging-rfq-engine` |
+| ECS service (mainnet-staging oracle-feeds) | `hedge-mainnet-staging-oracle-feeds` |
 | ECR repository | `hedge/<svc>` (`rfq-engine`, `oracle-feeds`, or `maker-bot`) |
 | Full image URI | `985539774899.dkr.ecr.us-east-1.amazonaws.com/hedge/<svc>:{<sha>,latest}` |
 

@@ -60,11 +60,17 @@ next-env.d.ts
 
 # terraform
 infra/.terraform/
+infra/**/.terraform/
 infra/*.tfstate
 infra/*.tfstate.*
 infra/*.tfvars
+infra/**/*.tfstate
+infra/**/*.tfstate.*
+infra/**/*.tfvars
 infra/.terraform.tfstate.lock.info
+infra/**/.terraform.tfstate.lock.info
 infra/tfplan
+infra/**/tfplan
 
 # turbo
 .turbo/
