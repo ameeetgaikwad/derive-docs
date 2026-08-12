@@ -15,6 +15,7 @@
 #   MAKER_ALLOWLIST           comma-separated maker EOAs; empty = open/dev mode.
 #   STORE_PATH                JSONL persistence file; unset = in-memory store.
 #   TAKER_ACCEPT_DEADLINE_MS  ms the taker has to accept a won auction (default 120000).
+#   TRUST_PROXY               true only when direct container access is blocked by a trusted proxy.
 # Contract addresses are read from protocol/deployments/<CHAIN_ID>.json — mount that
 # dir and point SATS_DEPLOYMENTS_DIR at it (it is intentionally NOT baked into the image).
 #

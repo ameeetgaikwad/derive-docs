@@ -31,6 +31,8 @@ export interface EngineConfig {
   takerOpen: boolean;
   /** RFQ creations per IP per minute (default 30; 0 disables) */
   rfqRateLimitPerMin: number;
+  /** Trust the first X-Forwarded-For hop when deployed behind a controlled proxy. */
+  trustProxy: boolean;
   /** JSONL persistence path; null = in-memory store */
   storePath: string | null;
   /** Matching contract (EIP-712 verifying contract) */
@@ -74,6 +76,7 @@ export interface EngineConfig {
  *   MAKER_ALLOWLIST          comma-separated maker addresses; empty = open/dev
  *   TAKER_OPEN               default true; "false" rejects all RFQ creation
  *   RFQ_RATE_LIMIT_PER_MIN   default 30 RFQ creations per IP per minute (0 disables)
+ *   TRUST_PROXY              default false; true only behind a trusted reverse proxy
  *   STORE_PATH               JSONL persistence file; unset = in-memory
  *   EXECUTOR_PRIVATE_KEY     default anvil key #0 (only on 31337)
  *   EXECUTOR_KMS_KEY_ID      AWS KMS key id/ARN/alias — used instead of the
@@ -116,6 +119,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): EngineConfig {
     makerAllowlist,
     takerOpen: env.TAKER_OPEN !== "false",
     rfqRateLimitPerMin: Number(env.RFQ_RATE_LIMIT_PER_MIN ?? 30),
+    trustProxy: env.TRUST_PROXY === "true",
     storePath: env.STORE_PATH ?? null,
     matching: getDeployedAddress(deployments, "matching"),
     rfqModule: getDeployedAddress(deployments, "rfqModule"),
