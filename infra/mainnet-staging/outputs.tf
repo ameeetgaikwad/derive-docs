@@ -11,16 +11,10 @@ output "alb_dns_name" {
 
 output "ssm_parameter_names" {
   value = {
-    chain_id = aws_ssm_parameter.chain_id.name
-    rpc_url  = aws_ssm_parameter.rpc_url.name
-  }
-}
-
-output "kms_key_arns" {
-  description = "KMS keys whose derived EVM addresses must match the staging deployment roles."
-  value = {
-    feed_signer = data.aws_kms_alias.feed_signer.target_key_arn
-    executor    = data.aws_kms_alias.executor.target_key_arn
+    chain_id             = aws_ssm_parameter.chain_id.name
+    rpc_url              = aws_ssm_parameter.rpc_url.name
+    executor_private_key = var.executor_private_key_parameter_name
+    feed_signer_key      = var.feed_signer_key_parameter_name
   }
 }
 

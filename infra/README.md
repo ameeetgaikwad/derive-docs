@@ -137,19 +137,20 @@ terraform apply -var-file=prod.tfvars
 
 Do not repoint the existing testnet services or apply from an empty copy of this
 root's state. Mainnet staging is a separate Terraform root and state under
-`infra/mainnet-staging`; it reads the shared cluster, roles, KMS aliases, ECR,
-and VPC as data sources. Follow its complete rollout guide:
+`infra/mainnet-staging`; it reads the shared cluster, roles, ECR, and VPC as
+data sources. Follow its complete rollout guide:
 
 ```bash
 cd infra/mainnet-staging
 cp mainnet-staging.tfvars.example mainnet-staging.tfvars
-tofu init -backend=false
-tofu validate
+terraform init -backend=false
+terraform validate
 ```
 
 See [`mainnet-staging/README.md`](mainnet-staging/README.md). Its first apply
-keeps both services at zero tasks; image publishing, KMS identity checks, and
-stopping the local chain-56 oracle happen before scaling to one.
+keeps both services at zero tasks; image publishing, raw-key identity checks,
+and stopping the local chain-56 oracle happen before scaling to one. Raw keys
+are staging-only; the production deployment must use KMS identities.
 
 The CD workflow publishes one shared service image and rolls both existing ECS
 service pairs when present. It skips the mainnet-staging names until Terraform

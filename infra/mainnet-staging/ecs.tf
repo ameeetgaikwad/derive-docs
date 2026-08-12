@@ -57,11 +57,10 @@ resource "aws_ecs_task_definition" "rfq_engine" {
 
       environment = [
         { name = "AWS_REGION", value = var.aws_region },
+        { name = "HOST", value = "0.0.0.0" },
         { name = "PORT", value = "3030" },
         { name = "SATS_DEPLOYMENTS_DIR", value = "/app/protocol/deployments/staging" },
         { name = "HEDGE_MARKETS_DIR", value = "/app/protocol/deployments/staging/markets" },
-        { name = "EXECUTOR_KMS_KEY_ID", value = var.executor_kms_alias },
-        { name = "EXECUTOR_KMS_REGION", value = var.aws_region },
         { name = "TAKER_OPEN", value = "true" },
         { name = "MAKER_ALLOWLIST", value = join(",", var.maker_allowlist) },
         { name = "RFQ_RATE_LIMIT_PER_MIN", value = "5" },
@@ -74,6 +73,7 @@ resource "aws_ecs_task_definition" "rfq_engine" {
       secrets = [
         { name = "CHAIN_ID", valueFrom = aws_ssm_parameter.chain_id.arn },
         { name = "RPC_URL", valueFrom = aws_ssm_parameter.rpc_url.arn },
+        { name = "EXECUTOR_PRIVATE_KEY", valueFrom = local.executor_private_key_parameter_arn },
       ]
 
       logConfiguration = {
@@ -156,8 +156,6 @@ resource "aws_ecs_task_definition" "oracle_feeds" {
         { name = "AWS_REGION", value = var.aws_region },
         { name = "SATS_DEPLOYMENTS_DIR", value = "/app/protocol/deployments/staging" },
         { name = "HEDGE_MARKETS_DIR", value = "/app/protocol/deployments/staging/markets" },
-        { name = "FEED_SIGNER_KMS_KEY_ID", value = var.feed_signer_kms_alias },
-        { name = "FEED_SIGNER_KMS_REGION", value = var.aws_region },
         { name = "ORACLE_STATE_PATH", value = "/var/lib/hedge/active-expiries.json" },
         { name = "ORACLE_TWAP_STATE_PATH", value = "/var/lib/hedge/settlement-twap.json" },
       ]
@@ -165,6 +163,7 @@ resource "aws_ecs_task_definition" "oracle_feeds" {
       secrets = [
         { name = "CHAIN_ID", valueFrom = aws_ssm_parameter.chain_id.arn },
         { name = "RPC_URL", valueFrom = aws_ssm_parameter.rpc_url.arn },
+        { name = "FEED_SIGNER_KEY", valueFrom = local.feed_signer_key_parameter_arn },
       ]
 
       logConfiguration = {

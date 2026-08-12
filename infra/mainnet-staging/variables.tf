@@ -11,7 +11,7 @@ variable "ecs_cluster_name" {
 }
 
 variable "ecs_task_role_name" {
-  description = "Existing runtime role with permission to use the Hedge KMS signing aliases."
+  description = "Existing runtime role used by the Hedge ECS containers."
   type        = string
   default     = "hedge-ecs-task"
 }
@@ -22,16 +22,26 @@ variable "ecs_execution_role_name" {
   default     = "hedge-ecs-execution"
 }
 
-variable "feed_signer_kms_alias" {
-  description = "KMS alias whose EVM address must match the deployed mainnet-staging feed signer."
+variable "executor_private_key_parameter_name" {
+  description = "Existing SSM SecureString containing the staging trade-executor private key. Terraform references its ARN but never reads its value."
   type        = string
-  default     = "alias/hedge-feed-signer"
+  default     = "/hedge/mainnet-staging/executor_private_key"
+
+  validation {
+    condition     = startswith(var.executor_private_key_parameter_name, "/hedge/mainnet-staging/")
+    error_message = "executor_private_key_parameter_name must stay under /hedge/mainnet-staging/."
+  }
 }
 
-variable "executor_kms_alias" {
-  description = "KMS alias whose EVM address must match the deployed mainnet-staging trade executor."
+variable "feed_signer_key_parameter_name" {
+  description = "Existing SSM SecureString containing the staging oracle feed-signer private key. Terraform references its ARN but never reads its value."
   type        = string
-  default     = "alias/hedge-executor"
+  default     = "/hedge/mainnet-staging/feed_signer_key"
+
+  validation {
+    condition     = startswith(var.feed_signer_key_parameter_name, "/hedge/mainnet-staging/")
+    error_message = "feed_signer_key_parameter_name must stay under /hedge/mainnet-staging/."
+  }
 }
 
 variable "rpc_url" {

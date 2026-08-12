@@ -9,12 +9,12 @@ terraform {
   }
 
   # Use a state key separate from the existing Hedge stack. Verify/create the
-  # bucket, uncomment, and run `tofu init -migrate-state` before the first apply.
-  # backend "s3" {
-  #   bucket       = "hedge-tfstate-985539774899"
-  #   key          = "infra/mainnet-staging/terraform.tfstate"
-  #   region       = "us-east-1"
-  #   encrypt      = true
-  #   use_lockfile = true
-  # }
+  # bucket, uncomment, and run `terraform init -migrate-state` before the first apply.
+  backend "s3" {
+    bucket       = "hedge-tfstate-985539774899"
+    key          = "infra/mainnet-staging/terraform.tfstate"
+    region       = "us-east-1"
+    encrypt      = true
+    use_lockfile = true
+  }
 }
