@@ -4,6 +4,9 @@ import {
   getRpcUrl,
   requireDeployments,
   getDeployedAddress,
+  readMarketManifest,
+  enabledMarkets,
+  type MarketDefinition,
 } from "@hedge/shared";
 
 /** anvil account #0 — the registered trade executor in deployments/31337.json */
@@ -42,6 +45,8 @@ export interface EngineConfig {
   optionAssets: Record<string, Address>;
   /** currency symbol -> forward feed (OI fee estimation) */
   forwardFeeds: Record<string, Address>;
+  /** canonical per-chain market definitions, including staged disabled markets */
+  markets: MarketDefinition[];
   /**
    * trade-executor private key; defaults to anvil #0 on chain 31337.
    * Null when the executor key lives in AWS KMS (EXECUTOR_KMS_KEY_ID).
@@ -78,6 +83,8 @@ export interface EngineConfig {
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): EngineConfig {
   const chainId = getChainId();
   const deployments = requireDeployments(chainId);
+  const manifest = readMarketManifest(chainId);
+  const activeMarkets = enabledMarkets(manifest);
 
   const executorKmsKeyId = env.EXECUTOR_KMS_KEY_ID?.trim() || null;
   const executorPrivateKey = ((env.EXECUTOR_PRIVATE_KEY ??
@@ -116,12 +123,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): EngineConfig {
     cashAsset: getDeployedAddress(deployments, "cashAsset"),
     srmViewer: getDeployedAddress(deployments, "srmViewer"),
     standardManager: getDeployedAddress(deployments, "standardManager"),
-    optionAssets: {
-      BTC: getDeployedAddress(deployments, "btcOptionAsset"),
-    },
-    forwardFeeds: {
-      BTC: getDeployedAddress(deployments, "btcForwardFeed"),
-    },
+    optionAssets: Object.fromEntries(activeMarkets.map((market) => [market.id, market.contracts!.optionAsset])),
+    forwardFeeds: Object.fromEntries(activeMarkets.map((market) => [market.id, market.contracts!.forwardFeed])),
+    markets: manifest.markets,
     executorPrivateKey,
     executorKmsKeyId,
   };

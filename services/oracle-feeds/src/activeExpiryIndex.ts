@@ -5,6 +5,8 @@ import { fileURLToPath } from "node:url";
 import {
   decodeOptionSubId,
   getDeployedAddress,
+  marketById,
+  readMarketManifest,
   requireDeployments,
 } from "@hedge/shared";
 import {
@@ -28,11 +30,18 @@ export interface ActiveExpiryAddresses {
   optionAsset: Address;
 }
 
-export function activeExpiryAddressesFromDeployments(chainId: number): ActiveExpiryAddresses {
+export function activeExpiryAddressesFromDeployments(
+  chainId: number,
+  marketId: string = process.env.ORACLE_MARKET ?? "BTC",
+): ActiveExpiryAddresses {
   const deployments = requireDeployments(chainId);
+  const market = marketById(readMarketManifest(chainId), marketId);
+  if (!market?.enabled || !market.contracts) {
+    throw new Error(`${marketId} market is not enabled on chain ${chainId}`);
+  }
   return {
     subAccounts: getDeployedAddress(deployments, "subAccounts"),
-    optionAsset: getDeployedAddress(deployments, "btcOptionAsset"),
+    optionAsset: market.contracts.optionAsset,
   };
 }
 
@@ -74,6 +83,7 @@ export interface ActiveExpiryCheckpoint {
 export interface ActiveExpiryIndexOptions {
   publicClient: PublicClient;
   chainId: number;
+  marketId?: string;
   addresses?: ActiveExpiryAddresses;
   statePath?: string;
   fromBlock?: bigint;
@@ -105,10 +115,16 @@ export class ActiveExpiryIndex {
   constructor(options: ActiveExpiryIndexOptions) {
     this.publicClient = options.publicClient;
     this.chainId = options.chainId;
-    this.addresses = options.addresses ?? activeExpiryAddressesFromDeployments(options.chainId);
+    const marketId = options.marketId ?? process.env.ORACLE_MARKET ?? "BTC";
+    this.addresses = options.addresses ?? activeExpiryAddressesFromDeployments(options.chainId, marketId);
     this.statePath =
       options.statePath ??
-      resolve(fileURLToPath(new URL("../.data", import.meta.url)), `active-expiries.${options.chainId}.json`);
+      resolve(
+        fileURLToPath(new URL("../.data", import.meta.url)),
+        marketId === "BTC"
+          ? `active-expiries.${options.chainId}.json`
+          : `active-expiries.${options.chainId}.${marketId}.json`,
+      );
     this.configuredFromBlock = options.fromBlock;
     this.confirmations = options.confirmations ?? (options.chainId === 31337 ? 0n : 6n);
     this.chunkSize = options.chunkSize ?? DEFAULT_CHUNK_SIZE;

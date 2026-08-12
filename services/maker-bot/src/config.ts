@@ -1,6 +1,6 @@
 import { privateKeyToAccount, type PrivateKeyAccount } from "viem/accounts";
 import type { Hex } from "viem";
-import { DEFAULT_RPC_URL, getChainId, getRpcUrl } from "@hedge/shared";
+import { DEFAULT_RPC_URL, MARKET_IDS, getChainId, getRpcUrl } from "@hedge/shared";
 
 export interface MakerBotConfig {
   chainId: number;
@@ -28,6 +28,14 @@ export interface MakerBotConfig {
   quoteTtlSec: number;
   /** Price vol off the live Deribit surface (DERIBIT_VOL=true), falling back to on-chain. */
   deribitVol: boolean;
+  /** Per-market spread overrides, e.g. MAKER_BID_RATIO_NVDA. */
+  marketBidRatios: Record<string, number>;
+  marketAskRatios: Record<string, number>;
+  /** Per-market static pricing overrides; global overrides remain BTC-only for compatibility. */
+  marketForwardOverrides: Record<string, number | null>;
+  marketSpotOverrides: Record<string, number | null>;
+  marketIvOverrides: Record<string, number | null>;
+  marketRates: Record<string, number>;
 }
 
 function num(name: string, fallback: number): number {
@@ -48,12 +56,15 @@ function optNum(name: string): number | null {
 
 export function loadConfig(): MakerBotConfig {
   const chainId = getChainId();
+  const defaultBid = num("MAKER_BID_RATIO", 0.95);
+  const defaultAsk = num("MAKER_ASK_RATIO", 1.05);
+  const defaultRate = num("RATE", 0);
   return {
     chainId,
     rpcUrl: getRpcUrl() ?? DEFAULT_RPC_URL,
     wsUrl: process.env.RFQ_ENGINE_WS ?? "ws://127.0.0.1:3030/maker",
-    bidRatio: num("MAKER_BID_RATIO", 0.95),
-    askRatio: num("MAKER_ASK_RATIO", 1.05),
+    bidRatio: defaultBid,
+    askRatio: defaultAsk,
     maxFee: process.env.MAKER_MAX_FEE ?? "0",
     depositUsdt: process.env.DEPOSIT_USDT ?? "100000",
     subaccountId: process.env.MAKER_SUBACCOUNT_ID
@@ -63,9 +74,15 @@ export function loadConfig(): MakerBotConfig {
     forwardOverride: optNum("FORWARD_PRICE"),
     spotOverride: optNum("SPOT_PRICE"),
     ivOverride: optNum("IV"),
-    rate: num("RATE", 0),
+    rate: defaultRate,
     quoteTtlSec: num("QUOTE_TTL_SEC", 300),
     deribitVol: (process.env.DERIBIT_VOL ?? "").toLowerCase() === "true",
+    marketBidRatios: Object.fromEntries(MARKET_IDS.map((id) => [id, num(`MAKER_BID_RATIO_${id}`, defaultBid)])),
+    marketAskRatios: Object.fromEntries(MARKET_IDS.map((id) => [id, num(`MAKER_ASK_RATIO_${id}`, defaultAsk)])),
+    marketForwardOverrides: Object.fromEntries(MARKET_IDS.map((id) => [id, optNum(`FORWARD_PRICE_${id}`)])),
+    marketSpotOverrides: Object.fromEntries(MARKET_IDS.map((id) => [id, optNum(`SPOT_PRICE_${id}`)])),
+    marketIvOverrides: Object.fromEntries(MARKET_IDS.map((id) => [id, optNum(`IV_${id}`)])),
+    marketRates: Object.fromEntries(MARKET_IDS.map((id) => [id, num(`RATE_${id}`, defaultRate)])),
   };
 }
 

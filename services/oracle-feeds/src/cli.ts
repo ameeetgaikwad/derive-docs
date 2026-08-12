@@ -8,6 +8,11 @@ import {
   makePublicClient,
   makeWalletClient,
   toUnit,
+  readMarketManifest,
+  enabledMarkets,
+  marketById,
+  rwaExpiries,
+  type MarketDefinition,
 } from "@hedge/shared";
 import { getDeadlineSec, getFeedSignerAccount, getPythPusherAccount } from "./env.js";
 import {
@@ -25,7 +30,16 @@ import {
   type StablePriceConfig,
 } from "./priceSource.js";
 import { SettlementRunner, settlementAddressesFromDeployments } from "./settlement.js";
-import { pushPythUpdate, pythAddressesFromDeployments, type PythAddresses } from "./pyth.js";
+import {
+  pushPythUpdate,
+  pushPythUpdates,
+  pythAddressesFromDeployments,
+  pythMarketsFromManifest,
+  oracleSignerReadiness,
+  spotFeedAbi,
+  type PythAddresses,
+  type PythBatchAddresses,
+} from "./pyth.js";
 import { ActiveExpiryIndex } from "./activeExpiryIndex.js";
 import {
   buildOracleExpirySet,
@@ -34,6 +48,8 @@ import {
 } from "./expiryPolicy.js";
 import { SettlementTwapTracker } from "./settlementTwap.js";
 import { SerialTransactionQueue } from "./transactionQueue.js";
+import { checkpointScaledMarkets } from "./multiplier.js";
+import { referenceRwaVolatility } from "./realizedVol.js";
 
 const USAGE = `oracle-feeds — signed feed poster + settlement runner (hedge)
 
@@ -268,16 +284,45 @@ async function cmdDaemon(args: Args): Promise<void> {
     (process.env.ORACLE_ALLOW_LATE_TWAP_BACKFILL ?? (chainId === 56 ? "false" : "true"))
       .toLowerCase() === "true";
   await activeIndex.sync();
+  const activeMarkets = enabledMarkets(readMarketManifest(chainId));
+  const selectedMarketId = process.env.ORACLE_MARKET ?? "BTC";
+  const selectedMarket = marketById(readMarketManifest(chainId), selectedMarketId);
+  if (!selectedMarket?.enabled || !selectedMarket.contracts) {
+    throw new Error(`ORACLE_MARKET ${selectedMarketId} is not enabled`);
+  }
+  if (selectedMarket.marketHours !== "24/7") {
+    throw new Error("ORACLE_MARKET selects the crypto reference path; enabled RWA markets are posted automatically");
+  }
+
+  const rwaRuntimes = activeMarkets
+    .filter((market) => market.marketHours === "24/5" && market.contracts)
+    .map((market) => ({
+      market,
+      poster: new FeedPoster(
+        publicClient,
+        walletClient,
+        signer,
+        chainId,
+        feedAddressesFromDeployments(chainId, market.id),
+        getDeadlineSec(),
+        transactionQueue,
+      ),
+      index: activeExpiryIndexFromEnv(publicClient, chainId, market.id),
+      twap: new SettlementTwapTracker({ chainId, marketId: market.id }),
+      volatility: configuredRwaVolatility(market),
+      rate: configuredRwaRate(market),
+    }));
+  await Promise.all(rwaRuntimes.map((runtime) => runtime.index.sync()));
 
   const pythDisabled =
     args.bools.has("no-pyth") || (process.env.PYTH_PUSH ?? "").toLowerCase() === "false";
   if (chainId === 56 && pythDisabled) {
     throw new Error("Pyth updates cannot be disabled on chain 56");
   }
-  let pythAddresses: PythAddresses | null = null;
+  let pythAddresses: PythBatchAddresses | null = null;
   if (!pythDisabled) {
     try {
-      pythAddresses = pythAddressesFromDeployments(chainId);
+      pythAddresses = pythMarketsFromManifest(chainId);
     } catch (error) {
       if (chainId !== 31337) {
         throw new Error(`Pyth deployment configuration is required on chain ${chainId}`, {
@@ -305,7 +350,11 @@ async function cmdDaemon(args: Args): Promise<void> {
   );
   const settlementAddresses = settlementAddressesFromDeployments(chainId);
   if (autoSettle && !settlementAddresses.anchoredSettlementFeed) {
-    throw new Error("AUTO_SETTLE=true requires an anchored settlement feed; signed fallback is not automatic");
+    throw new Error(
+      settlementAddresses.benchmarkSettlementFeed
+        ? "AUTO_SETTLE for RWA markets requires a benchmark-update provider; use the reviewed settle command"
+        : "AUTO_SETTLE=true requires an anchored settlement feed; signed fallback is not automatic",
+    );
   }
   const settlementRunner = autoSettle
     ? new SettlementRunner(
@@ -325,16 +374,59 @@ async function cmdDaemon(args: Args): Promise<void> {
       `stable=${stableConfig.priceSource.name}/${stableConfig.intervalSec}s ` +
       `batch=${useBatch ? "on" : "off"} autoSettle=${autoSettle ? "on" : "off"}`,
   );
-  if (pythAccount) {
-    console.log(`[oracle-feeds] pyth sender=${pythAccount.address}`);
-  }
+  const minimumSignerBalance =
+    optionalBigIntEnv("ORACLE_MIN_SIGNER_BALANCE_WEI") ?? 5_000_000_000_000_000n;
+  const transactionSenders = new Map<string, { address: typeof signer.address; roles: string[] }>();
+  const addTransactionSender = (address: typeof signer.address, role: string) => {
+    const key = address.toLowerCase();
+    const existing = transactionSenders.get(key);
+    if (existing) existing.roles.push(role);
+    else transactionSenders.set(key, { address, roles: [role] });
+  };
+  addTransactionSender(signer.address, "signed feeds");
+  if (pythAccount) addTransactionSender(pythAccount.address, "Pyth/multiplier updates");
+
+  const checkTransactionSenderGas = async () => {
+    for (const sender of transactionSenders.values()) {
+      const readiness = await oracleSignerReadiness(
+        publicClient,
+        sender.address,
+        minimumSignerBalance,
+      );
+      if (!readiness.ready) {
+        throw new Error(
+          `oracle transaction sender ${sender.address} (${sender.roles.join(", ")}) has ` +
+            `${readiness.balance} wei; minimum configured balance is ` +
+            `${readiness.minimumBalance} wei`,
+        );
+      }
+      console.log(
+        `[oracle-feeds] gas sender=${sender.address} roles=${sender.roles.join("+")} ` +
+          `balance=${readiness.balance} wei`,
+      );
+    }
+  };
+  await checkTransactionSenderGas();
 
   const loops: Promise<never>[] = [];
+  loops.push(
+    runPeriodic(
+      "oracle sender gas readiness",
+      positiveInteger(
+        "ORACLE_SIGNER_CHECK_INTERVAL_SEC",
+        process.env.ORACLE_SIGNER_CHECK_INTERVAL_SEC ?? "60",
+      ),
+      checkTransactionSenderGas,
+    ),
+  );
   loops.push(
     runPeriodic("active-expiry discovery", positiveInteger(
       "ORACLE_DISCOVERY_INTERVAL_SEC",
       process.env.ORACLE_DISCOVERY_INTERVAL_SEC ?? "15",
-    ), async () => activeIndex.sync()),
+    ), async () => {
+      await activeIndex.sync();
+      await Promise.all(rwaRuntimes.map((runtime) => runtime.index.sync()));
+    }),
   );
   loops.push(
     runPeriodic("signed feed", feedIntervalSec, async () => {
@@ -385,6 +477,53 @@ async function cmdDaemon(args: Args): Promise<void> {
       else await poster.postSnapshot(snapshot);
     }),
   );
+  if (rwaRuntimes.length > 0) {
+    loops.push(
+      runPeriodic("RWA signed feeds", feedIntervalSec, async () => {
+        for (const runtime of rwaRuntimes) {
+          await runtime.index.sync();
+          const chainNow = await runtime.poster.chainNow();
+          const expirySet = buildOracleExpirySet({
+            nowSec: chainNow,
+            tradeable: rwaExpiries(expiryCount, Number(chainNow) * 1000).map(BigInt),
+            active: runtime.index.activeExpiries(chainNow),
+          });
+          if (expirySet.posting.length > maxExpiries) {
+            throw new Error(
+              `${runtime.market.id} needs ${expirySet.posting.length} expiries, ` +
+                `above ORACLE_MAX_EXPIRIES=${maxExpiries}`,
+            );
+          }
+          const [spot] = await publicClient.readContract({
+            address: runtime.market.contracts!.spotFeed,
+            abi: spotFeedAbi,
+            functionName: "getSpot",
+          });
+          let snapshot: SnapshotParams = {
+            spot,
+            expiries: expirySet.posting.map((expiry) => ({
+              expiry,
+              forwardPrice: spot,
+              iv: toUnit(runtime.volatility.toString()),
+              rate: toUnit(runtime.rate.toString()),
+            })),
+          };
+          snapshot = await attachSettlementAggregates(
+            snapshot,
+            chainNow,
+            runtime.twap,
+            allowLateTwapBackfill,
+          );
+          if (useBatch) await runtime.poster.postSnapshotBatched(snapshot);
+          else await runtime.poster.postSnapshot(snapshot);
+          console.log(
+            `[oracle-feeds] ${runtime.market.id} spot=${fromUnit(spot)} ` +
+              `iv=${runtime.volatility} expiries=[${expirySet.posting.join(",")}]`,
+          );
+        }
+      }),
+    );
+  }
   loops.push(
     runPeriodic("stable feed", stableConfig.intervalSec, async () =>
       postStableUpdate(poster, stableConfig),
@@ -393,7 +532,7 @@ async function cmdDaemon(args: Args): Promise<void> {
   if (pythAddresses && pythWalletClient && pythAccount) {
     loops.push(
       runPeriodic("Pyth", intervalSec, async () => {
-        await pushPythUpdate({
+        await pushPythUpdates({
           publicClient,
           walletClient: pythWalletClient,
           account: pythAccount,
@@ -403,6 +542,21 @@ async function cmdDaemon(args: Args): Promise<void> {
         });
       }),
     );
+    const scaledMarkets = enabledMarkets(readMarketManifest(chainId)).filter((market) => market.collateral.scaledUi);
+    if (scaledMarkets.length > 0) {
+      loops.push(
+        runPeriodic("scaled UI multiplier", positiveInteger(
+          "MULTIPLIER_CHECKPOINT_INTERVAL_SEC",
+          process.env.MULTIPLIER_CHECKPOINT_INTERVAL_SEC ?? "60",
+        ), async () => checkpointScaledMarkets({
+          publicClient,
+          walletClient: pythWalletClient,
+          account: pythAccount,
+          markets: scaledMarkets,
+          transactionQueue: pythTransactionQueue,
+        })),
+      );
+    }
   }
   if (settlementRunner) {
     const cooldown = new Map<string, number>();
@@ -526,6 +680,30 @@ function optionalBigIntEnv(name: string): bigint | undefined {
   return BigInt(raw);
 }
 
+function configuredRwaVolatility(market: MarketDefinition): number {
+  const override = process.env[`RWA_IV_${market.id}`]?.trim();
+  if (override) {
+    const value = Number(override);
+    if (!Number.isFinite(value) || value <= 0) throw new Error(`RWA_IV_${market.id} must be positive`);
+    return Math.max(value, market.riskVolFloor);
+  }
+  const rawCloses = process.env[`RWA_CLOSES_${market.id}`]?.trim();
+  if (!rawCloses) {
+    throw new Error(
+      `enabled ${market.id} requires RWA_CLOSES_${market.id} (60 closes) or a reviewed RWA_IV_${market.id} override`,
+    );
+  }
+  const closes = rawCloses.split(",").map((value) => Number(value.trim()));
+  return referenceRwaVolatility(closes, market.riskVolFloor).reference;
+}
+
+function configuredRwaRate(market: MarketDefinition): number {
+  const raw = process.env[`RWA_RATE_${market.id}`]?.trim() ?? "0.05";
+  const value = Number(raw);
+  if (!Number.isFinite(value)) throw new Error(`RWA_RATE_${market.id} must be finite`);
+  return value;
+}
+
 async function cmdPythPush(args: Args): Promise<void> {
   const chainId = getChainId();
   const account = await getPythPusherAccount(chainId);
@@ -589,12 +767,16 @@ async function cmdStatus(): Promise<void> {
 function activeExpiryIndexFromEnv(
   publicClient: ReturnType<typeof makePublicClient>,
   chainId: number,
+  marketId: string = process.env.ORACLE_MARKET ?? "BTC",
 ): ActiveExpiryIndex {
   const discoveryFromBlock = optionalBigIntEnv("ORACLE_DISCOVERY_FROM_BLOCK");
   return new ActiveExpiryIndex({
     publicClient,
     chainId,
-    ...(process.env.ORACLE_STATE_PATH ? { statePath: process.env.ORACLE_STATE_PATH } : {}),
+    marketId,
+    ...(marketId === (process.env.ORACLE_MARKET ?? "BTC") && process.env.ORACLE_STATE_PATH
+      ? { statePath: process.env.ORACLE_STATE_PATH }
+      : {}),
     ...(discoveryFromBlock !== undefined ? { fromBlock: discoveryFromBlock } : {}),
     confirmations: BigInt(
       nonNegativeInteger(
@@ -638,6 +820,10 @@ async function cmdSettle(args: Args): Promise<void> {
     subaccounts: subs.split(",").map((s) => BigInt(s.trim())),
     signed,
     skipFeed: args.bools.has("skip-feed"),
+    benchmarkUpdateData: (args.flags.get("pyth-update") ?? []).map((value) => {
+      if (!/^0x[0-9a-fA-F]+$/.test(value)) throw new Error("--pyth-update must be hex bytes");
+      return value as `0x${string}`;
+    }),
   });
 }
 

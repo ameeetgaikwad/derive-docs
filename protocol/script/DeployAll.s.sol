@@ -148,7 +148,7 @@ contract DeployAll is MarketDeployerBase {
 
     _setupTokens();
     _deployCore();
-    _deployBtcMarket(getMarketConfig(0)); // BTC = market config entry 0
+    _deployBtcMarket(getManifestMarketConfig(0)); // BTC = market config entry 0
     _deployMatchingStack();
 
     vm.stopBroadcast();
@@ -159,7 +159,7 @@ contract DeployAll is MarketDeployerBase {
   /// @dev 18-decimal mocks on anvil (BTCB & USDT are both 18 decimals on BNB chain);
   ///      real token addresses from env elsewhere.
   function _setupTokens() internal {
-    btcb = _resolveUnderlying(getMarketConfig(0)); // mock on anvil, BTCB_ADDRESS elsewhere
+    btcb = _resolveUnderlying(getManifestMarketConfig(0)); // mock on anvil, BTCB_ADDRESS elsewhere
     if (block.chainid == 31337) {
       MockERC20 mockUsdt = new MockERC20("Mock USDT", "USDT", 18);
       // seed the deployer so local tooling has funds out of the box
@@ -315,7 +315,7 @@ contract DeployAll is MarketDeployerBase {
     vm.serializeAddress(k, "btcRateFeed", address(btcRateFeed));
     vm.serializeAddress(k, "btcSettlementFeed", btcSettlementFeed);
     // oracle stack (same keys the testnet 97.json carries; consumed by oracle-feeds pyth-push)
-    MarketConfig memory btcCfg = getMarketConfig(0);
+    MarketConfig memory btcCfg = getManifestMarketConfig(0);
     vm.serializeAddress(k, "pyth", _pythAddress());
     vm.serializeBytes32(k, "btcPythPriceId", btcCfg.pythPriceId);
     vm.serializeAddress(k, "btcPythSpotFeed", btcPythSpotFeed);

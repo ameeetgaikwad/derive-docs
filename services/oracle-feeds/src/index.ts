@@ -4,6 +4,7 @@ export * from "./priceSource.js";
 export * from "./poster.js";
 export * from "./settlement.js";
 export * from "./pyth.js";
+export * from "./realizedVol.js";
 export * from "./anchored.js";
 export * from "./activeExpiryIndex.js";
 export * from "./expiryPolicy.js";

@@ -37,6 +37,7 @@ import {
   scenarioRange,
 } from "@/lib/protocol/covered-call-scenario";
 import { cn } from "@/lib/utils";
+import type { AppMarket, MarketId } from "@/lib/protocol/markets";
 
 export type SetupPhase = "idle" | "subaccount" | "deposit";
 
@@ -51,6 +52,9 @@ export interface OrderSnapshot {
   expiryLabel: string;
   spotPrice: number;
   indicativeTotalPremium: number;
+  marketId?: MarketId;
+  assetName?: string;
+  collateralSymbol?: string;
 }
 
 export function formatUsd(value: number, maximumFractionDigits = 0): string {
@@ -79,7 +83,7 @@ function dte(epoch: number): number {
   return Math.max(0, Math.ceil((epoch * 1000 - Date.now()) / 86_400_000));
 }
 
-function LiveIndicator({ active }: { active: boolean }) {
+function LiveIndicator({ active, symbol = "BTC" }: { active: boolean; symbol?: string }) {
   return (
     <div className="flex items-center gap-2 font-mono text-xs text-zinc-700">
       <span className="relative flex size-2">
@@ -91,7 +95,7 @@ function LiveIndicator({ active }: { active: boolean }) {
         />
         <span className="relative size-2 rounded-full bg-green-500" />
       </span>
-      BTC live
+      {symbol} live
     </div>
   );
 }
@@ -107,6 +111,11 @@ export function ContractBrowser({
   disabled,
   onExpiryChange,
   onStrikeSelect,
+  markets = [],
+  selectedMarketId = "BTC",
+  onMarketChange,
+  marketUnavailable = false,
+  unavailableReason,
 }: {
   title: string;
   expiries: ExpiryInfo[];
@@ -118,25 +127,66 @@ export function ContractBrowser({
   disabled: boolean;
   onExpiryChange: (expiry: number) => void;
   onStrikeSelect: (strike: number, trigger: HTMLButtonElement) => void;
+  markets?: AppMarket[];
+  selectedMarketId?: MarketId;
+  onMarketChange?: (marketId: MarketId) => void;
+  marketUnavailable?: boolean;
+  unavailableReason?: string | null;
 }) {
   const fallbackPricing = strikes.some((strike) => strike.usedFallback);
+  const selectedMarket = markets.find((market) => market.id === selectedMarketId);
+  const assetName = selectedMarket?.displayName ?? "Bitcoin";
+  const collateralSymbol = selectedMarket?.collateral.symbol ?? "BTCB";
 
   return (
     <AsideCard className="relative z-10 min-w-0 rounded-lg border-[0.5px] border-zinc-200 bg-white shadow-[0_0_30px_0_rgba(0,0,0,0.05)]">
       <AsideHeader className="min-h-14 rounded-t-lg bg-zinc-100 px-5 py-4 pr-[1.875rem]">
         <AsideTitle>{title}</AsideTitle>
-        <LiveIndicator active={isLoading} />
+        <LiveIndicator active={isLoading} symbol={selectedMarketId} />
       </AsideHeader>
 
       <AsideContent className="p-5 sm:p-6 lg:p-[1.875rem]">
         <div className="flex flex-col gap-5">
+          {markets.length > 0 && (
+            <div className="flex flex-col gap-2">
+              <Text variant="body-small" className="text-zinc-500">Asset</Text>
+              <div role="listbox" aria-label="Covered call asset" className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1 scrollbar-thin">
+                {markets.map((market) => {
+                  const selected = market.id === selectedMarketId;
+                  return (
+                    <button
+                      key={market.id}
+                      type="button"
+                      role="option"
+                      aria-selected={selected}
+                      disabled={disabled}
+                      onClick={() => onMarketChange?.(market.id)}
+                      className={cn(
+                        "min-h-11 shrink-0 rounded-full border-[0.5px] px-4 font-mono text-xs transition-colors disabled:opacity-60",
+                        selected ? "border-orange-500 bg-orange-50 text-orange-700" : "border-zinc-200 bg-white text-zinc-700 hover:border-zinc-400",
+                      )}
+                    >
+                      {market.displayName}
+                      {!market.enabled && <span className="ml-2 text-[9px] uppercase opacity-60">Soon</span>}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+          {selectedMarket?.collateral.scaledUi && (
+            <div className="rounded-[5px] border-[0.5px] border-zinc-200 bg-zinc-50 px-3 py-2 font-mono text-[10px] text-zinc-600">
+              Tokenized exposure · bStocks · amounts use the token&apos;s current UI multiplier
+            </div>
+          )}
+
           <div className="flex items-start justify-between gap-4">
             <div>
               <Text as="h2" variant="h4" className="text-zinc-950">
                 Choose your covered call
               </Text>
               <Text variant="body-small" className="mt-1 text-zinc-500">
-                Select an expiry, then choose how high BTC can go.
+                Select an expiry, then choose how high {assetName} can go.
               </Text>
             </div>
             <span className="shrink-0 rounded-[5px] bg-zinc-100 px-3 py-2 font-mono text-xs text-zinc-700">
@@ -200,7 +250,7 @@ export function ContractBrowser({
 
           <div className="overflow-hidden rounded-[5px] border-[0.5px] border-zinc-200">
             <div className="flex min-h-11 items-center justify-between bg-zinc-100 px-4 font-mono text-xs text-zinc-600">
-              <span>BTC spot</span>
+              <span>{selectedMarketId} spot</span>
               <span className="font-medium text-zinc-950">
                 {spotPrice > 0 ? formatUsd(spotPrice, 2) : "Loading"}
               </span>
@@ -219,9 +269,13 @@ export function ContractBrowser({
                     </div>
                   ))}
                 </div>
+              ) : marketUnavailable ? (
+                <BrowserMessage>
+                  {unavailableReason ?? `${assetName} is staged and will appear here after its oracle, collateral, and maker are enabled.`}
+                </BrowserMessage>
               ) : spotPrice <= 0 ? (
                 <BrowserMessage>
-                  BTC pricing is unavailable. Check the oracle feed and try again.
+                  {assetName} pricing is unavailable. Check the oracle feed and try again.
                 </BrowserMessage>
               ) : strikes.length === 0 ? (
                 <BrowserMessage>No strikes are available for this expiry yet.</BrowserMessage>
@@ -235,7 +289,7 @@ export function ContractBrowser({
                         type="button"
                         disabled={disabled && !selected}
                         aria-pressed={selected}
-                        aria-label={`${disabled && selected ? "Reopen" : "Select"} ${formatUsd(strike.strike)} strike, ${formatUsd(strike.premium, 2)} premium per BTC`}
+                        aria-label={`${disabled && selected ? "Reopen" : "Select"} ${formatUsd(strike.strike)} strike, ${formatUsd(strike.premium, 2)} premium per ${selectedMarketId}`}
                         onClick={(event) =>
                           onStrikeSelect(strike.strike, event.currentTarget)
                         }
@@ -270,7 +324,7 @@ export function ContractBrowser({
           </div>
 
           <Text variant="terminal-small" className="text-zinc-500">
-            Premiums are shown per BTC. Enter your BTCB amount after selecting a strike.
+            Premiums are shown per {selectedMarketId}. Enter your {collateralSymbol} amount after selecting a strike.
           </Text>
         </div>
       </AsideContent>
@@ -363,6 +417,9 @@ export function OrderTicket({
   onAcceptQuote: () => void;
   onCreateAnother: () => void;
 }) {
+  const assetSymbol = snapshot.marketId ?? "BTC";
+  const assetName = snapshot.assetName ?? "Bitcoin";
+  const collateralSymbol = snapshot.collateralSymbol ?? "BTCB";
   const amountNumber = Math.max(0, Number.parseFloat(amount) || 0);
   const indicativeTotal = snapshot.strike.premium * amountNumber;
   const executableQuote =
@@ -417,6 +474,7 @@ export function OrderTicket({
     setupPhase,
     sellPhase,
     done: doneInfo !== null,
+    collateralSymbol,
   });
 
   const handlePrimary = () => {
@@ -464,7 +522,7 @@ export function OrderTicket({
         <div className="mx-auto flex w-full max-w-2xl flex-col gap-6">
           <div>
             <Text as="h2" variant="h3" className="text-zinc-950">
-              Sell BTC higher
+              Sell {assetName} higher
             </Text>
             <Text variant="body-small" className="mt-1 text-zinc-500">
               {shortExpiry(snapshot.strike.expiry)} · {dte(snapshot.strike.expiry)} DTE · {formatUsd(snapshot.strike.strike)} strike
@@ -472,14 +530,14 @@ export function OrderTicket({
           </div>
 
           <CurrencyField size="large">
-            <CurrencyField.Label>How much BTCB will you cover?</CurrencyField.Label>
+            <CurrencyField.Label>How much {collateralSymbol} will you cover?</CurrencyField.Label>
             <CurrencyField.Control
               disabled={amountLocked}
               value={amount}
               onChange={onAmountChange}
               prefix=""
               hasError={insufficient}
-              subtitle={`Available ${balance.toLocaleString("en-US", { maximumFractionDigits: 6 })} BTCB`}
+              subtitle={`Available ${balance.toLocaleString("en-US", { maximumFractionDigits: 6 })} ${collateralSymbol}`}
               trailing={
                 <div className="flex shrink-0 items-center gap-2">
                   <button
@@ -491,7 +549,7 @@ export function OrderTicket({
                     MAX
                   </button>
                   <span className="flex min-h-11 items-center gap-2 rounded-[5px] bg-zinc-100 px-3 text-sm text-zinc-800">
-                    <TokenIcon symbol="BTC" size={22} /> BTCB
+                    <TokenIcon symbol={assetSymbol} size={22} /> {collateralSymbol}
                   </span>
                 </div>
               }
@@ -500,7 +558,7 @@ export function OrderTicket({
 
           {insufficient && (
             <Text role="alert" variant="terminal-small" className="text-red-600">
-              Enter an amount no greater than your available BTCB balance.
+              Enter an amount no greater than your available {collateralSymbol} balance.
             </Text>
           )}
 
@@ -525,7 +583,7 @@ export function OrderTicket({
                 setupPhase === "subaccount"
                   ? "Creating your covered-call account"
                   : setupPhase === "deposit"
-                    ? "Depositing BTCB collateral"
+                    ? `Depositing ${collateralSymbol} collateral`
                     : "Opening the RFQ auction"
               }
               text="Keep this window open while the transaction is prepared."
@@ -541,6 +599,7 @@ export function OrderTicket({
               quote={quote}
               indicativeTotal={snapshot.indicativeTotalPremium}
               expired={sellPhase === "expired"}
+              assetSymbol={assetSymbol}
             />
           )}
 
@@ -587,13 +646,16 @@ export function OrderTicket({
             settlementPayment={scenario.settlementPayment}
             coveredPositionValue={scenario.coveredPositionValue}
             isAboveStrike={scenario.isAboveStrike}
+            assetName={assetName}
+            assetSymbol={assetSymbol}
+            collateralSymbol={collateralSymbol}
           />
 
           <div className="rounded-[5px] bg-zinc-50 p-4">
             <div className="flex items-start gap-3">
               <Info className="mt-0.5 size-4 shrink-0 text-zinc-500" />
               <Text variant="body-small" className="text-zinc-600">
-                Your BTCB remains in the covered-call subaccount. If BTC settles above the strike, the gain above the strike is offset through USDT cash settlement.
+                Your {collateralSymbol} remains in the covered-call subaccount. If {assetName} settles above the strike, the gain above the strike is offset through USDT cash settlement.
               </Text>
             </div>
           </div>
@@ -633,6 +695,7 @@ function primaryAction({
   setupPhase,
   sellPhase,
   done,
+  collateralSymbol,
 }: {
   isConnected: boolean;
   amountNumber: number;
@@ -640,11 +703,12 @@ function primaryAction({
   setupPhase: SetupPhase;
   sellPhase: SellPhase;
   done: boolean;
+  collateralSymbol: string;
 }): { label: string; disabled: boolean } {
   if (done) return { label: "Create another target", disabled: false };
   if (!isConnected) return { label: "Connect wallet", disabled: false };
   if (setupPhase === "subaccount") return { label: "Creating account…", disabled: true };
-  if (setupPhase === "deposit") return { label: "Depositing BTCB…", disabled: true };
+  if (setupPhase === "deposit") return { label: `Depositing ${collateralSymbol}…`, disabled: true };
   if (sellPhase === "requesting") return { label: "Opening auction…", disabled: true };
   if (sellPhase === "auction") return { label: "Collecting quotes…", disabled: true };
   if (sellPhase === "quoted") return { label: "Accept & sign", disabled: false };
@@ -727,10 +791,12 @@ function ExecutableQuotePanel({
   quote,
   indicativeTotal,
   expired,
+  assetSymbol,
 }: {
   quote: PreparedQuote;
   indicativeTotal: number;
   expired: boolean;
+  assetSymbol: string;
 }) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -758,7 +824,7 @@ function ExecutableQuotePanel({
             {formatUsd(quote.totalPremium, 2)}
           </Text>
           <Text variant="terminal-small" className="mt-1 text-zinc-500">
-            {formatUsd(quote.premium, 2)}/BTC · {quote.quoteCount} quote{quote.quoteCount === 1 ? "" : "s"}
+            {formatUsd(quote.premium, 2)}/{assetSymbol} · {quote.quoteCount} quote{quote.quoteCount === 1 ? "" : "s"}
           </Text>
         </div>
         <span
@@ -795,6 +861,9 @@ function ExpirySimulator({
   settlementPayment,
   coveredPositionValue,
   isAboveStrike,
+  assetName,
+  assetSymbol,
+  collateralSymbol,
 }: {
   spotPrice: number;
   strikePrice: number;
@@ -808,13 +877,16 @@ function ExpirySimulator({
   settlementPayment: number;
   coveredPositionValue: number;
   isAboveStrike: boolean;
+  assetName: string;
+  assetSymbol: string;
+  collateralSymbol: string;
 }) {
   return (
     <div className="rounded-[5px] border-[0.5px] border-zinc-200 p-5">
       <div className="flex items-start justify-between gap-4">
         <div>
           <Text variant="terminal-small" className="text-zinc-500">
-            BTC price at expiry
+            {assetName} price at expiry
           </Text>
           <Text variant="h3" className="mt-1 text-zinc-950">
             {formatUsd(scenarioPrice)}
@@ -833,7 +905,7 @@ function ExpirySimulator({
       <div className="relative mt-8 px-1 pb-8">
         <input
           type="range"
-          aria-label="Simulated BTC price at expiry"
+          aria-label={`Simulated ${assetSymbol} price at expiry`}
           min={range.min}
           max={range.max}
           step={range.step}
@@ -882,8 +954,8 @@ function ExpirySimulator({
 
       <Text variant="body-small" className="mt-4 text-zinc-600">
         {isAboveStrike
-          ? `BTCB remains held. USDT settlement offsets gains above ${formatUsd(strikePrice)} for the covered ${amount.toLocaleString("en-US", { maximumFractionDigits: 6 })} BTCB.`
-          : `BTC is below the strike, so you keep the covered ${amount.toLocaleString("en-US", { maximumFractionDigits: 6 })} BTCB and the premium.`}
+          ? `${collateralSymbol} remains held. USDT settlement offsets gains above ${formatUsd(strikePrice)} for the covered ${amount.toLocaleString("en-US", { maximumFractionDigits: 6 })} ${collateralSymbol}.`
+          : `${assetName} is below the strike, so you keep the covered ${amount.toLocaleString("en-US", { maximumFractionDigits: 6 })} ${collateralSymbol} and the premium.`}
       </Text>
     </div>
   );

@@ -1,6 +1,6 @@
 import { EventEmitter } from "node:events";
 import type { Address, Hex } from "viem";
-import { encodeOptionSubId, instrumentName, toUnit, type Action } from "@hedge/shared";
+import { encodeOptionSubId, instrumentName, toUnit, type Action, type MarketDefinition } from "@hedge/shared";
 import type { ChainReader } from "./chain.js";
 import { QuoteValidationError, validateQuote, validateTakerAccept } from "./quotes.js";
 import type { RfqStore } from "./store.js";
@@ -14,6 +14,7 @@ import {
 } from "./types.js";
 import { buildRfqExecution, type Executor } from "./executor.js";
 import type { ExecutionResult } from "./types.js";
+import { assertMarketTradeable } from "./markets.js";
 
 export interface AuctionEvents {
   rfq_open: [rfq: Rfq];
@@ -34,6 +35,9 @@ export interface AuctionEngineOptions {
   optionAssets: Record<string, Address>;
   /** currency symbol -> forward feed (SRM OI fee estimation); optional per currency */
   forwardFeeds?: Record<string, Address>;
+  markets?: MarketDefinition[];
+  /** Production feed and multiplier readiness gate, called before an RFQ is persisted. */
+  marketReadiness?: (market: MarketDefinition, expiry: bigint, strike: bigint) => Promise<void>;
   auctionWindowMs: number;
   /** ms the taker has to accept after the auction closes with a winner (default 120s) */
   acceptDeadlineMs?: number;
@@ -114,6 +118,11 @@ export class AuctionEngine extends EventEmitter<AuctionEvents> {
     const amount = toUnit(String(request.amount));
     if (amount <= 0n) throw new Error("amount must be > 0");
     const instrument = this.resolveInstrument(request.instrument);
+    const market = this.opts.markets?.find((candidate) => candidate.id === instrument.currency);
+    if (market) {
+      assertMarketTradeable(market, amount, instrument.expiry, this.now());
+      await this.opts.marketReadiness?.(market, instrument.expiry, instrument.strike);
+    }
 
     const createdAt = this.now();
     const rfq: Rfq = {

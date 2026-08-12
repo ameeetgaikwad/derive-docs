@@ -3,13 +3,12 @@ import {
   DeribitClient,
   fitSvi,
   fromUnit,
-  getDeployedAddress,
   lyraForwardFeedAbi,
   lyraRateFeedAbi,
   lyraSpotFeedAbi,
   lyraVolFeedAbi,
   sviVol,
-  type DeploymentsFile,
+  type MarketDefinition,
   type DeribitBoard,
   type SviRawParams,
 } from "@hedge/shared";
@@ -70,13 +69,14 @@ export class ChainPriceSource implements PriceSource {
 
   constructor(
     private readonly client: PublicClient,
-    deployments: DeploymentsFile,
+    market: MarketDefinition,
     private readonly cfg: MakerBotConfig,
   ) {
-    this.spotFeed = getDeployedAddress(deployments, "btcSpotFeed");
-    this.forwardFeed = getDeployedAddress(deployments, "btcForwardFeed");
-    this.volFeed = getDeployedAddress(deployments, "btcVolFeed");
-    this.rateFeed = getDeployedAddress(deployments, "btcRateFeed");
+    if (!market.enabled || !market.contracts) throw new Error(`${market.id} market is not enabled`);
+    this.spotFeed = market.contracts.spotFeed;
+    this.forwardFeed = market.contracts.forwardFeed;
+    this.volFeed = market.contracts.volFeed;
+    this.rateFeed = market.contracts.rateFeed;
   }
 
   async getInputs(option: { expiry: bigint; strike: bigint }): Promise<MarketInputs> {
@@ -211,16 +211,33 @@ export class DeribitPriceSource implements PriceSource {
 export function makePriceSource(
   cfg: MakerBotConfig,
   client: PublicClient | null,
-  deployments: DeploymentsFile | null,
+  market: MarketDefinition,
 ): PriceSource {
+  const marketCfg = pricingConfigForMarket(cfg, market.id);
   const envComplete =
-    (cfg.forwardOverride !== null || cfg.spotOverride !== null) && cfg.ivOverride !== null;
-  if (envComplete) return new EnvPriceSource(cfg);
-  if (!client || !deployments) {
+    (marketCfg.forwardOverride !== null || marketCfg.spotOverride !== null)
+      && marketCfg.ivOverride !== null;
+  if (envComplete) return new EnvPriceSource(marketCfg);
+  if (!client) {
     throw new Error(
       "Pricing needs either env overrides (FORWARD_PRICE/SPOT_PRICE + IV) or an RPC + deployments file",
     );
   }
-  const chain = new ChainPriceSource(client, deployments, cfg);
-  return cfg.deribitVol ? new DeribitPriceSource(chain) : chain;
+  const chain = new ChainPriceSource(client, market, marketCfg);
+  return marketCfg.deribitVol && market.id === "BTC" ? new DeribitPriceSource(chain) : chain;
+}
+
+/** Resolve overrides without allowing one asset's static price to leak into another market. */
+export function pricingConfigForMarket(cfg: MakerBotConfig, marketId: string): MakerBotConfig {
+  const legacyFallback = marketId === "BTC";
+  return {
+    ...cfg,
+    forwardOverride:
+      cfg.marketForwardOverrides[marketId] ?? (legacyFallback ? cfg.forwardOverride : null),
+    spotOverride:
+      cfg.marketSpotOverrides[marketId] ?? (legacyFallback ? cfg.spotOverride : null),
+    ivOverride:
+      cfg.marketIvOverrides[marketId] ?? (legacyFallback ? cfg.ivOverride : null),
+    rate: cfg.marketRates[marketId] ?? cfg.rate,
+  };
 }

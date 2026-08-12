@@ -1,6 +1,6 @@
 "use client";
 
-import { useNetworkStore, type AppChainId } from "@/stores/network";
+import { useNetworkStore, type EnabledAppChainId } from "@/stores/network";
 import {
   getAddresses,
   getExpectedActionTypehash,
@@ -12,8 +12,8 @@ import { getAppChain, type AppChain } from "@/lib/protocol/chain";
 import { rfqEngineUrl } from "@/lib/protocol/rfq-engine";
 
 export interface NetworkContext {
-  /** Active app chainId (56 mainnet / 97 testnet). */
-  chainId: AppChainId;
+  /** Active frontend chain. Mainnet is intentionally unavailable for now. */
+  chainId: EnabledAppChainId;
   isTestnet: boolean;
   chain: AppChain;
   addresses: ChainAddresses;
@@ -21,13 +21,13 @@ export interface NetworkContext {
   domainSeparator: `0x${string}`;
   actionTypehash: `0x${string}`;
   rfqEngineUrl: string;
-  setChainId: (chainId: AppChainId) => void;
+  setChainId: (chainId: EnabledAppChainId) => void;
 }
 
 /**
  * Reactive access to the active protocol network. Re-renders consumers when
- * the user flips the network toggle. Returns the deployment addresses,
- * explorer, rfq-engine URL and viem chain for the active network.
+ * the enabled network changes. Returns the deployment addresses, explorer,
+ * rfq-engine URL and viem chain for the active network.
  */
 export function useNetwork(): NetworkContext {
   const chainId = useNetworkStore((s) => s.chainId);

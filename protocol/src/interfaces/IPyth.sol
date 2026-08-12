@@ -20,6 +20,13 @@ interface IPyth {
     uint publishTime;
   }
 
+  /// @dev mirrors PythStructs.PriceFeed, returned by benchmark parsing.
+  struct PriceFeed {
+    bytes32 id;
+    Price price;
+    Price emaPrice;
+  }
+
   /// @notice Returns the price of a feed without any sanity checks (caller checks staleness)
   function getPriceUnsafe(bytes32 id) external view returns (Price memory price);
 
@@ -28,4 +35,12 @@ interface IPyth {
 
   /// @notice Updates price feeds with signed data from Hermes; requires `getUpdateFee` as msg.value
   function updatePriceFeeds(bytes[] calldata updateData) external payable;
+
+  /// @notice Parses a unique historical update in the inclusive publish-time range.
+  function parsePriceFeedUpdatesUnique(
+    bytes[] calldata updateData,
+    bytes32[] calldata priceIds,
+    uint64 minPublishTime,
+    uint64 maxPublishTime
+  ) external payable returns (PriceFeed[] memory priceFeeds);
 }

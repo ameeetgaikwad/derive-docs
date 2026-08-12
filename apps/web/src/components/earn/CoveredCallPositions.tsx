@@ -29,12 +29,13 @@ function formatUsd(value: number, digits = 0): string {
 }
 
 function exactExpiry(expiry: number): string {
-  return `${new Date(expiry * 1000).toLocaleDateString("en-US", {
+  const date = new Date(expiry * 1000);
+  return `${date.toLocaleDateString("en-US", {
     month: "short",
     day: "numeric",
     year: "numeric",
     timeZone: "UTC",
-  })} · 08:00 UTC`;
+  })} · ${date.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "UTC" })} UTC`;
 }
 
 function timeRemaining(expiry: number): string {
@@ -85,6 +86,9 @@ function PositionRow({
         : `${Math.abs(distance).toFixed(Math.abs(distance) >= 10 ? 0 : 1)}% ${distance > 0 ? "above" : "below"} strike`;
   const amount = Math.abs(position.balance);
   const premium = position.trade ? Number.parseFloat(position.trade.premium) : null;
+  const assetSymbol = position.marketId ?? "BTC";
+  const assetName = position.assetName ?? "Bitcoin";
+  const collateralSymbol = position.collateralSymbol ?? "BTCB";
 
   return (
     <article className="overflow-hidden rounded-[8px] border-[0.5px] border-zinc-200 bg-white transition-colors hover:border-zinc-300">
@@ -103,17 +107,17 @@ function PositionRow({
           />
           <span className="min-w-0">
             <span className="block font-heading text-base font-bold text-zinc-950">
-              BTC covered call
+              {assetSymbol} covered call
             </span>
             <span className="mt-1 block truncate font-mono text-[11px] text-zinc-500">
-              {formatUsd(position.strike)} strike · {amount.toLocaleString("en-US", { maximumFractionDigits: 6 })} BTCB · {timeRemaining(position.expiry)}
+              {formatUsd(position.strike)} strike · {amount.toLocaleString("en-US", { maximumFractionDigits: 6 })} {collateralSymbol} · {timeRemaining(position.expiry)}
             </span>
           </span>
         </span>
 
         <span className="pl-7 sm:pl-0">
           <span className="block font-mono text-[10px] uppercase tracking-wide text-zinc-400">
-            BTC spot
+            {assetSymbol} spot
           </span>
           <span className="mt-1 block text-sm font-medium text-zinc-950">
             {spotPrice > 0 ? formatUsd(spotPrice, 2) : "—"}
@@ -148,7 +152,7 @@ function PositionRow({
             <PositionDetail label="Exact expiry" value={exactExpiry(position.expiry)} />
             <PositionDetail
               label="Collateral represented"
-              value={`${amount.toLocaleString("en-US", { maximumFractionDigits: 6 })} BTCB`}
+              value={`${amount.toLocaleString("en-US", { maximumFractionDigits: 6 })} ${collateralSymbol}`}
             />
             <PositionDetail
               label="Settlement"
@@ -178,7 +182,7 @@ function PositionRow({
           <div className="mt-5 flex items-start gap-3 rounded-[5px] bg-white p-4">
             <Info className="mt-0.5 size-4 shrink-0 text-zinc-500" />
             <p className="text-xs font-medium leading-5 text-zinc-600 sm:text-sm">
-              BTCB remains held in the covered-call subaccount. When BTC settles above the strike, gains above the strike are offset through USDT cash settlement.
+              {collateralSymbol} remains held in the covered-call subaccount. When {assetName} settles above the strike, gains above the strike are offset through USDT cash settlement.
             </p>
           </div>
         </div>
@@ -206,8 +210,15 @@ function settlementLabel(position: OptionPosition): string {
 }
 
 export function CoveredCallPositions() {
-  const { subaccountId, cash, btcb, options, isLoading } = usePositions();
-  const { spotPrice } = useSpotPrice();
+  const positions = usePositions();
+  const { subaccountId, cash, options, isLoading } = positions;
+  const collateralByMarket = positions.collateralByMarket ?? { BTC: positions.btcb ?? 0 };
+  const btcSpot = useSpotPrice("BTC").spotPrice;
+  const xauSpot = useSpotPrice("XAU").spotPrice;
+  const spySpot = useSpotPrice("SPY").spotPrice;
+  const nvdaSpot = useSpotPrice("NVDA").spotPrice;
+  const spcxSpot = useSpotPrice("SPCX").spotPrice;
+  const spots = { BTC: btcSpot, XAU: xauSpot, SPY: spySpot, NVDA: nvdaSpot, SPCX: spcxSpot };
 
   if (subaccountId === null) return null;
 
@@ -227,7 +238,11 @@ export function CoveredCallPositions() {
             </h2>
           </div>
           <div className="flex-1" />
-          <BalancePill label="BTCB collateral" value={btcb.toFixed(6)} />
+          {Object.entries(collateralByMarket).map(([marketId, value]) => {
+            const position = options.find((option) => option.marketId === marketId);
+            const symbol = position?.collateralSymbol ?? (marketId === "BTC" ? "BTCB" : marketId);
+            return <BalancePill key={marketId} label={`${symbol} collateral`} value={(value ?? 0).toFixed(6)} />;
+          })}
           <BalancePill
             label="USDT cash"
             value={cash.toLocaleString("en-US", { maximumFractionDigits: 2 })}
@@ -254,7 +269,7 @@ export function CoveredCallPositions() {
               <PositionRow
                 key={position.subId.toString()}
                 position={position}
-                spotPrice={spotPrice}
+                spotPrice={spots[position.marketId ?? "BTC"]}
               />
             ))}
           </div>

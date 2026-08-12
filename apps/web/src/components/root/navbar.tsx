@@ -4,19 +4,13 @@ import { useEffect, useState } from "react";
 import { ConnectButton } from "@rainbow-me/rainbowkit";
 import { User, WalletIcon } from "lucide-react";
 import Link from "next/link";
-import { useAccount, useSwitchChain } from "wagmi";
+import { useAccount } from "wagmi";
 import { Text } from "@/components/ui/text";
 import { useBtcbBalance, useMintBtcb } from "@/hooks/protocol/useBtcb";
 import { useNetwork } from "@/hooks/protocol/useNetwork";
 import { TBNB_FAUCET_URL } from "@/lib/protocol/chain";
 import { cn } from "@/lib/utils";
-import type { AppChainId } from "@/stores/network";
 import { NavbarLogo } from "./navbar-logo";
-
-const NETWORKS: { id: AppChainId; label: string }[] = [
-  { id: 97, label: "Testnet" },
-  { id: 56, label: "Mainnet" },
-];
 
 export default function Navbar() {
   const hidden = useHideOnScroll();
@@ -121,36 +115,30 @@ export default function Navbar() {
 }
 
 function NetworkToggle() {
-  const { chainId, setChainId } = useNetwork();
-  const { switchChainAsync } = useSwitchChain();
-
   return (
-    <div className="flex items-center rounded-[5px] bg-zinc-100 p-0.5">
-      {NETWORKS.map((network) => {
-        const active = network.id === chainId;
-        return (
-          <button
-            key={network.id}
-            type="button"
-            aria-pressed={active}
-            onClick={() => {
-              setChainId(network.id);
-              switchChainAsync({ chainId: network.id }).catch(() => {});
-            }}
-            className={cn(
-              "rounded-[4px] px-2 py-1.5 font-mono text-[10px] font-medium uppercase transition-colors sm:px-2.5",
-              active
-                ? "bg-white text-orange-700 shadow-sm"
-                : "text-zinc-500 hover:text-zinc-950",
-            )}
-          >
-            <span className="sm:hidden">
-              {network.id === 97 ? "Test" : "Main"}
-            </span>
-            <span className="hidden sm:inline">{network.label}</span>
-          </button>
-        );
-      })}
+    <div
+      className="flex items-center rounded-[5px] bg-zinc-100 p-0.5"
+      role="group"
+      aria-label="Network"
+    >
+      <button
+        type="button"
+        aria-pressed="true"
+        className="rounded-[4px] bg-white px-2 py-1.5 font-mono text-[10px] font-medium uppercase text-orange-700 shadow-sm sm:px-2.5"
+      >
+        <span className="sm:hidden">Test</span>
+        <span className="hidden sm:inline">Testnet</span>
+      </button>
+      <button
+        type="button"
+        disabled
+        aria-disabled="true"
+        title="Mainnet is not available yet"
+        className="cursor-not-allowed rounded-[4px] px-2 py-1.5 font-mono text-[10px] font-medium uppercase text-zinc-400 opacity-60 sm:px-2.5"
+      >
+        <span className="sm:hidden">Main</span>
+        <span className="hidden sm:inline">Mainnet</span>
+      </button>
     </div>
   );
 }

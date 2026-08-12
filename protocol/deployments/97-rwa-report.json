@@ -1,0 +1,98 @@
+{
+  "chainId": 97,
+  "generatedAt": "2026-08-07T20:18:47.231Z",
+  "deployer": "0x1DDAACC770033feCfcFE2a43e3C2a73b8fe3edFd",
+  "feedSigner": "0x7a5e6A644A97d1E4Be9a0cd87092C3e9d3b8400c",
+  "mocks": {
+    "chainId": 97,
+    "xaut": "0x9b25631fb874B7ae45675080FadE009B5f1C95FA",
+    "spyb": "0xaB06114a526054Cef31e57394d4C5895B5682976",
+    "nvdab": "0x7A94666eAD74c05aA53cc8da67683936C80BEED2",
+    "spcxb": "0xd9665CBBD1d48e796b0Ff0E946E6D46fDaA15Ee5"
+  },
+  "markets": {
+    "XAU": {
+      "id": "XAU",
+      "displayName": "Gold",
+      "kind": "metal",
+      "enabled": false,
+      "collateral": {
+        "symbol": "XAUt",
+        "address": "0x9b25631fb874B7ae45675080FadE009B5f1C95FA",
+        "decimals": 6,
+        "scaledUi": false
+      },
+      "contracts": {
+        "marketId": 2,
+        "optionAsset": "0xe22D7FcB54C38463eC1D102D6027AB7D1b4D1113",
+        "baseAsset": "0x163df6a25B2f194d40A6dA2Ff71eC1f6d327badb",
+        "spotFeed": "0xdF7a3DaE99ED7a5f19E8C519d88EF05b6fb0436c",
+        "forwardFeed": "0xBc7f135887Cb1286eD11a3755D5A555360aF2a7F",
+        "volFeed": "0xC8ff2Eb661f6EFCb931fbf4Ae5148d742331D940",
+        "rateFeed": "0x9B58D11beAd3C1BfD932DeBe571EFcdE60108E91",
+        "settlementFeed": "0x2523A4CF8d7e9CC14A91bb54d900C103abb63656"
+      },
+      "pythPriceId": "0x765d2ba906dbc32ca17cc11f5310a89e9ee1f6420508c63861f2f8ba4ee34bb2",
+      "marketHours": "24/5",
+      "strikeIncrement": 25,
+      "riskVolFloor": 0.18,
+      "maxSize": "10"
+    },
+    "SPY": {
+      "id": "SPY",
+      "displayName": "S&P 500",
+      "kind": "equity",
+      "enabled": false,
+      "collateral": {
+        "symbol": "SPYB",
+        "address": "0xaB06114a526054Cef31e57394d4C5895B5682976",
+        "decimals": 18,
+        "scaledUi": true
+      },
+      "contracts": {
+        "marketId": 3,
+        "optionAsset": "0x64026BC7BC0973002299A9e96BcB1Ec0Ef6164ee",
+        "baseAsset": "0x8689303C95f0Fa84c305c2623661FD6913753342",
+        "spotFeed": "0xE380f84625546009E66EAd9364Fa3df209F96f66",
+        "forwardFeed": "0xb849E83358e4Af28C62A71D681181c05c4Aae56a",
+        "volFeed": "0xBEdF8D15e44bbEd435109115347a0ab5b13e6DA7",
+        "rateFeed": "0x2ED00F84bc50EE3A77610A7E1722031ac37f6E49",
+        "settlementFeed": "0xAb756CCB7453ba3e844878042922908661D7Fa4E",
+        "multiplierRegistry": "0xD5253721A0Abe13edBC9379955F529257Fc9e171"
+      },
+      "pythPriceId": "0x19e09bb805456ada3979a7d1cbb4b6d63babc3a0f8e8a9509f68afa5c4c11cd5",
+      "marketHours": "24/5",
+      "strikeIncrement": 5,
+      "riskVolFloor": 0.2,
+      "maxSize": "100"
+    },
+    "NVDA": {
+      "id": "NVDA",
+      "displayName": "NVIDIA",
+      "kind": "equity",
+      "enabled": false,
+      "collateral": {
+        "symbol": "NVDAB",
+        "address": "0x7A94666eAD74c05aA53cc8da67683936C80BEED2",
+        "decimals": 18,
+        "scaledUi": true
+      },
+      "contracts": {
+        "marketId": 4,
+        "optionAsset": "0x1B95BE59fD2167b5a7d70e0647b5306F5fb2D975",
+        "baseAsset": "0xfB014Ab274A2236611336a7915Eff8DD30014BCd",
+        "spotFeed": "0xdf1165ee1a6aA82516f5C29E6Ad74bD705d0A443",
+        "forwardFeed": "0xc0b097b792b76AE6dB5F210532bBC24172e12b88",
+        "volFeed": "0x82a8b16AD79Ab509ff4caA2da21DB089eAdDac4f",
+        "rateFeed": "0x6eC93fBa2a3C1Bd93dc55A9E5A38Ab9cb270D970",
+        "settlementFeed": "0x393e13a7104A6F3FF79BD9B83180C9Df6dB8950D",
+        "multiplierRegistry": "0xA0c7Ad278442cF88345a2C2EAfa64eE351f6e7e5"
+      },
+      "pythPriceId": "0xb1073854ed24cbc755dc527418f52b7d271f6cc967bbf8d8129112b18860a593",
+      "marketHours": "24/5",
+      "strikeIncrement": 5,
+      "riskVolFloor": 0.35,
+      "maxSize": "100"
+    }
+  }
+}

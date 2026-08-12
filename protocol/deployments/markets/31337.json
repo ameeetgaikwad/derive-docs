@@ -1,0 +1,23 @@
+{
+  "chainId": 31337,
+  "marketCount": 5,
+  "markets": [
+    {
+      "id": "BTC",
+      "displayName": "Bitcoin",
+      "kind": "crypto",
+      "enabled": true,
+      "collateral": { "symbol": "BTCB", "address": "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512", "decimals": 18, "scaledUi": false },
+      "contracts": { "marketId": 1, "optionAsset": "0x1291Be112d480055DaFd8a610b7d1e203891C274", "baseAsset": "0x5f3f1dBD7B74C6B46e8c44f98792A1dAf8d69154", "spotFeed": "0x84eA74d481Ee0A5332c457a4d796187F6Ba67fEB", "forwardFeed": "0x9E545E3C0baAB3E08CdfD552C960A1050f373042", "volFeed": "0xa82fF9aFd8f496c3d6ac40E2a0F282E47488CFc9", "rateFeed": "0x1613beB3B2C4f22Ee086B2b38C1476A3cE7f78E8", "settlementFeed": "0x9E545E3C0baAB3E08CdfD552C960A1050f373042" },
+      "pythPriceId": "0xe62df6c8b4a85fe1a67db44dc12de5db330f7ac66b72dc658afedf0f4a415b43",
+      "marketHours": "24/7",
+      "strikeIncrement": 500,
+      "riskVolFloor": 0.4,
+      "maxSize": "5"
+    },
+    { "id": "XAU", "displayName": "Gold", "kind": "metal", "enabled": false, "collateral": { "symbol": "XAUt", "address": null, "decimals": 6, "scaledUi": false }, "contracts": null, "pythPriceId": null, "marketHours": "24/5", "strikeIncrement": 25, "riskVolFloor": 0.18, "maxSize": "10" },
+    { "id": "SPY", "displayName": "S&P 500", "kind": "equity", "enabled": false, "collateral": { "symbol": "SPYB", "address": null, "decimals": 18, "scaledUi": true }, "contracts": null, "pythPriceId": null, "marketHours": "24/5", "strikeIncrement": 5, "riskVolFloor": 0.2, "maxSize": "100" },
+    { "id": "NVDA", "displayName": "NVIDIA", "kind": "equity", "enabled": false, "collateral": { "symbol": "NVDAB", "address": null, "decimals": 18, "scaledUi": true }, "contracts": null, "pythPriceId": null, "marketHours": "24/5", "strikeIncrement": 5, "riskVolFloor": 0.35, "maxSize": "100" },
+    { "id": "SPCX", "displayName": "SpaceX", "kind": "equity", "enabled": false, "collateral": { "symbol": "SPCXB", "address": null, "decimals": 18, "scaledUi": true }, "contracts": null, "pythPriceId": null, "marketHours": "24/5", "strikeIncrement": 5, "riskVolFloor": 0.45, "maxSize": "100" }
+  ]
+}

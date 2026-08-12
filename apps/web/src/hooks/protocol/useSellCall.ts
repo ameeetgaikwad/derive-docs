@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Address, Hex } from "viem";
-import { useAccount, useSignTypedData, useSwitchChain } from "wagmi";
+import { useAccount, useConfig, useSignTypedData, useSwitchChain } from "wagmi";
+import { readContract } from "wagmi/actions";
 import {
   actionTypedData,
   buildAction,
@@ -21,6 +22,8 @@ import { encodeOptionSubId } from "@/lib/protocol/instruments";
 import { toUnit, unitToNumber } from "@/lib/protocol/units";
 import type { AppChainId } from "@/stores/network";
 import { useNetwork } from "./useNetwork";
+import { scaledUiTokenAbi } from "@/lib/protocol/abis";
+import { getMarket, type MarketId } from "@/lib/protocol/markets";
 
 export type SellPhase =
   | "idle"
@@ -50,7 +53,16 @@ export interface PreparedQuote {
   instrumentName: string;
   expiry: number;
   strike: number;
+  /** raw-price strike sent to the option encoding for scaled collateral */
+  protocolStrike?: string;
   amount: string;
+  marketId: MarketId;
+  rawAmount: string;
+  tokenDecimals: number;
+  uiMultiplier: bigint | null;
+  optionAsset: Address;
+  spot: number;
+  indicativePremium: number;
   quoteCount: number;
   /** per-unit executable premium, USD */
   premium: number;
@@ -70,13 +82,21 @@ export interface SellResult {
 }
 
 export interface SellParams {
+  marketId?: MarketId;
   subaccountId: bigint;
   /** unix seconds */
   expiry: number;
   /** whole USD strike, e.g. 69000 */
   strike: number;
+  /** raw-price strike sent to the option encoding for scaled collateral */
+  protocolStrike?: string;
   /** human decimal option amount, e.g. "0.5" */
   amount: string;
+  /** raw 18dp protocol amount; defaults to amount for non-scaled collateral */
+  rawAmount?: string;
+  uiMultiplier?: bigint | null;
+  spot?: number;
+  indicativePremium?: number;
   instrumentName: string;
 }
 
@@ -88,10 +108,13 @@ interface PreparedContext {
   owner: Address;
   acceptBy: number;
   addresses: {
-    btcOptionAsset: Address;
+    optionAsset: Address;
     rfqModule: Address;
     matching: Address;
+    collateral: Address | null;
   };
+  marketId: MarketId;
+  uiMultiplier: bigint | null;
 }
 
 const POLL_INTERVAL_MS = 750;
@@ -109,6 +132,7 @@ export function useSellCall() {
   const { address } = useAccount();
   const { signTypedDataAsync } = useSignTypedData();
   const { switchChainAsync } = useSwitchChain();
+  const wagmiConfig = useConfig();
   const { addresses, chainId } = useNetwork();
 
   const [phase, setPhase] = useState<SellPhase>("idle");
@@ -173,10 +197,14 @@ export function useSellCall() {
       try {
         const saleChainId = chainId;
         const saleOwner = address;
+        const marketId = params.marketId ?? "BTC";
+        const market = getMarket(saleChainId, marketId);
+        if (!market.enabled || !market.contracts) throw new Error(`${market.displayName} market is not enabled`);
         const saleAddresses = {
-          btcOptionAsset: addresses.btcOptionAsset,
+          optionAsset: marketId === "BTC" ? addresses.btcOptionAsset : market.contracts.optionAsset,
           rfqModule: addresses.rfqModule,
           matching: addresses.matching,
+          collateral: market.collateral.address,
         };
 
         setPhase("requesting");
@@ -185,7 +213,10 @@ export function useSellCall() {
             subaccountId: params.subaccountId,
             expiry: params.expiry,
             strike: params.strike.toString(),
+            protocolStrike: params.protocolStrike,
             amount: params.amount,
+            marketId,
+            rawAmount: params.rawAmount ?? params.amount,
           },
           saleChainId,
         );
@@ -217,7 +248,7 @@ export function useSellCall() {
         }
 
         const best = status.bestQuote;
-        verifyBestQuote(best, params, saleAddresses.btcOptionAsset);
+        verifyBestQuote(best, params, saleAddresses.optionAsset);
 
         const makerExpiryMs = Number(best.actionExpiry) * 1000;
         const engineDeadline = status.rfq.acceptDeadlineAt ?? makerExpiryMs;
@@ -234,8 +265,19 @@ export function useSellCall() {
           expiry: params.expiry,
           strike: params.strike,
           amount: params.amount,
+          marketId,
+          rawAmount: params.rawAmount ?? params.amount,
+          tokenDecimals: market.collateral.decimals,
+          uiMultiplier: params.uiMultiplier ?? null,
+          optionAsset: saleAddresses.optionAsset,
+          spot: params.spot ?? 0,
+          indicativePremium: params.indicativePremium ?? 0,
           quoteCount: status.quoteCount,
-          premium: unitToNumber(BigInt(best.premium)),
+          premium:
+            unitToNumber(BigInt(best.premium)) /
+            (params.uiMultiplier === null || params.uiMultiplier === undefined
+              ? 1
+              : Number(params.uiMultiplier) / 1e18),
           totalPremium: unitToNumber(BigInt(best.totalPremium)),
           acceptBy,
         };
@@ -248,6 +290,8 @@ export function useSellCall() {
           owner: saleOwner,
           acceptBy,
           addresses: saleAddresses,
+          marketId,
+          uiMultiplier: params.uiMultiplier ?? null,
         };
         setQuote(prepared);
         setPhase("quoted");
@@ -284,6 +328,19 @@ export function useSellCall() {
     try {
       setPhase("signing");
       await switchChainAsync({ chainId: prepared.chainId }).catch(() => {});
+      if (prepared.uiMultiplier !== null && prepared.addresses.collateral) {
+        const currentMultiplier = await readContract(wagmiConfig, {
+          abi: scaledUiTokenAbi,
+          address: prepared.addresses.collateral,
+          functionName: "uiMultiplier",
+          chainId: prepared.chainId,
+        });
+        if (currentMultiplier !== prepared.uiMultiplier) {
+          clearExpiryTimer();
+          setPhase("expired");
+          throw new Error("The token conversion multiplier changed. Get a new quote.");
+        }
+      }
       const action = buildAction({
         subaccountId: prepared.params.subaccountId,
         module: prepared.addresses.rfqModule,
@@ -341,7 +398,7 @@ export function useSellCall() {
     } finally {
       busyRef.current = false;
     }
-  }, [address, armExpiryTimer, clearExpiryTimer, signTypedDataAsync, switchChainAsync]);
+  }, [address, armExpiryTimer, clearExpiryTimer, signTypedDataAsync, switchChainAsync, wagmiConfig]);
 
   // Backwards-compatible helper for the legacy CoveredCallFlow component.
   const sell = useCallback(
@@ -391,7 +448,7 @@ function verifyBestQuote(
   const trade = trades[0];
   const expectedSubId = encodeOptionSubId({
     expiry: BigInt(params.expiry),
-    strike: toUnit(params.strike),
+    strike: params.protocolStrike ? toUnit(params.protocolStrike) : toUnit(params.strike),
     isCall: true,
   });
   if (trade.asset.toLowerCase() !== btcOptionAsset.toLowerCase()) {
@@ -400,7 +457,7 @@ function verifyBestQuote(
   if (trade.subId !== expectedSubId) {
     throw new Error("Quote rejected: wrong instrument (subId mismatch)");
   }
-  if (trade.amount !== toUnit(params.amount)) {
+  if (trade.amount !== toUnit(params.rawAmount ?? params.amount)) {
     throw new Error("Quote rejected: wrong amount");
   }
 }

@@ -2,44 +2,35 @@
 
 import Link from "next/link";
 import { ConnectButton } from "@rainbow-me/rainbowkit";
-import { useAccount, useSwitchChain } from "wagmi";
+import { useAccount } from "wagmi";
 import { HedgeLogo } from "@/components/ui/HedgeLogo";
 import { useBtcbBalance, useMintBtcb } from "@/hooks/protocol/useBtcb";
 import { useNetwork } from "@/hooks/protocol/useNetwork";
 import { TBNB_FAUCET_URL } from "@/lib/protocol/chain";
-import type { AppChainId } from "@/stores/network";
-
-const NETWORKS: { id: AppChainId; label: string }[] = [
-  { id: 97, label: "Testnet" },
-  { id: 56, label: "Mainnet" },
-];
 
 function NetworkToggle() {
-  const { chainId, setChainId } = useNetwork();
-  const { switchChainAsync } = useSwitchChain();
-
   return (
-    <div className="flex items-center rounded-md border-[0.5px] border-border bg-background p-0.5">
-      {NETWORKS.map((n) => {
-        const active = n.id === chainId;
-        return (
-          <button
-            key={n.id}
-            onClick={() => {
-              setChainId(n.id);
-              switchChainAsync({ chainId: n.id }).catch(() => {});
-            }}
-            className={
-              "rounded px-2.5 py-1 text-xs font-semibold transition-colors " +
-              (active
-                ? "bg-accent/15 text-accent"
-                : "text-muted-foreground hover:text-foreground")
-            }
-          >
-            {n.label}
-          </button>
-        );
-      })}
+    <div
+      className="flex items-center rounded-md border-[0.5px] border-border bg-background p-0.5"
+      role="group"
+      aria-label="Network"
+    >
+      <button
+        type="button"
+        aria-pressed="true"
+        className="rounded bg-accent/15 px-2.5 py-1 text-xs font-semibold text-accent"
+      >
+        Testnet
+      </button>
+      <button
+        type="button"
+        disabled
+        aria-disabled="true"
+        title="Mainnet is not available yet"
+        className="cursor-not-allowed rounded px-2.5 py-1 text-xs font-semibold text-muted-foreground opacity-50"
+      >
+        Mainnet
+      </button>
     </div>
   );
 }

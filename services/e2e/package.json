@@ -10,9 +10,12 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "deploy:rwa:testnet": "tsx src/deploy-rwa-testnet.ts",
+    "activate:rwa:testnet": "tsx src/activate-rwa-testnet.ts",
     "e2e": "tsx src/run.ts",
     "dev": "tsx src/run.ts",
-    "smoke": "pnpm build && tsx src/run.ts"
+    "smoke": "pnpm build && tsx src/run.ts",
+    "test": "tsx --test src/rwa-testnet.test.ts"
   },
   "dependencies": {
     "@hedge/oracle-feeds": "workspace:*",
