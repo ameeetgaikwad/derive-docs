@@ -2,24 +2,23 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
 /**
- * Protocol deployments known to the frontend. Mainnet remains represented in
- * the deployment helpers for future releases, but only BSC testnet is enabled
- * as a user-selectable app network today.
+ * Protocol deployments available in the frontend. BSC testnet remains the
+ * default, while chain 56 routes to the isolated mainnet staging deployment.
  *
  * The chosen chainId is also mirrored into a module-level variable
  * (see lib/protocol/deployments.ts `getActiveChainId`) so non-React signing
  * code can read the active network without a hook.
  */
 export type AppChainId = 56 | 97;
-export type EnabledAppChainId = 97;
+export type EnabledAppChainId = AppChainId;
 
 export const APP_CHAIN_IDS: readonly AppChainId[] = [56, 97] as const;
-export const ENABLED_APP_CHAIN_IDS: readonly EnabledAppChainId[] = [97] as const;
+export const ENABLED_APP_CHAIN_IDS: readonly EnabledAppChainId[] = [97, 56] as const;
 
 export const DEFAULT_APP_CHAIN_ID: EnabledAppChainId = 97;
 
 export function isEnabledAppChainId(v: unknown): v is EnabledAppChainId {
-  return v === 97;
+  return v === 97 || v === 56;
 }
 
 export function coerceEnabledAppChainId(v: unknown): EnabledAppChainId {

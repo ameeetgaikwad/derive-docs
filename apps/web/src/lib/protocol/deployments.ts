@@ -1,15 +1,15 @@
 import type { Address, Hex } from "viem";
-import deployments56 from "../../../../../protocol/deployments/56.json";
+import deployments56 from "../../../../../protocol/deployments/staging/56.json";
 import deployments97 from "../../../../../protocol/deployments/97.json";
 import { getActiveChainId, type AppChainId } from "@/stores/network";
 
 /**
  * sats-options / Hedge BSC deployments.
  *
- * Source of truth: protocol/deployments/{56,97}.json (written by the deploy
- * script, documented in protocol/MAINNET.md + TESTNET.md). Both are imported
- * so the app can switch networks at runtime; the active one is chosen from the
- * network store.
+ * Source of truth: protocol/deployments/staging/56.json for the isolated
+ * mainnet smoke deployment and protocol/deployments/97.json for testnet. Both
+ * are imported so the app can switch networks at runtime; the active one is
+ * chosen from the network store.
  *
  * Feed keys of note:
  *  - btcSpotFeed     — legacy LyraSpotFeed (fallback)
@@ -25,7 +25,7 @@ const RAW = {
 type RawDeployment = (typeof RAW)[keyof typeof RAW];
 
 if (RAW[56].chainId !== 56) {
-  throw new Error(`protocol/deployments/56.json chainId mismatch: ${RAW[56].chainId}`);
+  throw new Error(`protocol/deployments/staging/56.json chainId mismatch: ${RAW[56].chainId}`);
 }
 if (RAW[97].chainId !== 97) {
   throw new Error(`protocol/deployments/97.json chainId mismatch: ${RAW[97].chainId}`);
