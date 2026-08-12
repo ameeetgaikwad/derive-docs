@@ -1,8 +1,9 @@
 # Production readiness checklist
 
-Status: **PRE-LAUNCH**. The chain-56 contracts are deployed, but production
-deposits and public trading must remain gated until every P0 item below has an
-owner, evidence, and sign-off.
+Status: **PRE-LAUNCH**. The isolated chain-56 staging contracts are deployed and
+may be used for explicitly labelled, capped public testing. Production deposits
+and unrestricted production trading must remain gated until every P0 item below
+has an owner, evidence, and sign-off.
 
 This is the cross-system launch checklist. Use
 [`protocol/MAINNET.md`](protocol/MAINNET.md) for deployed addresses and broadcast
@@ -14,25 +15,117 @@ commands, [`protocol/OWNERSHIP.md`](protocol/OWNERSHIP.md) for admin transfer,
 
 [`DeployMainnetStaging.s.sol`](protocol/script/DeployMainnetStaging.s.sol) is an
 isolated BSC mainnet deployment entrypoint for controlled testing with real
-chain-56 tokens, oracle contracts, and transaction behavior. It is not a
-production deployment and must not be exposed to public deposits or trading.
+chain-56 tokens, oracle contracts, and transaction behavior. It is intentionally
+available to public staging takers, but it is not a production deployment or a
+representation that the production launch checklist is complete.
 
 The staging deployment:
 
 - requires chain ID 56 and the explicit
   `MAINNET_STAGING_CONFIRM=DEPLOY_HEDGE_MAINNET_STAGING_CHAIN_56`
   acknowledgement;
-- writes addresses to `protocol/deployments/56-staging.json` instead of
+- requires an explicit `PRIVATE_KEY`, `FEED_SIGNER`, and `TRADE_EXECUTOR`, with
+  distinct deployer, feed-signer, and trade-executor addresses;
+- writes addresses to `protocol/deployments/staging/56.json` instead of
   replacing the existing chain-56 deployment record;
+- rejects `BTCB_ADDRESS`, `USDT_ADDRESS`, or `PYTH_ADDRESS` overrides unless
+  they exactly match the pinned staging dependencies, and validates token
+  metadata plus the BTC/USD Pyth and Chainlink feeds before deployment;
+- deploys with a `0.05 BTC` aggregate option-position cap, a `0.05 BTCB`
+  aggregate base-position cap, disabled cash borrowing, and the existing
+  production-like OI fee settings;
 - may retain the dedicated staging deployer EOA as administrator so operators
   can rapidly test and recover the isolated deployment; and
-- must use fresh staging accounts, minimal real funds, closed public taker
-  access, and deliberately small exposure caps.
+- must use fresh staging accounts, minimal real funds, a maker allowlist, RFQ
+  rate limiting, and deliberately small exposure caps. Public taker access is
+  intentional for this staging environment; taker authentication is not
+  implemented.
 
 Do not promote the staging contracts or deployment record to production. A
 production launch still requires a separately reviewed deployment, Safe
 ownership, audited oracle and collateral changes, durable services, and every
 P0 gate below.
+
+Pinned chain-56 staging dependencies:
+
+| Dependency | Address / ID |
+|---|---|
+| BTCB | `0x7130d2A12B9BCbFAe4f2634d864A1Ee1Ce3Ead9c` |
+| USDT | `0x55d398326f99059fF775485246999027B3197955` |
+| Pyth Core (upgraded BNB mainnet contract) | `0xdF21D137Aadc95588205586636710ca2890538d5` |
+| Pyth BTC/USD price ID | `0xe62df6c8b4a85fe1a67db44dc12de5db330f7ac66b72dc658afedf0f4a415b43` |
+| Chainlink BTC/USD | `0x264990fbd0A4796A3E3d8E37C4d5F87a3aCa5Ebf` |
+
+[Pyth recommends](https://docs.pyth.network/price-feeds/core/contract-addresses/evm)
+new integrations use its upgraded EVM contract ahead of the August 18, 2026
+Core upgrade. Revalidate every pinned dependency against the official
+issuer/oracle source immediately before broadcasting staging.
+
+The isolated runtime templates live in
+[`protocol/deployments/staging`](protocol/deployments/staging): BTC RFQs are
+limited to `0.01`, aggregate protocol exposure is capped, public takers are
+enabled, and a maker allowlist is required. The RFQ engine uses port `3030` on
+its dedicated mainnet-staging server, matching the testnet service's port on its
+separate server. If both services run on one host, assign one a different port
+and update its frontend URL. Put the staging secrets in a file outside the
+repository containing `RPC_URL_56`, `PRIVATE_KEY`, `FEED_SIGNER`,
+`TRADE_EXECUTOR`, and
+`MAINNET_STAGING_CONFIRM=DEPLOY_HEDGE_MAINNET_STAGING_CHAIN_56`. Simulate first:
+
+```sh
+cd protocol
+set -a
+source /secure/path/mainnet-staging.env
+set +a
+forge script script/DeployMainnetStaging.s.sol --rpc-url "$RPC_URL_56" -vvvv
+```
+
+Review the complete simulation output and predicted staging addresses. The
+operator may then rerun the same entrypoint with broadcasting explicitly
+enabled:
+
+```sh
+forge script script/DeployMainnetStaging.s.sol \
+  --rpc-url "$RPC_URL_56" \
+  --broadcast \
+  --slow \
+  -vvvv
+```
+
+The freshly deployed 10 USDT minimum OI fee intentionally makes `0.0001 BTCB`
+smoke trades fail margin checks. For the isolated micro-trade window only,
+configure a 0.01 USDT minimum while retaining the 0.1% OI fee rate:
+
+```sh
+cd protocol
+MAINNET_STAGING_FEE_CONFIRM=SET_HEDGE_MAINNET_STAGING_MIN_OI_FEE_0_01 \
+forge script script/ConfigureMainnetStagingFee.s.sol \
+  --rpc-url "$RPC_URL_56" \
+  -vvvv
+
+# After reviewing the simulation:
+MAINNET_STAGING_FEE_CONFIRM=SET_HEDGE_MAINNET_STAGING_MIN_OI_FEE_0_01 \
+forge script script/ConfigureMainnetStagingFee.s.sol \
+  --rpc-url "$RPC_URL_56" \
+  --broadcast \
+  --legacy \
+  --with-gas-price 200000000 \
+  --slow \
+  -vvvv
+```
+
+After the fee configuration, run the read-only verifier before
+populating/enabling the staging market manifest:
+
+```sh
+forge script script/VerifyMainnetStaging.s.sol --rpc-url "$RPC_URL_56"
+```
+
+Do not apply this staging-only minimum to a production deployment.
+
+A minimal-value real-BTCB staging trade has been completed against this
+deployment. The ITM and OTM settlement rehearsals remain outstanding and are
+still part of the combined P0 launch gate below.
 
 ## P0 launch blockers
 

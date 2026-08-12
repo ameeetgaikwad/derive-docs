@@ -176,7 +176,7 @@ contract DeployAll is MarketDeployerBase {
   }
 
   /// @dev mirrors lib/v2-core/scripts/deploy-core.s.sol (_deployCoreContracts + _setupCoreFunctions)
-  function _deployCore() internal {
+  function _deployCore() internal virtual {
     uint nonce = vm.getNonce(deployer);
 
     // nonce
@@ -242,7 +242,7 @@ contract DeployAll is MarketDeployerBase {
 
   /// @dev market deploy + SRM registration logic is shared with AddMarket.s.sol —
   ///      see MarketDeployerBase._deployAndRegisterMarket.
-  function _deployBtcMarket(MarketConfig memory cfg) internal {
+  function _deployBtcMarket(MarketConfig memory cfg) internal virtual {
     MarketDeployment memory m = _deployAndRegisterMarket(subAccounts, srm, srmViewer, btcb, cfg);
     btcSpotFeed = m.spotFeed;
     btcForwardFeed = m.forwardFeed;
