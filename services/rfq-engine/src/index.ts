@@ -87,6 +87,7 @@ async function main(): Promise<void> {
     makerAllowlist: config.makerAllowlist,
     takerOpen: config.takerOpen,
     rfqRateLimitPerMin: config.rfqRateLimitPerMin,
+    trustProxy: config.trustProxy,
     heartbeatMs: config.heartbeatMs,
     markets: config.markets,
     marketStatusProvider: async (market) => {

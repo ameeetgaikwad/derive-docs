@@ -1,7 +1,14 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { DEFAULT_HERMES_URL, fetchHermesUpdate, formatPythPrice } from "../src/pyth.js";
+import {
+  DEFAULT_HERMES_URL,
+  fetchHermesUpdate,
+  formatPythPrice,
+  selectFreshPythMarkets,
+} from "../src/pyth.js";
 
 const BTC_ID = "0xe62df6c8b4a85fe1a67db44dc12de5db330f7ac66b72dc658afedf0f4a415b43" as const;
+const SPY_ID = `0x${"1".repeat(64)}` as const;
+const NVDA_ID = `0x${"2".repeat(64)}` as const;
 
 describe("formatPythPrice", () => {
   it("renders negative exponents", () => {
@@ -55,5 +62,26 @@ describe("fetchHermesUpdate", () => {
 
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) }));
     await expect(fetchHermesUpdate(BTC_ID)).rejects.toThrow(/missing binary update data/);
+  });
+});
+
+describe("selectFreshPythMarkets", () => {
+  it("keeps live markets updating while deferred markets are stale or missing", () => {
+    const markets = [
+      { marketId: "BTC", priceId: BTC_ID },
+      { marketId: "SPY", priceId: SPY_ID },
+      { marketId: "NVDA", priceId: NVDA_ID },
+    ];
+    const prices = new Map([
+      [BTC_ID.toLowerCase(), { price: "65000", conf: "1", expo: 0, publishTime: 990 }],
+      [SPY_ID.toLowerCase(), { price: "770", conf: "1", expo: 0, publishTime: 800 }],
+    ]);
+
+    const selected = selectFreshPythMarkets(markets, prices, 1_000n, 45n);
+    expect(selected.fresh.map((market) => market.marketId)).toEqual(["BTC"]);
+    expect(selected.skipped).toEqual([
+      { marketId: "SPY", age: 200n, reason: "stale Hermes source" },
+      { marketId: "NVDA", age: null, reason: "missing parsed Hermes price" },
+    ]);
   });
 });

@@ -36,6 +36,7 @@ settlement also uses `standardManager`, `btcOptionAsset`, `subAccounts`, `cashAs
 | `FEED_SIGNER_KMS_KEY_ID` | — | production feed-signing KMS key; preferred over a raw key |
 | `FEED_DEADLINE_SEC` | `3600` | signature deadline horizon |
 | `INTERVAL_SEC` | `30` | Pyth refresh cadence; daemon rejects values >= its 60-second staleness limit |
+| `PYTH_SOURCE_MAX_AGE_SEC` | `45` | maximum Hermes source age admitted to a Pyth batch; stale deferred markets are skipped without blocking fresh markets |
 | `FEED_INTERVAL_SEC` | `120` | signed BTC snapshot cadence; daemon rejects values >= the 180-second spot heartbeat |
 | `EXPIRY_COUNT` | `4` | number of >24h Friday expiries exposed for new trades |
 | `PRICE_SOURCE` | `static` | `static` (uses `SPOT_PRICE`) or live `chainlink` BTC/USD |

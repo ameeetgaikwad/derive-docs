@@ -115,6 +115,8 @@ export default function Navbar() {
 }
 
 function NetworkToggle() {
+  const { chainId, setChainId } = useNetwork();
+
   return (
     <div
       className="flex items-center rounded-[5px] bg-zinc-100 p-0.5"
@@ -123,21 +125,32 @@ function NetworkToggle() {
     >
       <button
         type="button"
-        aria-pressed="true"
-        className="rounded-[4px] bg-white px-2 py-1.5 font-mono text-[10px] font-medium uppercase text-orange-700 shadow-sm sm:px-2.5"
+        onClick={() => setChainId(97)}
+        aria-pressed={chainId === 97}
+        className={cn(
+          "rounded-[4px] px-2 py-1.5 font-mono text-[10px] font-medium uppercase transition-colors sm:px-2.5",
+          chainId === 97
+            ? "bg-white text-orange-700 shadow-sm"
+            : "text-zinc-500 hover:text-zinc-950"
+        )}
       >
         <span className="sm:hidden">Test</span>
         <span className="hidden sm:inline">Testnet</span>
       </button>
       <button
         type="button"
-        disabled
-        aria-disabled="true"
-        title="Mainnet is not available yet"
-        className="cursor-not-allowed rounded-[4px] px-2 py-1.5 font-mono text-[10px] font-medium uppercase text-zinc-400 opacity-60 sm:px-2.5"
+        onClick={() => setChainId(56)}
+        aria-pressed={chainId === 56}
+        title="Mainnet staging"
+        className={cn(
+          "rounded-[4px] px-2 py-1.5 font-mono text-[10px] font-medium uppercase transition-colors sm:px-2.5",
+          chainId === 56
+            ? "bg-white text-orange-700 shadow-sm"
+            : "text-zinc-500 hover:text-zinc-950"
+        )}
       >
-        <span className="sm:hidden">Main</span>
-        <span className="hidden sm:inline">Mainnet</span>
+        <span className="sm:hidden">Stage</span>
+        <span className="hidden sm:inline">Mainnet staging</span>
       </button>
     </div>
   );

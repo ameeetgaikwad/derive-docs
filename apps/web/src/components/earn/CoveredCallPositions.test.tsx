@@ -63,6 +63,8 @@ describe("covered-call position rows", () => {
   it("distinguishes open, expired, and settled outcomes", () => {
     render(<CoveredCallPositions />);
 
+    expect(mocks.useSpotPrice).toHaveBeenCalledTimes(5);
+    expect(mocks.useSpotPrice.mock.calls.every(([marketId]) => marketId === "BTC")).toBe(true);
     expect(screen.getAllByText("OTM").length).toBeGreaterThan(0);
     expect(screen.getByText("ITM")).toBeTruthy();
     expect(screen.getByText("Awaiting settlement")).toBeTruthy();

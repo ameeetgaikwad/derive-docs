@@ -7,7 +7,11 @@
     "node": ">=22"
   },
   "scripts": {
-    "dev": "turbo run dev --filter=@hedge/shared --filter=@hedge/oracle-feeds --filter=@hedge/rfq-engine --filter=@hedge/maker-bot --filter=@hedge/web",
+    "dev": "turbo run dev --filter=@hedge/shared --filter=@hedge/rfq-engine --filter=@hedge/maker-bot --filter=@hedge/web",
+    "dev:oracle": "pnpm --filter @hedge/oracle-feeds dev",
+    "dev:with-oracle": "turbo run dev --filter=@hedge/shared --filter=@hedge/oracle-feeds --filter=@hedge/rfq-engine --filter=@hedge/maker-bot --filter=@hedge/web",
+    "bootstrap:rwa:testnet": "pnpm --filter @hedge/e2e bootstrap:rwa:testnet --broadcast",
+    "bootstrap:rwa:testnet:plan": "pnpm --filter @hedge/e2e bootstrap:rwa:testnet",
     "deploy:rwa:testnet": "pnpm --filter @hedge/e2e deploy:rwa:testnet --market XAU,SPY,NVDA --broadcast",
     "deploy:rwa:testnet:plan": "pnpm --filter @hedge/e2e deploy:rwa:testnet --market XAU,SPY,NVDA",
     "activate:rwa:testnet": "pnpm --filter @hedge/e2e activate:rwa:testnet",

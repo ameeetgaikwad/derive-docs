@@ -147,6 +147,24 @@ variable "oracle_feeds_command" {
   default     = ["daemon", "--source", "deribit"]
 }
 
+variable "oracle_rwa_iv" {
+  description = "Reviewed flat reference volatilities used until enough RWA closes are configured."
+  type        = map(string)
+  default = {
+    XAU  = "0.20"
+    SPY  = "0.25"
+    NVDA = "0.50"
+  }
+
+  validation {
+    condition = alltrue([
+      for market, value in var.oracle_rwa_iv :
+      contains(["XAU", "SPY", "NVDA"], market) && try(tonumber(value) > 0, false)
+    ])
+    error_message = "oracle_rwa_iv may contain only positive XAU, SPY, and NVDA values."
+  }
+}
+
 variable "log_retention_days" {
   description = "CloudWatch Logs retention in days for service log groups."
   type        = number

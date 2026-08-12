@@ -762,4 +762,42 @@ describe("taker gating", () => {
     });
     expect(res.status).toBe(403);
   });
+
+  it("rate-limits forwarded client IPs independently only when proxy trust is enabled", async () => {
+    const engine = new AuctionEngine({
+      store: new InMemoryRfqStore(),
+      chainReader: makeReader(),
+      executor: new Executor(new FakeSubmitter()),
+      chainId: CHAIN_ID,
+      matching: MATCHING,
+      rfqModule: RFQ_MODULE,
+      optionAssets: { BTC: OPTION_ASSET },
+      auctionWindowMs: 60_000,
+    });
+    const server = new RfqEngineServer({
+      engine,
+      port: 0,
+      heartbeatMs: 0,
+      rfqRateLimitPerMin: 1,
+      trustProxy: true,
+    });
+    const { port } = await server.start();
+    cleanups.push(() => server.stop());
+    const url = `http://127.0.0.1:${port}/rfq`;
+    const body = JSON.stringify({
+      subaccountId: TAKER_SUBACC.toString(),
+      instrument: { asset: "BTC", expiry: EXPIRY.toString(), strike: "110000", isCall: true },
+      amount: "1",
+      direction: "sell",
+    });
+    const create = (forwardedFor: string) => fetch(url, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-forwarded-for": forwardedFor },
+      body,
+    });
+
+    expect((await create("198.51.100.10")).status).toBe(201);
+    expect((await create("198.51.100.11")).status).toBe(201);
+    expect((await create("198.51.100.10, 10.0.0.1")).status).toBe(429);
+  });
 });

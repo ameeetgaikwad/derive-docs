@@ -5,6 +5,11 @@ running `rfq-engine` (public, behind an ALB) and `oracle-feeds` (daemon), the
 GitHub Actions OIDC deploy role, and the IAM task role that lets containers
 **sign with KMS using no private keys and no access keys**.
 
+The optional chain-56 mainnet-staging stack adds a second RFQ/oracle pair to
+the same cluster. It has independent task definitions, services, ALB, SSM
+parameters, logs, security groups, and encrypted EFS state. Both RFQ containers
+listen on `3030`; Fargate task networking and separate ALBs isolate them.
+
 - Account: `985539774899`
 - Region: `us-east-1`
 - GitHub repo (OIDC): `Sats-Terminal/derive`
@@ -51,15 +56,30 @@ chain_id        = "56"                              # 56 = BNB mainnet, 97 = tes
 ```
 
 Other tuning vars (with defaults) live in `variables.tf`: task CPU/memory,
-desired counts, `oracle_feeds_command`, `log_retention_days`, KMS aliases.
+desired counts, `oracle_feeds_command`, `oracle_rwa_iv`, `log_retention_days`,
+and KMS aliases. The RWA volatility values are non-secret reviewed inputs passed
+to `oracle-feeds` as `RWA_IV_<MARKET>` until sufficient close history is
+configured.
 
-> **Oracle state gate:** the current Fargate task definition does not yet mount
-> durable storage for `ORACLE_STATE_PATH` and `ORACLE_TWAP_STATE_PATH`. Do not
+The AWS `oracle-feeds` service is the canonical chain writer. The root
+`pnpm dev` command intentionally excludes a local oracle to avoid two processes
+using the same feed-signer account and racing transaction nonces. Run
+`pnpm dev:oracle` (or `pnpm dev:with-oracle`) only while the ECS oracle service
+is deliberately scaled to zero.
+
+> **Existing-stack oracle state gate:** the original Fargate task definition
+> does not yet mount durable storage for `ORACLE_STATE_PATH` and
+> `ORACLE_TWAP_STATE_PATH`. Do not
 > use this Terraform configuration for public/mainnet trading until an encrypted
 > persistent volume, backup/restore procedure, and single-writer failover are
 > implemented and rehearsed. The active-expiry index can replay from chain, but
 > a lost in-window settlement-TWAP accumulator cannot be reconstructed from the
 > container filesystem.
+
+The mainnet-staging tasks do mount encrypted EFS storage. RFQ auctions use a
+durable JSONL store, while oracle active-expiry and settlement-TWAP checkpoints
+use a separate access point. Both desired counts are restricted to zero or one
+because these stores and transaction signers require a single writer.
 
 If `certificate_arn` is **not** set, the ALB serves plain HTTP on `:80` (fine for
 bring-up and `validate`). Production WSS needs an ACM cert — provision one for
@@ -113,6 +133,31 @@ terraform apply -var-file=prod.tfvars
 
 ---
 
+## Add the chain-56 mainnet-staging services
+
+Do not repoint the existing testnet services or apply from an empty copy of this
+root's state. Mainnet staging is a separate Terraform root and state under
+`infra/mainnet-staging`; it reads the shared cluster, roles, ECR, and VPC as
+data sources. Follow its complete rollout guide:
+
+```bash
+cd infra/mainnet-staging
+cp mainnet-staging.tfvars.example mainnet-staging.tfvars
+terraform init -backend=false
+terraform validate
+```
+
+See [`mainnet-staging/README.md`](mainnet-staging/README.md). Its first apply
+keeps both services at zero tasks; image publishing, raw-key identity checks,
+and stopping the local chain-56 oracle happen before scaling to one. Raw keys
+are staging-only; the production deployment must use KMS identities.
+
+The CD workflow publishes one shared service image and rolls both existing ECS
+service pairs when present. It skips the mainnet-staging names until Terraform
+creates them.
+
+---
+
 ## One-time GitHub setup (from Terraform outputs)
 
 After apply, wire GitHub Actions to deploy via OIDC (no keys in GitHub):
@@ -159,6 +204,7 @@ terraform validate
 | `oidc.tf`      | GitHub OIDC provider + deploy role/policy                           |
 | `alb.tf`       | ALB, target group, HTTP/HTTPS listeners                             |
 | `ecs.tf`       | SSM params, log groups, cluster, task defs, services                |
+| `mainnet-staging/` | Separate-state chain-56 ECS, ALB, and EFS runtime stack        |
 | `outputs.tf`   | ECR URLs, cluster/service names, role ARNs, ALB DNS, KMS ARNs       |
 
 ---

@@ -46,6 +46,7 @@ script) and verifies on-chain that the executor key is registered via
 | `MAKER_ALLOWLIST` | empty (open/dev) | comma-separated maker EOA addresses; when set, WS auth is refused (close code `4003`) for any other address |
 | `TAKER_OPEN` | `true` | `false` rejects all RFQ creation (REST `403` / taker-WS error) |
 | `RFQ_RATE_LIMIT_PER_MIN` | `30` | RFQ creations allowed per IP per minute (REST `POST /rfq` **and** taker-WS `create_rfq`); over-limit ⇒ `429` / WS error. `0` disables |
+| `TRUST_PROXY` | `false` | trust the first `X-Forwarded-For` address for rate limiting; enable only when security groups/firewalls block direct container access |
 | `STORE_PATH` | unset (in-memory) | path to a JSONL file for durable auctions + trade history (see Persistence) |
 | `EXECUTOR_PRIVATE_KEY` | anvil key #0 (31337 only) | must be the registered trade executor (`tradeExecutor` in the deployments JSON) |
 | `SATS_DEPLOYMENTS_DIR` | auto-discovered | override deployments dir |
@@ -63,9 +64,9 @@ TLS-terminating reverse proxy (nginx / caddy / cloud LB):
   above the heartbeat interval).
 - only set `HOST=0.0.0.0` when the engine runs in a private network segment
   behind the proxy; never expose the plain-HTTP port publicly.
-- per-IP rate limiting in the engine assumes it sees real client addresses —
-  when behind a proxy either rate-limit at the proxy (preferred) or run the
-  proxy on the same host so the source IP is still meaningful.
+- per-IP rate limiting uses the socket peer by default. Prefer rate limiting at
+  the proxy; otherwise set `TRUST_PROXY=true` only when network policy prevents
+  clients from bypassing that proxy and forging `X-Forwarded-For`.
 - set `MAKER_ALLOWLIST` to the onboarded maker addresses and `STORE_PATH`
   to a persistent volume.
 

@@ -350,7 +350,7 @@ abstract contract MarketDeployerBase is Script {
 
   /// @dev official Pyth price-feeds contract per chain (docs.pyth.network); used by the
   ///      AnchoredSettlementFeed as a best-effort cross-check. address(0) disables it.
-  function _pythAddress() internal returns (address) {
+  function _pythAddress() internal virtual returns (address) {
     if (block.chainid == 56) return vm.envOr("PYTH_ADDRESS", BSC_MAINNET_PYTH); // BSC mainnet
     if (block.chainid == 97) return 0x5744Cbf430D99456a0A8771208b674F27f8EF0Fb; // BSC testnet
     return vm.envOr("PYTH_ADDRESS", address(0));

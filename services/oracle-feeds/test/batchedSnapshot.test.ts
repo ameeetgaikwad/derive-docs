@@ -1,8 +1,8 @@
 import { privateKeyToAccount } from "viem/accounts";
 import { describe, expect, it } from "vitest";
-import type { Address, Hex, PublicClient, WalletClient } from "viem";
+import { encodeErrorResult, type Address, type Hex, type PublicClient, type WalletClient } from "viem";
 
-import { toUnit } from "@hedge/shared";
+import { lyraSpotFeedAbi, toUnit } from "@hedge/shared";
 import { FeedPoster, SETTLEMENT_TWAP_DURATION } from "../src/poster.js";
 
 const signer = privateKeyToAccount(
@@ -67,5 +67,42 @@ describe("atomic signed snapshot", () => {
         expiries: [{ expiry: now + SETTLEMENT_TWAP_DURATION - 1n }],
       }),
     ).rejects.toThrow(/requires rolling settlement aggregates/);
+  });
+
+  it("identifies the feed error hidden by a failed Multicall3 aggregate", async () => {
+    const now = 1_786_000_000n;
+    const revertData = encodeErrorResult({
+      abi: lyraSpotFeedAbi,
+      errorName: "BLF_InvalidTimestamp",
+    });
+    const publicClient = {
+      getBlock: async () => ({ timestamp: now }),
+      simulateContract: async () => ({
+        result: [
+          { success: false, returnData: revertData },
+          { success: true, returnData: "0x" },
+          { success: true, returnData: "0x" },
+          { success: true, returnData: "0x" },
+        ],
+      }),
+    } as unknown as PublicClient;
+    const walletClient = {
+      account: signer,
+      chain: null,
+      writeContract: async () => {
+        throw new Error("Multicall3: call failed");
+      },
+    } as unknown as WalletClient;
+    const poster = new FeedPoster(publicClient, walletClient, signer, 97, addresses);
+
+    await expect(
+      poster.postSnapshotBatched({
+        spot: toUnit("65000"),
+        timestamp: now,
+        expiries: [{ expiry: now + 7n * 86_400n, forwardPrice: toUnit("65100") }],
+      }),
+    ).rejects.toThrow(
+      `spot target=${addresses.spotFeed}: BLF_InvalidTimestamp`,
+    );
   });
 });

@@ -1,0 +1,17 @@
+rpc_url = "https://replace-with-private-bnb-mainnet-rpc"
+
+# CD publishes immutable SHA tags for audit/rollback and updates this moving tag.
+image_tag = "latest"
+
+# Public takers are enabled; only these maker EOAs may quote.
+maker_allowlist = [
+  "0xE37515eF43C884e04147F4714A7fC1C70059C392",
+]
+
+# Add a validated us-east-1 certificate before exposing the browser endpoint.
+certificate_arn = null
+
+# First apply at zero. Set both to one only after publishing the image,
+# verifying KMS identities/funding, and stopping the local chain-56 oracle.
+rfq_engine_desired_count   = 0
+oracle_feeds_desired_count = 0

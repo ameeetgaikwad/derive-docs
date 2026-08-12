@@ -191,6 +191,11 @@ function PositionRow({
   );
 }
 
+function PositionRowWithSpot({ position }: { position: OptionPosition }) {
+  const { spotPrice } = useSpotPrice(position.marketId ?? "BTC");
+  return <PositionRow position={position} spotPrice={spotPrice} />;
+}
+
 function PositionDetail({ label, value }: { label: string; value: string }) {
   return (
     <div>
@@ -213,12 +218,6 @@ export function CoveredCallPositions() {
   const positions = usePositions();
   const { subaccountId, cash, options, isLoading } = positions;
   const collateralByMarket = positions.collateralByMarket ?? { BTC: positions.btcb ?? 0 };
-  const btcSpot = useSpotPrice("BTC").spotPrice;
-  const xauSpot = useSpotPrice("XAU").spotPrice;
-  const spySpot = useSpotPrice("SPY").spotPrice;
-  const nvdaSpot = useSpotPrice("NVDA").spotPrice;
-  const spcxSpot = useSpotPrice("SPCX").spotPrice;
-  const spots = { BTC: btcSpot, XAU: xauSpot, SPY: spySpot, NVDA: nvdaSpot, SPCX: spcxSpot };
 
   if (subaccountId === null) return null;
 
@@ -266,10 +265,9 @@ export function CoveredCallPositions() {
         ) : (
           <div className="space-y-3">
             {options.map((position) => (
-              <PositionRow
+              <PositionRowWithSpot
                 key={position.subId.toString()}
                 position={position}
-                spotPrice={spots[position.marketId ?? "BTC"]}
               />
             ))}
           </div>

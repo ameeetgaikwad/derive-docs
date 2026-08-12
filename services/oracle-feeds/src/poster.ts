@@ -1,4 +1,11 @@
-import { encodeFunctionData, type Address, type Hex, type PublicClient, type WalletClient } from "viem";
+import {
+  decodeErrorResult,
+  encodeFunctionData,
+  type Address,
+  type Hex,
+  type PublicClient,
+  type WalletClient,
+} from "viem";
 import type { LocalAccount } from "viem";
 import {
   encodeForwardData,
@@ -75,7 +82,7 @@ export function feedAddressesFromDeployments(
   const market = marketById(readMarketManifest(chainId), marketId);
   if (!market?.enabled || !market.contracts) throw new Error(`${marketId} market is not enabled on chain ${chainId}`);
   return {
-    spotFeed: market.contracts.spotFeed,
+    spotFeed: market.contracts.signedSpotFeed,
     forwardFeed: market.contracts.forwardFeed,
     volFeed: market.contracts.volFeed,
     rateFeed: market.contracts.rateFeed,
@@ -347,13 +354,19 @@ export class FeedPoster {
       throw new Error(`snapshot timestamp ${timestamp} is ahead of chain time ${now}`);
     }
     const conf = params.confidence ?? ONE;
-    const calls: { target: Address; allowFailure: false; callData: Hex }[] = [];
+    const calls: { kind: FeedKind; label: string; target: Address; callData: Hex }[] = [];
 
-    const append = async (kind: FeedKind, target: Address, data: Hex): Promise<void> => {
+    const append = async (
+      kind: FeedKind,
+      label: string,
+      target: Address,
+      data: Hex,
+    ): Promise<void> => {
       const signed = await this.signAcceptData(kind, data, timestamp, target, now);
       calls.push({
+        kind,
+        label,
         target,
-        allowFailure: false,
         callData: encodeFunctionData({
           abi: FEED_ABIS[kind],
           functionName: "acceptData",
@@ -362,7 +375,12 @@ export class FeedPoster {
       });
     };
 
-    await append("spot", this.addresses.spotFeed, encodeSpotData({ price: params.spot, confidence: conf }));
+    await append(
+      "spot",
+      "spot",
+      this.addresses.spotFeed,
+      encodeSpotData({ price: params.spot, confidence: conf }),
+    );
     for (const expiryParams of params.expiries ?? []) {
       const { expiry, settlement } = expiryParams;
       if (timestamp >= expiry) {
@@ -374,6 +392,7 @@ export class FeedPoster {
       const forward = expiryParams.forwardPrice ?? params.spot;
       await append(
         "forward",
+        `forward expiry=${expiry}`,
         this.addresses.forwardFeed,
         encodeForwardData({
           expiry,
@@ -385,6 +404,7 @@ export class FeedPoster {
       );
       await append(
         "rate",
+        `rate expiry=${expiry}`,
         this.addresses.rateFeed,
         encodeRateData({ expiry, rate: expiryParams.rate ?? toUnit("0.05"), confidence: conf }),
       );
@@ -397,32 +417,75 @@ export class FeedPoster {
         );
       await append(
         "vol",
+        `vol expiry=${expiry}`,
         this.addresses.volFeed,
         encodeVolData({ expiry, ...svi, confidence: conf }),
       );
     }
 
-    const hash = await this.transactionQueue.run(async () => {
-      const transactionHash = await this.walletClient.writeContract({
-        address: MULTICALL3,
-        abi: multicall3Abi,
-        functionName: "aggregate3",
-        args: [calls],
-        account: this.walletClient.account ?? this.signer,
-        chain: this.walletClient.chain ?? null,
+    const aggregateCalls = calls.map(({ target, callData }) => ({
+      target,
+      allowFailure: false,
+      callData,
+    }));
+    let hash: Hex;
+    try {
+      hash = await this.transactionQueue.run(async () => {
+        const transactionHash = await this.walletClient.writeContract({
+          address: MULTICALL3,
+          abi: multicall3Abi,
+          functionName: "aggregate3",
+          args: [aggregateCalls],
+          account: this.walletClient.account ?? this.signer,
+          chain: this.walletClient.chain ?? null,
+        });
+        const receipt = await this.publicClient.waitForTransactionReceipt({ hash: transactionHash });
+        if (receipt.status !== "success") {
+          throw new Error(`batched feed snapshot reverted (tx ${transactionHash})`);
+        }
+        return transactionHash;
       });
-      const receipt = await this.publicClient.waitForTransactionReceipt({ hash: transactionHash });
-      if (receipt.status !== "success") {
-        throw new Error(`batched feed snapshot reverted (tx ${transactionHash})`);
+    } catch (error) {
+      const failures = await this.diagnoseBatchedFailure(calls).catch(() => []);
+      if (failures.length > 0) {
+        throw new Error(`batched feed snapshot rejected: ${failures.join("; ")}`, { cause: error });
       }
-      return transactionHash;
-    });
+      throw error;
+    }
     log(
       `snapshot spot=${fmt(params.spot)} expiries=[${(params.expiries ?? [])
         .map((entry) => entry.expiry)
         .join(",")}] calls=${calls.length} tx=${hash}`,
     );
     return hash;
+  }
+
+  private async diagnoseBatchedFailure(
+    calls: { kind: FeedKind; label: string; target: Address; callData: Hex }[],
+  ): Promise<string[]> {
+    const { result } = await this.publicClient.simulateContract({
+      address: MULTICALL3,
+      abi: multicall3Abi,
+      functionName: "aggregate3",
+      args: [calls.map(({ target, callData }) => ({ target, allowFailure: true, callData }))],
+      account: this.walletClient.account ?? this.signer,
+    });
+    const failures: string[] = [];
+    result.forEach((entry, index) => {
+      if (entry.success) return;
+      const call = calls[index];
+      if (!call) return;
+      let reason = entry.returnData === "0x" ? "empty revert data" : entry.returnData.slice(0, 10);
+      if (entry.returnData !== "0x") {
+        try {
+          reason = decodeErrorResult({ abi: FEED_ABIS[call.kind], data: entry.returnData }).errorName;
+        } catch {
+          // Retain the selector when a dependency emits an error absent from its ABI.
+        }
+      }
+      failures.push(`${call.label} target=${call.target}: ${reason}`);
+    });
+    return failures;
   }
 
   async readSpot(): Promise<bigint> {

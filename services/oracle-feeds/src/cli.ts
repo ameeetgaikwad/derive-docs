@@ -31,11 +31,13 @@ import {
 } from "./priceSource.js";
 import { SettlementRunner, settlementAddressesFromDeployments } from "./settlement.js";
 import {
+  fetchHermesUpdates,
   pushPythUpdate,
   pushPythUpdates,
   pythAddressesFromDeployments,
   pythMarketsFromManifest,
   oracleSignerReadiness,
+  selectFreshPythMarkets,
   spotFeedAbi,
   type PythAddresses,
   type PythBatchAddresses,
@@ -320,6 +322,13 @@ async function cmdDaemon(args: Args): Promise<void> {
     throw new Error("Pyth updates cannot be disabled on chain 56");
   }
   let pythAddresses: PythBatchAddresses | null = null;
+  const pythSourceMaxAgeSec = BigInt(positiveInteger(
+    "PYTH_SOURCE_MAX_AGE_SEC",
+    process.env.PYTH_SOURCE_MAX_AGE_SEC ?? "45",
+  ));
+  if (pythSourceMaxAgeSec >= 60n) {
+    throw new Error("PYTH_SOURCE_MAX_AGE_SEC must remain below the adapter's 60-second staleness limit");
+  }
   if (!pythDisabled) {
     try {
       pythAddresses = pythMarketsFromManifest(chainId);
@@ -481,45 +490,51 @@ async function cmdDaemon(args: Args): Promise<void> {
     loops.push(
       runPeriodic("RWA signed feeds", feedIntervalSec, async () => {
         for (const runtime of rwaRuntimes) {
-          await runtime.index.sync();
-          const chainNow = await runtime.poster.chainNow();
-          const expirySet = buildOracleExpirySet({
-            nowSec: chainNow,
-            tradeable: rwaExpiries(expiryCount, Number(chainNow) * 1000).map(BigInt),
-            active: runtime.index.activeExpiries(chainNow),
-          });
-          if (expirySet.posting.length > maxExpiries) {
-            throw new Error(
-              `${runtime.market.id} needs ${expirySet.posting.length} expiries, ` +
-                `above ORACLE_MAX_EXPIRIES=${maxExpiries}`,
+          try {
+            await runtime.index.sync();
+            const chainNow = await runtime.poster.chainNow();
+            const expirySet = buildOracleExpirySet({
+              nowSec: chainNow,
+              tradeable: rwaExpiries(expiryCount, Number(chainNow) * 1000).map(BigInt),
+              active: runtime.index.activeExpiries(chainNow),
+            });
+            if (expirySet.posting.length > maxExpiries) {
+              throw new Error(
+                `${runtime.market.id} needs ${expirySet.posting.length} expiries, ` +
+                  `above ORACLE_MAX_EXPIRIES=${maxExpiries}`,
+              );
+            }
+            const [spot] = await publicClient.readContract({
+              address: runtime.market.contracts!.spotFeed,
+              abi: spotFeedAbi,
+              functionName: "getSpot",
+            });
+            let snapshot: SnapshotParams = {
+              spot,
+              expiries: expirySet.posting.map((expiry) => ({
+                expiry,
+                forwardPrice: spot,
+                iv: toUnit(runtime.volatility.toString()),
+                rate: toUnit(runtime.rate.toString()),
+              })),
+            };
+            snapshot = await attachSettlementAggregates(
+              snapshot,
+              chainNow,
+              runtime.twap,
+              allowLateTwapBackfill,
+            );
+            if (useBatch) await runtime.poster.postSnapshotBatched(snapshot);
+            else await runtime.poster.postSnapshot(snapshot);
+            console.log(
+              `[oracle-feeds] ${runtime.market.id} spot=${fromUnit(spot)} ` +
+                `iv=${runtime.volatility} expiries=[${expirySet.posting.join(",")}]`,
+            );
+          } catch (error) {
+            console.warn(
+              `[oracle-feeds] ${runtime.market.id} signed feeds skipped: ${conciseError(error)}`,
             );
           }
-          const [spot] = await publicClient.readContract({
-            address: runtime.market.contracts!.spotFeed,
-            abi: spotFeedAbi,
-            functionName: "getSpot",
-          });
-          let snapshot: SnapshotParams = {
-            spot,
-            expiries: expirySet.posting.map((expiry) => ({
-              expiry,
-              forwardPrice: spot,
-              iv: toUnit(runtime.volatility.toString()),
-              rate: toUnit(runtime.rate.toString()),
-            })),
-          };
-          snapshot = await attachSettlementAggregates(
-            snapshot,
-            chainNow,
-            runtime.twap,
-            allowLateTwapBackfill,
-          );
-          if (useBatch) await runtime.poster.postSnapshotBatched(snapshot);
-          else await runtime.poster.postSnapshot(snapshot);
-          console.log(
-            `[oracle-feeds] ${runtime.market.id} spot=${fromUnit(spot)} ` +
-              `iv=${runtime.volatility} expiries=[${expirySet.posting.join(",")}]`,
-          );
         }
       }),
     );
@@ -532,11 +547,30 @@ async function cmdDaemon(args: Args): Promise<void> {
   if (pythAddresses && pythWalletClient && pythAccount) {
     loops.push(
       runPeriodic("Pyth", intervalSec, async () => {
+        const block = await publicClient.getBlock();
+        const preview = await fetchHermesUpdates(
+          pythAddresses.markets.map((market) => market.priceId),
+          one(args, "hermes"),
+        );
+        const selection = selectFreshPythMarkets(
+          pythAddresses.markets,
+          preview.prices,
+          block.timestamp,
+          pythSourceMaxAgeSec,
+        );
+        if (selection.skipped.length > 0) {
+          console.warn(
+            `[oracle-feeds] skipping stale Pyth sources: ${selection.skipped.map((item) =>
+              `${item.marketId}(${item.age === null ? item.reason : `${item.age}s`})`
+            ).join(", ")}`,
+          );
+        }
+        if (selection.fresh.length === 0) throw new Error("no fresh Pyth sources available");
         await pushPythUpdates({
           publicClient,
           walletClient: pythWalletClient,
           account: pythAccount,
-          addresses: pythAddresses,
+          addresses: { ...pythAddresses, markets: selection.fresh },
           hermesUrl: one(args, "hermes"),
           transactionQueue: pythTransactionQueue,
         });
@@ -655,6 +689,15 @@ async function runPeriodic(
     const remainingMs = intervalSec * 1000 - (Date.now() - started);
     await new Promise((resolve) => setTimeout(resolve, Math.max(1_000, remainingMs)));
   }
+}
+
+function conciseError(error: unknown): string {
+  const candidate = error && typeof error === "object"
+    ? (error as { shortMessage?: unknown; message?: unknown }).shortMessage
+      ?? (error as { message?: unknown }).message
+    : error;
+  const normalized = String(candidate ?? "unknown error").replace(/\s+/g, " ").trim();
+  return normalized.length > 320 ? `${normalized.slice(0, 317)}...` : normalized;
 }
 
 function positiveInteger(name: string, raw: string): number {

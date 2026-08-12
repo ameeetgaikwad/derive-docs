@@ -31,6 +31,7 @@ export const DEPLOYMENTS_DIR = join(PROTOCOL_DIR, "deployments");
 export const TESTNET_MANIFEST_PATH = join(DEPLOYMENTS_DIR, "markets", "97.json");
 export const RWA_MOCKS_PATH = join(DEPLOYMENTS_DIR, "97-rwa-mocks.json");
 export const DEPLOYMENT_REPORT_PATH = join(DEPLOYMENTS_DIR, "97-rwa-report.json");
+export const ORACLE_ENV_PATH = join(ROOT, "services", "oracle-feeds", ".env");
 
 const ownerAbi = [{
   type: "function",
@@ -112,6 +113,7 @@ export function loadTestnetEnv(): void {
   setFallback("RPC_URL", "TESTNET_RPC_URL");
   setFallback("PRIVATE_KEY", "TESTNET_DEPLOYER_KEY");
   setFallback("FEED_SIGNER_KEY", "TESTNET_FEED_SIGNER_KEY");
+  if (existsSync(ORACLE_ENV_PATH)) process.loadEnvFile(ORACLE_ENV_PATH);
 }
 
 export function requireEnv(name: string): string {
@@ -316,10 +318,16 @@ export interface PythHealth {
   publishTime: bigint;
 }
 
-export async function readPythHealth(
+export interface PythBinding {
+  adapter: Address;
+  pyth: Address;
+  priceId: Hex;
+}
+
+export async function readPythBinding(
   client: PublicClient,
   market: MarketDefinition,
-): Promise<PythHealth> {
+): Promise<PythBinding> {
   if (!market.contracts || !market.pythPriceId) throw new Error(`${market.id} is not fully staged`);
   const adapter = market.collateral.scaledUi
     ? await client.readContract({
@@ -335,6 +343,14 @@ export async function readPythHealth(
   if (priceId.toLowerCase() !== market.pythPriceId.toLowerCase()) {
     throw new Error(`${market.id} Pyth price id does not match the manifest`);
   }
+  return { adapter, pyth, priceId };
+}
+
+export async function readPythHealth(
+  client: PublicClient,
+  market: MarketDefinition,
+): Promise<PythHealth> {
+  const { adapter, pyth, priceId } = await readPythBinding(client, market);
   const price = await client.readContract({
     address: pyth,
     abi: pythPriceAbi,

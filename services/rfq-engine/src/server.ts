@@ -59,6 +59,8 @@ export interface RfqEngineServerOptions {
   takerOpen?: boolean;
   /** RFQ creations allowed per IP per minute (REST + taker WS). 0 disables. */
   rfqRateLimitPerMin?: number;
+  /** Trust the first X-Forwarded-For value. Enable only when direct access is blocked. */
+  trustProxy?: boolean;
   /** WS ping interval; a connection missing a pong for one full interval is dropped. 0 disables. */
   heartbeatMs?: number;
   /** canonical registry returned by GET /markets */
@@ -114,6 +116,7 @@ export class RfqEngineServer {
   private readonly allowlist: Set<string> | null;
   private readonly takerOpen: boolean;
   private readonly rfqLimiter: RateLimiter;
+  private readonly trustProxy: boolean;
   private readonly heartbeatMs: number;
   private heartbeatTimer: NodeJS.Timeout | null = null;
   private readonly markets: MarketDefinition[];
@@ -129,6 +132,7 @@ export class RfqEngineServer {
         : null;
     this.takerOpen = opts.takerOpen ?? true;
     this.rfqLimiter = new RateLimiter(opts.rfqRateLimitPerMin ?? DEFAULT_RFQ_RATE_LIMIT_PER_MIN);
+    this.trustProxy = opts.trustProxy ?? false;
     this.heartbeatMs = opts.heartbeatMs ?? DEFAULT_HEARTBEAT_MS;
     this.markets = opts.markets ?? [];
     this.marketStatusProvider = opts.marketStatusProvider ?? (async (market) => marketStatus(market));
@@ -144,7 +148,7 @@ export class RfqEngineServer {
 
     this.httpServer.on("upgrade", (req, socket, head) => {
       const pathname = new URL(req.url ?? "/", "http://localhost").pathname;
-      const ip = req.socket.remoteAddress ?? "unknown";
+      const ip = this.clientIp(req);
       if (pathname === "/maker") {
         this.makerWss.handleUpgrade(req, socket, head, (ws) => this.onMakerConnect(ws));
       } else if (pathname === "/taker") {
@@ -213,6 +217,14 @@ export class RfqEngineServer {
     );
   }
 
+  private clientIp(req: IncomingMessage): string {
+    const remote = req.socket.remoteAddress ?? "unknown";
+    if (!this.trustProxy) return remote;
+    const forwarded = req.headers["x-forwarded-for"];
+    const value = Array.isArray(forwarded) ? forwarded[0] : forwarded;
+    return value?.split(",")[0]?.trim() || remote;
+  }
+
   /**
    * WS liveness: every heartbeatMs we ping each connection; one that hasn't
    * ponged (or sent anything) since the previous round is terminated.
@@ -271,7 +283,7 @@ export class RfqEngineServer {
       if (!this.takerOpen) {
         return sendJson(res, 403, { error: "rfq creation is disabled (TAKER_OPEN=false)" });
       }
-      const ip = req.socket.remoteAddress ?? "unknown";
+      const ip = this.clientIp(req);
       if (!this.rfqLimiter.allow(ip)) {
         return sendJson(res, 429, { error: "rate limit exceeded — slow down" });
       }

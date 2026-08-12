@@ -12,7 +12,10 @@ export interface MarketContracts {
   marketId: number;
   optionAsset: Address;
   baseAsset: Address;
+  /** Live pricing adapter consumed by the SRM and RFQ readiness checks. */
   spotFeed: Address;
+  /** Writable LyraSpotFeed paired with the signed forward feed. */
+  signedSpotFeed: Address;
   forwardFeed: Address;
   volFeed: Address;
   rateFeed: Address;

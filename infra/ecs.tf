@@ -153,12 +153,18 @@ resource "aws_ecs_task_definition" "oracle_feeds" {
       essential = true
       command   = var.oracle_feeds_command
 
-      environment = [
-        { name = "AWS_REGION", value = var.aws_region },
-        # KMS-backed feed signer. No private key anywhere.
-        { name = "FEED_SIGNER_KMS_KEY_ID", value = var.feed_signer_kms_alias },
-        { name = "FEED_SIGNER_KMS_REGION", value = var.aws_region },
-      ]
+      environment = concat(
+        [
+          { name = "AWS_REGION", value = var.aws_region },
+          # KMS-backed feed signer. No private key anywhere.
+          { name = "FEED_SIGNER_KMS_KEY_ID", value = var.feed_signer_kms_alias },
+          { name = "FEED_SIGNER_KMS_REGION", value = var.aws_region },
+        ],
+        [
+          for market, volatility in var.oracle_rwa_iv :
+          { name = "RWA_IV_${market}", value = volatility }
+        ],
+      )
 
       secrets = [
         { name = "CHAIN_ID", valueFrom = aws_ssm_parameter.chain_id.arn },

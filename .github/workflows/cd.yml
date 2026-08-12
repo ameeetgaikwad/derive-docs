@@ -124,20 +124,37 @@ jobs:
         env:
           SERVICE: ${{ matrix.service }}
         run: |
-          echo "Forcing new deployment of ${ECS_CLUSTER}/hedge-${SERVICE}"
-          aws ecs update-service \
-            --cluster "$ECS_CLUSTER" \
-            --service "hedge-${SERVICE}" \
-            --force-new-deployment \
-            --no-cli-pager
+          TARGETS=("hedge-${SERVICE}" "hedge-mainnet-staging-${SERVICE}")
+          : > /tmp/hedge-ecs-targets
+          for TARGET in "${TARGETS[@]}"; do
+            STATUS=$(aws ecs describe-services \
+              --cluster "$ECS_CLUSTER" \
+              --services "$TARGET" \
+              --query 'services[0].status' \
+              --output text)
+            if [ "$STATUS" != "ACTIVE" ]; then
+              echo "Skipping absent ECS service ${ECS_CLUSTER}/${TARGET}"
+              continue
+            fi
+            echo "Forcing new deployment of ${ECS_CLUSTER}/${TARGET}"
+            aws ecs update-service \
+              --cluster "$ECS_CLUSTER" \
+              --service "$TARGET" \
+              --force-new-deployment \
+              --no-cli-pager
+            echo "$TARGET" >> /tmp/hedge-ecs-targets
+          done
 
       - name: Wait for ECS service to stabilize
         if: matrix.service != 'maker-bot'
-        env:
-          SERVICE: ${{ matrix.service }}
         run: |
-          echo "Waiting for ${ECS_CLUSTER}/hedge-${SERVICE} to reach a steady state..."
+          mapfile -t TARGETS < /tmp/hedge-ecs-targets
+          if [ "${#TARGETS[@]}" -eq 0 ]; then
+            echo "No ECS services exist for this image yet."
+            exit 0
+          fi
+          echo "Waiting for ${ECS_CLUSTER}/${TARGETS[*]} to reach a steady state..."
           aws ecs wait services-stable \
             --cluster "$ECS_CLUSTER" \
-            --services "hedge-${SERVICE}"
-          echo "hedge-${SERVICE} is stable."
+            --services "${TARGETS[@]}"
+          echo "ECS services are stable: ${TARGETS[*]}"

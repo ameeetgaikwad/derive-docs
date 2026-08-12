@@ -12,7 +12,7 @@ import { getAppChain, type AppChain } from "@/lib/protocol/chain";
 import { rfqEngineUrl } from "@/lib/protocol/rfq-engine";
 
 export interface NetworkContext {
-  /** Active frontend chain. Mainnet is intentionally unavailable for now. */
+  /** Active frontend chain. Chain 56 is the isolated mainnet staging deployment. */
   chainId: EnabledAppChainId;
   isTestnet: boolean;
   chain: AppChain;

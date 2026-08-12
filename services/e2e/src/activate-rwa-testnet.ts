@@ -12,6 +12,7 @@ import {
   assertTestnetChain,
   loadTestnetEnv,
   makeTestnetClient,
+  readPythBinding,
   readPythHealth,
   readTestnetManifest,
   requireTestnetDeployments,
@@ -21,6 +22,7 @@ import {
 interface Options {
   market: RwaMarketId;
   confirm: boolean;
+  deferred: boolean;
   disable: boolean;
   help: boolean;
 }
@@ -28,11 +30,13 @@ interface Options {
 function parseOptions(argv: string[]): Options | { help: true } {
   let market: string | undefined;
   let confirm = false;
+  let deferred = false;
   let disable = false;
   let help = false;
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]!;
     if (arg === "--confirm") confirm = true;
+    else if (arg === "--deferred") deferred = true;
     else if (arg === "--disable") disable = true;
     else if (arg === "--help" || arg === "-h") help = true;
     else if (arg === "--market") {
@@ -45,7 +49,8 @@ function parseOptions(argv: string[]): Options | { help: true } {
     }
   }
   if (help) return { help: true };
-  return { market: requireRwaMarket(market), confirm, disable, help: false };
+  if (disable && deferred) throw new Error("--deferred cannot be combined with --disable");
+  return { market: requireRwaMarket(market), confirm, deferred, disable, help: false };
 }
 
 function usage(): void {
@@ -54,6 +59,7 @@ function usage(): void {
 Usage:
   pnpm activate:rwa:testnet --market XAU              # readiness check only
   pnpm activate:rwa:testnet --market XAU --confirm    # enable after checks
+  pnpm activate:rwa:testnet --market SPY --deferred --confirm
   pnpm activate:rwa:testnet --market XAU --disable --confirm
 
 Enable checks:
@@ -62,6 +68,10 @@ Enable checks:
   - the configured Pyth price is positive and fresh
   - the oracle feed signer has sufficient tBNB
   - RWA_IV_<MARKET> or RWA_CLOSES_<MARKET> is configured
+
+Deferred enable verifies the adapter binding, contracts, pricing configuration,
+and signer gas but permits the current Pyth price to be missing or stale. Runtime
+feed checks remain fail-closed until the oracle publishes a fresh price.
 
 This command changes the local canonical manifest only. Restart the oracle,
 RFQ engine, maker, and web deployment after enabling. Disabling is allowed
@@ -122,15 +132,29 @@ async function activate(): Promise<void> {
   await assertTestnetChain(client);
   await verifyMarket(client, deployments, market);
 
-  const health = await readPythHealth(client, market);
-  if (health.price <= 0n) throw new Error(`${options.market} Pyth price is not positive`);
-  const block = await client.getBlock();
-  const age = block.timestamp > health.publishTime ? block.timestamp - health.publishTime : 0n;
-  const maximumAge = maxPythAge();
-  if (health.publishTime === 0n || age > maximumAge) {
-    throw new Error(
-      `${options.market} Pyth price is stale (${age}s old; maximum ${maximumAge}s); push an update first`,
-    );
+  await readPythBinding(client, market);
+  let pythStatus: string;
+  if (options.deferred) {
+    try {
+      const health = await readPythHealth(client, market);
+      const block = await client.getBlock();
+      const age = block.timestamp > health.publishTime ? block.timestamp - health.publishTime : 0n;
+      pythStatus = `deferred pythAge=${age}s`;
+    } catch (error) {
+      pythStatus = `deferred pythUnavailable=${(error as Error).message.split("\n")[0]}`;
+    }
+  } else {
+    const health = await readPythHealth(client, market);
+    if (health.price <= 0n) throw new Error(`${options.market} Pyth price is not positive`);
+    const block = await client.getBlock();
+    const age = block.timestamp > health.publishTime ? block.timestamp - health.publishTime : 0n;
+    const maximumAge = maxPythAge();
+    if (health.publishTime === 0n || age > maximumAge) {
+      throw new Error(
+        `${options.market} Pyth price is stale (${age}s old; maximum ${maximumAge}s); push an update first`,
+      );
+    }
+    pythStatus = `pythAge=${age}s`;
   }
 
   const feedSigner = getDeployedAddress(deployments, "feedSigner");
@@ -143,12 +167,15 @@ async function activate(): Promise<void> {
   }
 
   console.log(
-    `[rwa-activate] readiness passed market=${options.market} pythAge=${age}s ` +
+    `[rwa-activate] readiness passed market=${options.market} ${pythStatus} ` +
       `feedSignerBalance=${formatEther(feedSignerBalance)} tBNB`,
   );
   if (!options.confirm) {
     console.log(`[rwa-activate] DRY RUN — ${options.market} remains ${market.enabled ? "enabled" : "disabled"}`);
-    console.log(`[rwa-activate] rerun with --market ${options.market} --confirm to enable it`);
+    console.log(
+      `[rwa-activate] rerun with --market ${options.market}` +
+        `${options.deferred ? " --deferred" : ""} --confirm to enable it`,
+    );
     return;
   }
   if (market.enabled) {
@@ -160,11 +187,14 @@ async function activate(): Promise<void> {
     setManifestMarketEnabled(manifest, options.market, true),
   );
   console.log(`[rwa-activate] ${options.market} enabled in markets/97.json`);
-  console.log("[rwa-activate] restart services, then run the live RFQ smoke test before enabling another market");
+  console.log(
+    options.deferred
+      ? "[rwa-activate] deferred market remains runtime-closed until fresh feeds arrive; restart services"
+      : "[rwa-activate] restart services, then run the live RFQ smoke test before enabling another market",
+  );
 }
 
 activate().catch((error) => {
   console.error(`[rwa-activate] FAILED: ${error instanceof Error ? error.message : String(error)}`);
   process.exitCode = 1;
 });
-

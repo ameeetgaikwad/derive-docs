@@ -133,7 +133,7 @@ contract DeployAll is MarketDeployerBase {
   LyraSettlementUtils internal settlementUtils;
   uint internal feeRecipientSubAccount;
 
-  function run() external {
+  function run() public virtual {
     uint deployerKey = vm.envOr("PRIVATE_KEY", ANVIL_KEY_0);
     deployer = vm.addr(deployerKey);
     feedSigner = vm.envOr("FEED_SIGNER", deployer);
@@ -176,7 +176,7 @@ contract DeployAll is MarketDeployerBase {
   }
 
   /// @dev mirrors lib/v2-core/scripts/deploy-core.s.sol (_deployCoreContracts + _setupCoreFunctions)
-  function _deployCore() internal {
+  function _deployCore() internal virtual {
     uint nonce = vm.getNonce(deployer);
 
     // nonce
@@ -242,7 +242,7 @@ contract DeployAll is MarketDeployerBase {
 
   /// @dev market deploy + SRM registration logic is shared with AddMarket.s.sol —
   ///      see MarketDeployerBase._deployAndRegisterMarket.
-  function _deployBtcMarket(MarketConfig memory cfg) internal {
+  function _deployBtcMarket(MarketConfig memory cfg) internal virtual {
     MarketDeployment memory m = _deployAndRegisterMarket(subAccounts, srm, srmViewer, btcb, cfg);
     btcSpotFeed = m.spotFeed;
     btcForwardFeed = m.forwardFeed;
@@ -339,9 +339,14 @@ contract DeployAll is MarketDeployerBase {
     string memory json = vm.serializeBytes32(k, "actionTypehash", matching.ACTION_TYPEHASH());
 
     // deployments/ dir is checked into the repo (.gitkeep) — pinned forge-std has no vm.createDir
-    string memory path =
-      string.concat(vm.projectRoot(), "/deployments/", vm.toString(block.chainid), ".json");
+    string memory path = _deploymentOutputPath();
     vm.writeFile(path, json);
     console2.log("Deployment addresses written to:", path);
+  }
+
+  /// @dev Override in versioned deployment entrypoints so a simulation cannot
+  ///      overwrite the canonical address record for an earlier deployment.
+  function _deploymentOutputPath() internal view virtual returns (string memory) {
+    return string.concat(vm.projectRoot(), "/deployments/", vm.toString(block.chainid), ".json");
   }
 }

@@ -1,12 +1,13 @@
 "use client";
 
 import { useAccount, useSwitchChain } from "wagmi";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { useNetwork } from "@/hooks/protocol/useNetwork";
 
 export function NetworkGuard() {
   const { chain, isConnected } = useAccount();
-  const { switchChain, isPending } = useSwitchChain();
+  const { switchChainAsync, isPending } = useSwitchChain();
   const { chainId: activeChainId, chain: activeChain } = useNetwork();
 
   if (!isConnected) return null;
@@ -21,7 +22,17 @@ export function NetworkGuard() {
           size="sm"
           variant="outline"
           disabled={isPending}
-          onClick={() => switchChain({ chainId: activeChainId })}
+          onClick={async () => {
+            try {
+              await switchChainAsync({ chainId: activeChainId });
+            } catch (error) {
+              toast.error(
+                error instanceof Error
+                  ? `Could not switch wallet: ${error.message}`
+                  : "Could not switch the connected wallet network",
+              );
+            }
+          }}
         >
           {isPending ? "Switching..." : "Switch Network"}
         </Button>

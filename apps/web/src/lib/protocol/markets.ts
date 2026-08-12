@@ -1,5 +1,5 @@
 import type { Address, Hex } from "viem";
-import markets56 from "../../../../../protocol/deployments/markets/56.json";
+import markets56 from "../../../../../protocol/deployments/staging/markets/56.json";
 import markets97 from "../../../../../protocol/deployments/markets/97.json";
 import type { AppChainId } from "@/stores/network";
 

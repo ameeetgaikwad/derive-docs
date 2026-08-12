@@ -9,6 +9,8 @@ import { useNetwork } from "@/hooks/protocol/useNetwork";
 import { TBNB_FAUCET_URL } from "@/lib/protocol/chain";
 
 function NetworkToggle() {
+  const { chainId, setChainId } = useNetwork();
+
   return (
     <div
       className="flex items-center rounded-md border-[0.5px] border-border bg-background p-0.5"
@@ -17,19 +19,28 @@ function NetworkToggle() {
     >
       <button
         type="button"
-        aria-pressed="true"
-        className="rounded bg-accent/15 px-2.5 py-1 text-xs font-semibold text-accent"
+        onClick={() => setChainId(97)}
+        aria-pressed={chainId === 97}
+        className={
+          chainId === 97
+            ? "rounded bg-accent/15 px-2.5 py-1 text-xs font-semibold text-accent"
+            : "rounded px-2.5 py-1 text-xs font-semibold text-muted-foreground"
+        }
       >
         Testnet
       </button>
       <button
         type="button"
-        disabled
-        aria-disabled="true"
-        title="Mainnet is not available yet"
-        className="cursor-not-allowed rounded px-2.5 py-1 text-xs font-semibold text-muted-foreground opacity-50"
+        onClick={() => setChainId(56)}
+        aria-pressed={chainId === 56}
+        title="Mainnet staging"
+        className={
+          chainId === 56
+            ? "rounded bg-accent/15 px-2.5 py-1 text-xs font-semibold text-accent"
+            : "rounded px-2.5 py-1 text-xs font-semibold text-muted-foreground"
+        }
       >
-        Mainnet
+        Mainnet staging
       </button>
     </div>
   );

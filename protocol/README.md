@@ -60,13 +60,26 @@ Activate one market only after pushing a fresh Pyth update and configuring its
 reference volatility input:
 
 ```sh
+pnpm bootstrap:rwa:testnet:plan # fetch and validate current Hermes prices only
+pnpm bootstrap:rwa:testnet      # batch-push XAU/SPY/NVDA and run readiness checks
 RWA_IV_XAU=0.20 pnpm activate:rwa:testnet --market XAU       # readiness only
 RWA_IV_XAU=0.20 pnpm activate:rwa:testnet --market XAU --confirm
+pnpm activate:rwa:testnet --market SPY --deferred --confirm  # enable fail-closed until feeds resume
 ```
+
+The bootstrap command never enables a market. It validates the three deployed
+adapters, uses one funded Pyth-pusher transaction for all three price IDs, checks
+freshness and signer gas afterward, and requires the oracle service environment
+to contain `RWA_IV_XAU`, `RWA_IV_SPY`, and `RWA_IV_NVDA` (or corresponding
+`RWA_CLOSES_*` histories). It refuses to spend gas when Hermes source data is
+stale; during a market-hours rollout, bootstrap one live market with
+`pnpm --filter @hedge/e2e bootstrap:rwa:testnet --market XAU --broadcast`.
 
 `--disable --confirm` is the fail-closed path and intentionally does not depend
 on RPC health. Restart the oracle, RFQ engine, maker, and web deployment after
-changing the manifest. SPCX remains undeployable until a reviewed SpaceX Pyth
+changing the manifest. `--deferred` skips only the one-time current-price check;
+contract wiring, signer gas, oracle configuration, and all runtime freshness
+checks still apply. SPCX remains undeployable until a reviewed SpaceX Pyth
 Core feed ID or a reviewed alternative adapter is available; never substitute
 another asset's feed ID.
 
