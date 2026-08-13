@@ -21,7 +21,8 @@ import { useCollateralBalance, useDepositCollateral } from "@/hooks/protocol/use
 import { usePositionMonitor } from "@/hooks/protocol/usePositionMonitor";
 import { useSellCall } from "@/hooks/protocol/useSellCall";
 import { explorerTxUrl } from "@/lib/protocol/deployments";
-import { fromUnit, toUnit } from "@/lib/protocol/units";
+import { assertRfqEngineChain } from "@/lib/protocol/rfq-engine";
+import { amountExceedsLimit, fromUnit, toUnit } from "@/lib/protocol/units";
 import { getSelectableMarkets, uiAmount18ToRaw18, type MarketId } from "@/lib/protocol/markets";
 import { cn } from "@/lib/utils";
 import { useCoveredCallStore } from "@/stores/covered-call";
@@ -78,7 +79,7 @@ export default function TargetComposer({
     NVDA: "1",
     SPCX: "1",
   });
-  const amount = amounts[selectedMarketId];
+  const storedAmount = amounts[selectedMarketId];
   const setAmount = useCallback((value: string) => {
     setAmounts((current) => ({ ...current, [selectedMarketId]: value }));
   }, [selectedMarketId]);
@@ -111,6 +112,9 @@ export default function TargetComposer({
   const { balances: subBalances, refetch: refetchPositions } =
     usePositionMonitor(subaccountId, selectedMarketId, multiplier);
   const { addTrade } = useCoveredCallStore();
+  const amount = amountExceedsLimit(storedAmount, market.maxSize)
+    ? market.maxSize
+    : storedAmount;
 
   const balance = walletCollateral + subBalances.collateral;
   const amountNumber = Math.max(0, Number.parseFloat(amount) || 0);
@@ -253,6 +257,12 @@ export default function TargetComposer({
       toast.error(`Enter the ${market.collateral.symbol} amount you want to cover`);
       return;
     }
+    if (amountExceedsLimit(amount, market.maxSize)) {
+      toast.error(
+        `Maximum order size for ${market.displayName} is ${market.maxSize} ${market.collateral.symbol}`,
+      );
+      return;
+    }
     if (amountNumber > balance) {
       toast.error(`Not enough ${market.collateral.symbol} for this covered call`);
       return;
@@ -271,6 +281,8 @@ export default function TargetComposer({
     setDoneInfo(null);
 
     try {
+      await assertRfqEngineChain(chainId);
+
       setSetupPhase("subaccount");
       const subId = await ensureSubaccount();
       setPreparedSubaccountId(subId);
@@ -304,8 +316,10 @@ export default function TargetComposer({
     }
   }, [
     address,
+    amount,
     amountNumber,
     balance,
+    chainId,
     currentOrder,
     depositCollateral,
     ensureSubaccount,
@@ -316,6 +330,8 @@ export default function TargetComposer({
     sellCall,
     subBalances.collateral,
     market.collateral.symbol,
+    market.displayName,
+    market.maxSize,
     multiplier,
     selectedMarketId,
   ]);
@@ -378,6 +394,7 @@ export default function TargetComposer({
       snapshot={displayOrder}
       amount={amount}
       balance={balance}
+      maxAmount={market.maxSize}
       isConnected={isConnected}
       amountLocked={controlsLocked}
       setupPhase={setupPhase}

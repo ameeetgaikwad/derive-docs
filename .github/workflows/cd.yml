@@ -9,7 +9,7 @@ on:
       services:
         description: "Comma-separated services to publish (rfq-engine,oracle-feeds,maker-bot)"
         required: false
-        default: "rfq-engine,oracle-feeds"
+        default: "rfq-engine,oracle-feeds,maker-bot"
 
 concurrency:
   group: cd-${{ github.ref }}
@@ -50,12 +50,11 @@ jobs:
       - name: Build service matrix
         id: matrix
         env:
-          # Push to main deploys both ECS services; workflow_dispatch may also
-          # publish maker-bot, whose runtime is operator-managed outside ECS.
+          # Push to main deploys every ECS-backed service.
           REQUESTED: ${{ github.event.inputs.services }}
         run: |
           if [ -z "$REQUESTED" ]; then
-            REQUESTED="rfq-engine,oracle-feeds"
+            REQUESTED="rfq-engine,oracle-feeds,maker-bot"
           fi
           # Turn "a,b, c" into a validated JSON array ["a","b","c"].
           JSON=$(printf '%s' "$REQUESTED" \
@@ -67,8 +66,7 @@ jobs:
           echo "Deploy targets: $JSON"
 
   # ---------------------------------------------------------------------------
-  # Build + push each service image to ECR. ECS-managed services are then
-  # rolled; maker-bot is image-publish-only for its external operator runtime.
+  # Build + push each service image to ECR. ECS-managed services are then rolled.
   # Context is the repo root; Dockerfile lives at services/<svc>/Dockerfile.
   # We push both :<sha> (immutable, auditable) and :latest (moving tag the ECS
   # task definition references) so `--force-new-deployment` picks up the image.
@@ -120,11 +118,14 @@ jobs:
           docker push "$IMAGE:latest"
 
       - name: Force new ECS deployment
-        if: matrix.service != 'maker-bot'
         env:
           SERVICE: ${{ matrix.service }}
         run: |
-          TARGETS=("hedge-${SERVICE}" "hedge-mainnet-staging-${SERVICE}")
+          if [ "$SERVICE" = "maker-bot" ]; then
+            TARGETS=("hedge-mainnet-staging-${SERVICE}")
+          else
+            TARGETS=("hedge-${SERVICE}" "hedge-mainnet-staging-${SERVICE}")
+          fi
           : > /tmp/hedge-ecs-targets
           for TARGET in "${TARGETS[@]}"; do
             STATUS=$(aws ecs describe-services \
@@ -146,7 +147,6 @@ jobs:
           done
 
       - name: Wait for ECS service to stabilize
-        if: matrix.service != 'maker-bot'
         run: |
           mapfile -t TARGETS < /tmp/hedge-ecs-targets
           if [ "${#TARGETS[@]}" -eq 0 ]; then

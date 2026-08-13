@@ -246,6 +246,7 @@ async function makeHarness(opts?: {
   });
   const server = new RfqEngineServer({
     engine,
+    chainId: CHAIN_ID,
     port: 0,
     makerAllowlist: opts?.makerAllowlist,
     heartbeatMs: opts?.heartbeatMs ?? 0,
@@ -274,6 +275,20 @@ async function openRfqViaRest(base: string): Promise<{ id: string }> {
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 // ---------------------------------------------------------------------------
+
+describe("service health", () => {
+  it("identifies the configured execution chain", async () => {
+    const h = await makeHarness();
+    const response = await fetch(`${h.base}/health`);
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      ok: true,
+      service: "rfq-engine",
+      chainId: CHAIN_ID,
+    });
+  });
+});
 
 describe("maker allowlist", () => {
   it("admits allowlisted makers and rejects others with close code 4003", async () => {
@@ -729,6 +744,7 @@ describe("taker gating", () => {
     });
     const server = new RfqEngineServer({
       engine,
+      chainId: CHAIN_ID,
       port: 0,
       heartbeatMs: 0,
       rfqRateLimitPerMin: 2,
@@ -752,7 +768,13 @@ describe("taker gating", () => {
     expect(third.status).toBe(429);
 
     // TAKER_OPEN=false -> 403 on every create
-    const closedServer = new RfqEngineServer({ engine, port: 0, heartbeatMs: 0, takerOpen: false });
+    const closedServer = new RfqEngineServer({
+      engine,
+      chainId: CHAIN_ID,
+      port: 0,
+      heartbeatMs: 0,
+      takerOpen: false,
+    });
     const { port: closedPort } = await closedServer.start();
     cleanups.push(() => closedServer.stop());
     const res = await fetch(`http://127.0.0.1:${closedPort}/rfq`, {
@@ -776,6 +798,7 @@ describe("taker gating", () => {
     });
     const server = new RfqEngineServer({
       engine,
+      chainId: CHAIN_ID,
       port: 0,
       heartbeatMs: 0,
       rfqRateLimitPerMin: 1,

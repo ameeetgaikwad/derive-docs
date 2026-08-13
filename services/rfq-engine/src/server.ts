@@ -49,6 +49,8 @@ interface TakerSession {
 
 export interface RfqEngineServerOptions {
   engine: AuctionEngine;
+  /** Chain this process is configured to execute against. Exposed by GET /health. */
+  chainId: number;
   /** 0 = ephemeral (tests) */
   port: number;
   /** listen address; default 127.0.0.1 — front with a TLS-terminating proxy in prod */
@@ -111,6 +113,7 @@ export class RfqEngineServer {
   private readonly makers = new Map<WebSocket, MakerSession>();
   private readonly takers = new Map<WebSocket, TakerSession>();
   private readonly engine: AuctionEngine;
+  private readonly chainId: number;
   private readonly port: number;
   private readonly host: string;
   private readonly allowlist: Set<string> | null;
@@ -124,6 +127,7 @@ export class RfqEngineServer {
 
   constructor(opts: RfqEngineServerOptions) {
     this.engine = opts.engine;
+    this.chainId = opts.chainId;
     this.port = opts.port;
     this.host = opts.host ?? "127.0.0.1";
     this.allowlist =
@@ -269,6 +273,7 @@ export class RfqEngineServer {
       return sendJson(res, 200, {
         ok: true,
         service: "rfq-engine",
+        chainId: this.chainId,
         markets: await Promise.all(this.markets.map((market) => this.marketStatusProvider(market))),
       });
     }

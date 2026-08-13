@@ -151,6 +151,7 @@ describe("covered-call order ticket", () => {
         snapshot={snapshot}
         amount="0.5"
         balance={0.25}
+        maxAmount="1"
         isConnected
         amountLocked={false}
         setupPhase="idle"
@@ -177,6 +178,42 @@ describe("covered-call order ticket", () => {
     expect(onAmountChange).toHaveBeenCalledWith("0.25");
   });
 
+  it("enforces the market maximum and clamps MAX to that limit", async () => {
+    const user = userEvent.setup();
+    const onAmountChange = vi.fn();
+    const onRequestQuote = vi.fn();
+    render(
+      <OrderTicket
+        snapshot={snapshot}
+        amount="0.010000000000000001"
+        balance={0.25}
+        maxAmount="0.01"
+        isConnected
+        amountLocked={false}
+        setupPhase="idle"
+        sellPhase="idle"
+        auction={null}
+        quote={null}
+        error={null}
+        doneInfo={null}
+        onAmountChange={onAmountChange}
+        onClose={vi.fn()}
+        onRequestQuote={onRequestQuote}
+        onAcceptQuote={vi.fn()}
+        onCreateAnother={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole("alert").textContent).toMatch(/maximum order size is 0\.01/i);
+    const quoteButton = screen.getByRole("button", { name: "Get live quote" });
+    expect((quoteButton as HTMLButtonElement).disabled).toBe(true);
+    await user.click(quoteButton);
+    expect(onRequestQuote).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole("button", { name: "MAX" }));
+    expect(onAmountChange).toHaveBeenCalledWith("0.01");
+  });
+
   it("shows a verified quote and requires an explicit acceptance action", async () => {
     const user = userEvent.setup();
     const onAcceptQuote = vi.fn();
@@ -185,6 +222,7 @@ describe("covered-call order ticket", () => {
         snapshot={snapshot}
         amount="0.5"
         balance={1}
+        maxAmount="1"
         isConnected
         amountLocked
         setupPhase="idle"
@@ -230,6 +268,7 @@ describe("covered-call order ticket", () => {
         snapshot={snapshot}
         amount="0.5"
         balance={1}
+        maxAmount="1"
         isConnected
         amountLocked={false}
         setupPhase="idle"
@@ -259,6 +298,7 @@ describe("covered-call order ticket", () => {
         snapshot={snapshot}
         amount="1"
         balance={2}
+        maxAmount="2"
         isConnected
         amountLocked={false}
         setupPhase="idle"

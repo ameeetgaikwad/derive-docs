@@ -44,6 +44,28 @@ variable "feed_signer_key_parameter_name" {
   }
 }
 
+variable "maker_private_key_parameter_name" {
+  description = "Existing SSM SecureString containing the staging maker private key. Terraform references its ARN but never reads its value."
+  type        = string
+  default     = "/hedge/maker_private_key"
+
+  validation {
+    condition     = startswith(var.maker_private_key_parameter_name, "/hedge/")
+    error_message = "maker_private_key_parameter_name must stay under /hedge/."
+  }
+}
+
+variable "maker_subaccount_id" {
+  description = "Existing chain-56 maker subaccount owned by the allowlisted maker EOA."
+  type        = string
+  default     = "4"
+
+  validation {
+    condition     = can(regex("^[1-9][0-9]*$", var.maker_subaccount_id))
+    error_message = "maker_subaccount_id must be a positive integer string."
+  }
+}
+
 variable "rpc_url" {
   description = "Private BNB mainnet JSON-RPC URL, stored in SSM as a SecureString."
   type        = string
@@ -100,6 +122,27 @@ variable "oracle_feeds_memory" {
   default = "512"
 }
 
+variable "oracle_discovery_from_block" {
+  description = "Chain-56 block where the staging SubAccounts contract was deployed; avoids historical-state discovery on pruned RPCs."
+  type        = string
+  default     = "115316790"
+
+  validation {
+    condition     = can(regex("^[1-9][0-9]*$", var.oracle_discovery_from_block))
+    error_message = "oracle_discovery_from_block must be a positive integer block number."
+  }
+}
+
+variable "maker_bot_cpu" {
+  type    = string
+  default = "256"
+}
+
+variable "maker_bot_memory" {
+  type    = string
+  default = "512"
+}
+
 variable "rfq_engine_desired_count" {
   description = "Start at zero; set to one after publishing and verifying the image."
   type        = number
@@ -119,6 +162,17 @@ variable "oracle_feeds_desired_count" {
   validation {
     condition     = contains([0, 1], var.oracle_feeds_desired_count)
     error_message = "oracle_feeds_desired_count must be 0 or 1."
+  }
+}
+
+variable "maker_bot_desired_count" {
+  description = "Start at zero; keep at one maximum because one maker key may have only one active quoting session."
+  type        = number
+  default     = 0
+
+  validation {
+    condition     = contains([0, 1], var.maker_bot_desired_count)
+    error_message = "maker_bot_desired_count must be 0 or 1."
   }
 }
 

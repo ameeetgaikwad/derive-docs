@@ -8,6 +8,12 @@ resource "aws_ssm_parameter" "rpc_url" {
   name  = "/hedge/mainnet-staging/rpc_url"
   type  = "SecureString"
   value = var.rpc_url
+
+  # Operators rotate/correct the staging RPC directly in SSM. Do not replace a
+  # working endpoint with the bootstrap value from an ignored local tfvars file.
+  lifecycle {
+    ignore_changes = [value]
+  }
 }
 
 resource "aws_cloudwatch_log_group" "rfq_engine" {
@@ -17,6 +23,11 @@ resource "aws_cloudwatch_log_group" "rfq_engine" {
 
 resource "aws_cloudwatch_log_group" "oracle_feeds" {
   name              = "/ecs/${local.name_prefix}/oracle-feeds"
+  retention_in_days = var.log_retention_days
+}
+
+resource "aws_cloudwatch_log_group" "maker_bot" {
+  name              = "/ecs/${local.name_prefix}/maker-bot"
   retention_in_days = var.log_retention_days
 }
 
@@ -158,6 +169,11 @@ resource "aws_ecs_task_definition" "oracle_feeds" {
         { name = "HEDGE_MARKETS_DIR", value = "/app/protocol/deployments/staging/markets" },
         { name = "ORACLE_STATE_PATH", value = "/var/lib/hedge/active-expiries.json" },
         { name = "ORACLE_TWAP_STATE_PATH", value = "/var/lib/hedge/settlement-twap.json" },
+        { name = "ORACLE_DISCOVERY_FROM_BLOCK", value = var.oracle_discovery_from_block },
+        { name = "STABLE_PRICE_SOURCE", value = "chainlink" },
+        { name = "STABLE_CHAINLINK_AGGREGATOR", value = "0xB97Ad0E74fa7d920791E90258A6E2085088b4320" },
+        { name = "STABLE_FEED_INTERVAL_SEC", value = "300" },
+        { name = "STABLE_CHAINLINK_MAX_STALE_SEC", value = "3600" },
       ]
 
       secrets = [
@@ -198,4 +214,72 @@ resource "aws_ecs_service" "oracle_feeds" {
   }
 
   depends_on = [aws_efs_mount_target.state]
+}
+
+resource "aws_ecs_task_definition" "maker_bot" {
+  family                   = "${local.name_prefix}-maker-bot"
+  requires_compatibilities = ["FARGATE"]
+  network_mode             = "awsvpc"
+  cpu                      = var.maker_bot_cpu
+  memory                   = var.maker_bot_memory
+  execution_role_arn       = data.aws_iam_role.execution.arn
+  task_role_arn            = data.aws_iam_role.task.arn
+
+  container_definitions = jsonencode([
+    {
+      name      = "maker-bot"
+      image     = "${local.ecr_registry}/hedge/maker-bot:${var.image_tag}"
+      essential = true
+
+      environment = [
+        { name = "AWS_REGION", value = var.aws_region },
+        { name = "SATS_DEPLOYMENTS_DIR", value = "/app/protocol/deployments/staging" },
+        { name = "HEDGE_MARKETS_DIR", value = "/app/protocol/deployments/staging/markets" },
+        { name = "RFQ_ENGINE_WS", value = "${local.rfq_engine_ws_scheme}://${aws_lb.rfq_engine.dns_name}/maker" },
+        { name = "MAKER_SUBACCOUNT_ID", value = var.maker_subaccount_id },
+        { name = "MAKER_BID_RATIO", value = "0.95" },
+        { name = "MAKER_ASK_RATIO", value = "1.05" },
+        { name = "MAKER_MAX_FEE", value = "0" },
+        { name = "QUOTE_TTL_SEC", value = "120" },
+        { name = "DERIBIT_VOL", value = "true" },
+      ]
+
+      secrets = [
+        { name = "CHAIN_ID", valueFrom = aws_ssm_parameter.chain_id.arn },
+        { name = "RPC_URL", valueFrom = aws_ssm_parameter.rpc_url.arn },
+        { name = "PRIVATE_KEY", valueFrom = local.maker_private_key_parameter_arn },
+      ]
+
+      logConfiguration = {
+        logDriver = "awslogs"
+        options = {
+          "awslogs-group"         = aws_cloudwatch_log_group.maker_bot.name
+          "awslogs-region"        = var.aws_region
+          "awslogs-stream-prefix" = "maker-bot"
+        }
+      }
+    },
+  ])
+}
+
+resource "aws_ecs_service" "maker_bot" {
+  name             = "${local.name_prefix}-maker-bot"
+  cluster          = data.aws_ecs_cluster.hedge.arn
+  task_definition  = aws_ecs_task_definition.maker_bot.arn
+  desired_count    = var.maker_bot_desired_count
+  launch_type      = "FARGATE"
+  platform_version = "1.4.0"
+
+  deployment_circuit_breaker {
+    enable   = true
+    rollback = true
+  }
+
+  network_configuration {
+    subnets          = data.aws_subnets.default.ids
+    security_groups  = [aws_security_group.maker_bot.id]
+    assign_public_ip = true
+  }
+
+  depends_on = [aws_lb_listener.http]
 }

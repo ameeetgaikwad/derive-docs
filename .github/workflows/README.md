@@ -34,15 +34,16 @@ CI/CD for the Hedge Turborepo monorepo (`Sats-Terminal/derive`).
   No static AWS access keys are stored in GitHub.
 - **Guard:** if `vars.AWS_DEPLOY_ROLE_ARN` is unset, the workflow logs a notice and
   skips the deploy job — it will not fail before the AWS infra exists.
-- **Matrix:** builds `rfq-engine` and `oracle-feeds` by default on push to `main`.
-  `workflow_dispatch` accepts a validated `services` input (comma-separated) to
-  pick either ECS service or `maker-bot`. The maker image is pushed to its ECR
-  repository, but its standalone operator runtime is not managed by ECS.
+- **Matrix:** builds `rfq-engine`, `oracle-feeds`, and `maker-bot` by default on
+  push to `main`. `workflow_dispatch` accepts a validated `services` input
+  (comma-separated) to select a subset.
 - For each service: `docker build -f services/<svc>/Dockerfile -t <ecr>/hedge/<svc>:<sha> .`
   (build context = repo root), then push both `:<sha>` and `:latest` to ECR. For
-  `rfq-engine` and `oracle-feeds`, CD also runs
+  `rfq-engine` and `oracle-feeds`, CD runs
   `aws ecs update-service --force-new-deployment` for both `hedge-<svc>` and,
   when present, `hedge-mainnet-staging-<svc>`. Missing service names are skipped.
+  For `maker-bot`, CD rolls only `hedge-mainnet-staging-maker-bot`; the existing
+  testnet maker remains pinned to its operator-selected task revision.
   The ECS **task definition should reference the `:latest` tag**; `--force-new-deployment`
   makes ECS re-pull it. `:<sha>` is pushed alongside for auditability / rollback.
 
@@ -76,6 +77,7 @@ No AWS access-key secrets are required — CD uses OIDC.
 | ECS service (oracle-feeds) | `hedge-oracle-feeds` |
 | ECS service (mainnet-staging rfq-engine) | `hedge-mainnet-staging-rfq-engine` |
 | ECS service (mainnet-staging oracle-feeds) | `hedge-mainnet-staging-oracle-feeds` |
+| ECS service (mainnet-staging maker-bot) | `hedge-mainnet-staging-maker-bot` |
 | ECR repository | `hedge/<svc>` (`rfq-engine`, `oracle-feeds`, or `maker-bot`) |
 | Full image URI | `985539774899.dkr.ecr.us-east-1.amazonaws.com/hedge/<svc>:{<sha>,latest}` |
 

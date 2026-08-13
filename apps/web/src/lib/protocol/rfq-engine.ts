@@ -16,18 +16,33 @@ const trimSlash = (u: string) => u.replace(/\/+$/, "");
 
 /**
  * rfq-engine base URL per network. Configure with
- * NEXT_PUBLIC_RFQ_ENGINE_URL_56 (mainnet) and NEXT_PUBLIC_RFQ_ENGINE_URL_97
- * (testnet). A legacy NEXT_PUBLIC_RFQ_ENGINE_URL is honoured as a fallback for
- * both. Defaults to localhost:3030 for local dev.
+ * NEXT_PUBLIC_RFQ_ENGINE_URL_56 (mainnet staging) and
+ * NEXT_PUBLIC_RFQ_ENGINE_URL_97 (testnet). Chain 56 deliberately has no
+ * fallback: sending a mainnet request to a testnet or local engine can strand
+ * real collateral after it has been deposited.
  */
 export function rfqEngineUrl(chainId: AppChainId = getActiveChainId()): string {
-  const perChain =
-    chainId === 56
-      ? process.env.NEXT_PUBLIC_RFQ_ENGINE_URL_56
-      : process.env.NEXT_PUBLIC_RFQ_ENGINE_URL_97;
+  if (chainId === 56) {
+    const url = process.env.NEXT_PUBLIC_RFQ_ENGINE_URL_56?.trim();
+    if (!url) {
+      throw new Error(
+        "Mainnet staging is unavailable: NEXT_PUBLIC_RFQ_ENGINE_URL_56 is not configured",
+      );
+    }
+    return trimSlash(url);
+  }
+
   const url =
-    perChain ?? process.env.NEXT_PUBLIC_RFQ_ENGINE_URL ?? "http://localhost:3030";
+    process.env.NEXT_PUBLIC_RFQ_ENGINE_URL_97 ??
+    process.env.NEXT_PUBLIC_RFQ_ENGINE_URL ??
+    "http://localhost:3030";
   return trimSlash(url);
+}
+
+export interface RfqEngineHealth {
+  ok: boolean;
+  service: string;
+  chainId: number;
 }
 
 export type RfqStatus =
@@ -223,9 +238,32 @@ export async function rfqEngineHealthy(
   chainId: AppChainId = getActiveChainId(),
 ): Promise<boolean> {
   try {
-    await request<{ ok: boolean }>(rfqEngineUrl(chainId), "/health");
+    await assertRfqEngineChain(chainId);
     return true;
   } catch {
     return false;
+  }
+}
+
+/**
+ * Fail closed before any wallet or collateral operation if the configured RFQ
+ * endpoint is not the service for the selected chain.
+ */
+export async function assertRfqEngineChain(
+  chainId: AppChainId = getActiveChainId(),
+): Promise<void> {
+  const baseUrl = rfqEngineUrl(chainId);
+  const health = await request<RfqEngineHealth>(baseUrl, "/health");
+  if (
+    health.ok !== true ||
+    health.service !== "rfq-engine" ||
+    health.chainId !== chainId
+  ) {
+    const reportedChain = Number.isInteger(health.chainId)
+      ? health.chainId.toString()
+      : "unknown";
+    throw new Error(
+      `RFQ endpoint ${baseUrl} reports chain ${reportedChain}; expected chain ${chainId}. Refusing to move collateral.`,
+    );
   }
 }
