@@ -70,9 +70,9 @@ const preparedQuote = {
 };
 
 const history = [
-  { time: 1, value: 67_500 },
-  { time: 2, value: 69_000 },
-  { time: 3, value: 70_000 },
+  { time: Date.UTC(2027, 0, 13) / 1_000, value: 67_500 },
+  { time: Date.UTC(2027, 0, 14) / 1_000, value: 69_000 },
+  { time: Date.UTC(2027, 0, 15) / 1_000, value: 68_000 },
 ];
 
 function renderConfigurator(overrides: Partial<Parameters<typeof TradeConfigurator>[0]> = {}) {
@@ -140,7 +140,44 @@ describe("covered-call terms surface", () => {
 
     await user.click(screen.getByRole("button", { name: /\$80,000/i }));
     expect(props.onStrikeSelect).toHaveBeenCalledWith(80_000);
-    expect(screen.getByRole("img", { name: /Bitcoin 30-day price history/i })).toBeTruthy();
+    expect(screen.getByRole("slider", { name: /Bitcoin 30-day price history/i })).toBeTruthy();
+  });
+
+  it("reveals the nearest dated price while the chart is inspected", () => {
+    renderConfigurator();
+    const chart = screen.getByRole("slider", { name: /Bitcoin 30-day price history/i });
+    vi.spyOn(chart, "getBoundingClientRect").mockReturnValue({
+      left: 0,
+      width: 720,
+    } as DOMRect);
+
+    fireEvent.pointerMove(chart, { clientX: 360 });
+    expect(screen.getByText("Jan 14, 2027")).toBeTruthy();
+    expect(screen.getByText("$69,000.00")).toBeTruthy();
+
+    fireEvent.pointerMove(chart, { clientX: 720 });
+    const latestTooltipLabel = screen.getByText("Now");
+    expect(latestTooltipLabel.parentElement?.textContent).toContain("$70,000.00");
+    expect(chart.getAttribute("aria-valuetext")).toBe("Now, $70,000.00");
+  });
+
+  it("supports keyboard inspection across the chart history", () => {
+    renderConfigurator();
+    const chart = screen.getByRole("slider", { name: /Bitcoin 30-day price history/i });
+
+    fireEvent.focus(chart);
+    fireEvent.keyDown(chart, { key: "ArrowLeft" });
+    expect(chart.getAttribute("aria-valuetext")).toBe("Jan 14, 2027, $69,000.00");
+
+    fireEvent.keyDown(chart, { key: "Home" });
+    fireEvent.keyDown(chart, { key: "ArrowLeft" });
+    expect(chart.getAttribute("aria-valuenow")).toBe("0");
+    expect(chart.getAttribute("aria-valuetext")).toBe("Jan 13, 2027, $67,500.00");
+
+    fireEvent.keyDown(chart, { key: "End" });
+    fireEvent.keyDown(chart, { key: "ArrowRight" });
+    expect(chart.getAttribute("aria-valuenow")).toBe("2");
+    expect(chart.getAttribute("aria-valuetext")).toBe("Now, $70,000.00");
   });
 
   it("shows amount-scaled premiums and returns side by side instead of hiding contracts behind a slider", () => {
