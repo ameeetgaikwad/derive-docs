@@ -40,4 +40,6 @@ locals {
   ecr_registry                       = "${data.aws_caller_identity.current.account_id}.dkr.ecr.${var.aws_region}.amazonaws.com"
   executor_private_key_parameter_arn = "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter${var.executor_private_key_parameter_name}"
   feed_signer_key_parameter_arn      = "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter${var.feed_signer_key_parameter_name}"
+  maker_private_key_parameter_arn    = "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter${var.maker_private_key_parameter_name}"
+  rfq_engine_ws_scheme               = var.certificate_arn == null ? "ws" : "wss"
 }

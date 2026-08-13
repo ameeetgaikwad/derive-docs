@@ -1,5 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { getRfq } from "../rfq-engine";
+import {
+  assertRfqEngineChain,
+  getRfq,
+  rfqEngineUrl,
+} from "../rfq-engine";
 
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -25,5 +29,47 @@ describe("RFQ engine network routing", () => {
       "https://main-rfq.example/rfq/main-auction",
       "https://test-rfq.example/rfq/test-auction",
     ]);
+  });
+
+  it("requires an explicit chain-56 endpoint instead of using a legacy fallback", () => {
+    vi.stubEnv("NEXT_PUBLIC_RFQ_ENGINE_URL_56", "");
+    vi.stubEnv("NEXT_PUBLIC_RFQ_ENGINE_URL", "https://test-only.example");
+
+    expect(() => rfqEngineUrl(56)).toThrow(/NEXT_PUBLIC_RFQ_ENGINE_URL_56/);
+    expect(rfqEngineUrl(97)).toBe("https://test-only.example");
+  });
+
+  it("verifies that health reports the selected chain", async () => {
+    vi.stubEnv("NEXT_PUBLIC_RFQ_ENGINE_URL_56", "https://main-rfq.example");
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({ ok: true, service: "rfq-engine", chainId: 56 }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(assertRfqEngineChain(56)).resolves.toBeUndefined();
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://main-rfq.example/health",
+      expect.objectContaining({ headers: expect.any(Object) }),
+    );
+  });
+
+  it("rejects an RFQ endpoint configured for a different chain", async () => {
+    vi.stubEnv("NEXT_PUBLIC_RFQ_ENGINE_URL_56", "https://wrong-rfq.example");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({ ok: true, service: "rfq-engine", chainId: 97 }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+      ),
+    );
+
+    await expect(assertRfqEngineChain(56)).rejects.toThrow(
+      /reports chain 97; expected chain 56.*Refusing to move collateral/,
+    );
   });
 });

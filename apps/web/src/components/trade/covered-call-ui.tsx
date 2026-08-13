@@ -36,6 +36,7 @@ import {
   calculateCoveredCallScenario,
   scenarioRange,
 } from "@/lib/protocol/covered-call-scenario";
+import { amountExceedsLimit } from "@/lib/protocol/units";
 import { cn } from "@/lib/utils";
 import type { AppMarket, MarketId } from "@/lib/protocol/markets";
 
@@ -386,6 +387,7 @@ export function OrderTicket({
   snapshot,
   amount,
   balance,
+  maxAmount,
   isConnected,
   amountLocked,
   setupPhase,
@@ -403,6 +405,7 @@ export function OrderTicket({
   snapshot: OrderSnapshot;
   amount: string;
   balance: number;
+  maxAmount: string;
   isConnected: boolean;
   amountLocked: boolean;
   setupPhase: SetupPhase;
@@ -429,6 +432,7 @@ export function OrderTicket({
       : null;
   const displayPremium = executableQuote?.totalPremium ?? indicativeTotal;
   const insufficient = isConnected && amountNumber > balance;
+  const exceedsMaximum = amountExceedsLimit(amount || "0", maxAmount);
   const busy =
     setupPhase !== "idle" ||
     ["requesting", "auction", "signing", "executing"].includes(sellPhase);
@@ -471,6 +475,7 @@ export function OrderTicket({
     isConnected,
     amountNumber,
     insufficient,
+    exceedsMaximum,
     setupPhase,
     sellPhase,
     done: doneInfo !== null,
@@ -536,14 +541,20 @@ export function OrderTicket({
               value={amount}
               onChange={onAmountChange}
               prefix=""
-              hasError={insufficient}
+              hasError={insufficient || exceedsMaximum}
               subtitle={`Available ${balance.toLocaleString("en-US", { maximumFractionDigits: 6 })} ${collateralSymbol}`}
               trailing={
                 <div className="flex shrink-0 items-center gap-2">
                   <button
                     type="button"
                     disabled={amountLocked || balance <= 0}
-                    onClick={() => onAmountChange(balance.toString())}
+                    onClick={() =>
+                      onAmountChange(
+                        Math.min(balance, Number.parseFloat(maxAmount))
+                          .toFixed(18)
+                          .replace(/\.?0+$/, ""),
+                      )
+                    }
                     className="min-h-11 rounded-[5px] border-[0.5px] border-zinc-200 px-3 font-mono text-xs text-zinc-600 hover:border-orange-400 hover:text-orange-600 disabled:opacity-40"
                   >
                     MAX
@@ -559,6 +570,12 @@ export function OrderTicket({
           {insufficient && (
             <Text role="alert" variant="terminal-small" className="text-red-600">
               Enter an amount no greater than your available {collateralSymbol} balance.
+            </Text>
+          )}
+
+          {!insufficient && exceedsMaximum && (
+            <Text role="alert" variant="terminal-small" className="text-red-600">
+              Maximum order size is {maxAmount} {collateralSymbol}.
             </Text>
           )}
 
@@ -692,6 +709,7 @@ function primaryAction({
   isConnected,
   amountNumber,
   insufficient,
+  exceedsMaximum,
   setupPhase,
   sellPhase,
   done,
@@ -700,6 +718,7 @@ function primaryAction({
   isConnected: boolean;
   amountNumber: number;
   insufficient: boolean;
+  exceedsMaximum: boolean;
   setupPhase: SetupPhase;
   sellPhase: SellPhase;
   done: boolean;
@@ -718,7 +737,7 @@ function primaryAction({
   if (sellPhase === "error") return { label: "Try again", disabled: false };
   return {
     label: "Get live quote",
-    disabled: amountNumber <= 0 || insufficient,
+    disabled: amountNumber <= 0 || insufficient || exceedsMaximum,
   };
 }
 

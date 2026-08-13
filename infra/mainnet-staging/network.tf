@@ -75,6 +75,20 @@ resource "aws_security_group" "oracle_feeds" {
   }
 }
 
+resource "aws_security_group" "maker_bot" {
+  name        = "${local.name_prefix}-maker-bot"
+  description = "Mainnet-staging maker bot Fargate tasks"
+  vpc_id      = data.aws_vpc.default.id
+
+  egress {
+    description = "All outbound"
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+}
+
 resource "aws_security_group" "efs" {
   name        = "${local.name_prefix}-efs"
   description = "NFS from mainnet-staging Fargate tasks"

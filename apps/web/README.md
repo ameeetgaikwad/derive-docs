@@ -24,11 +24,14 @@ NEXT_PUBLIC_BSC_TESTNET_RPC_URL=https://bsc-testnet.bnbchain.org
 NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID=...
 ```
 
-`NEXT_PUBLIC_RFQ_ENGINE_URL` is supported as a legacy fallback. Never put a
-private key, authenticated RPC URL, or other secret in this app or in any
-`NEXT_PUBLIC_*` variable. Both RFQ services may listen on `3030` when deployed
-to different servers; when running both locally, give one a different port and
-set its chain-specific URL accordingly.
+`NEXT_PUBLIC_RFQ_ENGINE_URL_56` is mandatory whenever chain 56 is exposed, and
+the web app verifies that its `/health` response reports chain ID 56 before any
+subaccount or deposit transaction. `NEXT_PUBLIC_RFQ_ENGINE_URL` remains a
+legacy fallback for testnet only. Never put a private key, authenticated RPC
+URL, or other secret in this app or in any `NEXT_PUBLIC_*` variable. Both RFQ
+services may listen on `3030` when deployed to different servers; when running
+both locally, give one a different port and set its chain-specific URL
+accordingly.
 
 ## Checks
 

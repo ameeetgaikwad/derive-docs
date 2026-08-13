@@ -12,6 +12,7 @@ maker_allowlist = [
 certificate_arn = null
 
 # First apply at zero. Set both to one only after publishing the image,
-# verifying KMS identities/funding, and stopping the local chain-56 oracle.
+# verifying staging signer identities/funding, and stopping the local chain-56 oracle.
 rfq_engine_desired_count   = 0
 oracle_feeds_desired_count = 0
+maker_bot_desired_count    = 0

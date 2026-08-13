@@ -19,6 +19,14 @@ export function toUnit(value: string | number): bigint {
   return toTokenAmount(typeof value === "number" ? value.toString() : value, 18);
 }
 
+/** Exact 18dp comparison for user-entered decimal amounts. */
+export function amountExceedsLimit(
+  value: string,
+  limit: string,
+): boolean {
+  return toUnit(value) > toUnit(limit);
+}
+
 /** 18dp bigint -> decimal string. */
 export function fromUnit(value: bigint, decimals = 18): string {
   const negative = value < 0n;

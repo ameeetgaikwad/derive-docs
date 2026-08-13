@@ -223,7 +223,7 @@ describe("rfq auction over WS + REST", () => {
       optionAssets: { BTC: OPTION_ASSET },
       auctionWindowMs: AUCTION_WINDOW_MS,
     });
-    server = new RfqEngineServer({ engine, port: 0 });
+    server = new RfqEngineServer({ engine, chainId: CHAIN_ID, port: 0 });
     ({ port } = await server.start());
     base = `http://127.0.0.1:${port}`;
   });

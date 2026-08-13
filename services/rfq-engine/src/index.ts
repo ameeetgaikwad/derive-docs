@@ -82,6 +82,7 @@ async function main(): Promise<void> {
 
   const server = new RfqEngineServer({
     engine,
+    chainId: config.chainId,
     host: config.host,
     port: config.port,
     makerAllowlist: config.makerAllowlist,

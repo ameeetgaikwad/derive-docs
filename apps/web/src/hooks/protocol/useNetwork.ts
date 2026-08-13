@@ -9,7 +9,6 @@ import {
   type ChainAddresses,
 } from "@/lib/protocol/deployments";
 import { getAppChain, type AppChain } from "@/lib/protocol/chain";
-import { rfqEngineUrl } from "@/lib/protocol/rfq-engine";
 
 export interface NetworkContext {
   /** Active frontend chain. Chain 56 is the isolated mainnet staging deployment. */
@@ -20,14 +19,13 @@ export interface NetworkContext {
   explorerUrl: string;
   domainSeparator: `0x${string}`;
   actionTypehash: `0x${string}`;
-  rfqEngineUrl: string;
   setChainId: (chainId: EnabledAppChainId) => void;
 }
 
 /**
  * Reactive access to the active protocol network. Re-renders consumers when
  * the enabled network changes. Returns the deployment addresses, explorer,
- * rfq-engine URL and viem chain for the active network.
+ * and viem chain for the active network.
  */
 export function useNetwork(): NetworkContext {
   const chainId = useNetworkStore((s) => s.chainId);
@@ -41,7 +39,6 @@ export function useNetwork(): NetworkContext {
     explorerUrl: getExplorerUrl(chainId),
     domainSeparator: getExpectedDomainSeparator(chainId),
     actionTypehash: getExpectedActionTypehash(chainId),
-    rfqEngineUrl: rfqEngineUrl(chainId),
     setChainId,
   };
 }
