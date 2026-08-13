@@ -18,22 +18,27 @@ const faqs = [
   {
     question: 'How does selling BTC higher work?',
     answer:
-      'You commit only the BTCB slice you want to cover. The BTCB remains held in the subaccount; if BTC settles above the strike, gains above it are offset through USDT cash settlement. Below the strike, you keep the BTCB and premium.',
+      'You cover a chosen BTCB amount. Below the strike, you keep that BTCB and the premium after fees. Above it, the subaccount owes (settlement minus strike) times the covered amount in USDT; a cash shortfall becomes borrowing against BTCB.',
   },
   {
     question: 'Where does the premium come from?',
     answer:
-      'The app opens a short RFQ auction with connected market makers. The displayed board price is indicative; the executable premium comes from the winning signed quote.',
+      'The app opens a short RFQ auction with connected market makers. Board prices are indicative; the winning signed quote sets the executable gross premium. Hedge shows the live protocol OI-fee estimate and expected net cash change before signing.',
   },
   {
     question: 'Can I lose my whole BTC stack?',
     answer:
-      'The covered call only applies to the BTCB amount deposited into the target account. Anything outside that slice remains outside the position, while gains above the strike on the covered slice are offset through USDT settlement.',
+      'BTC downside remains, and an above-strike cash obligation can borrow against BTCB held in the covered-call subaccount. BTCB left in your wallet is not deposited automatically. Review the amount, net economics, and both settlement outcomes before signing.',
+  },
+  {
+    question: 'Can I exit before expiry?',
+    answer:
+      'Not in the current version. A covered call runs to its listed expiry, so choose the date and strike assuming the position stays open until settlement.',
   },
   {
     question: 'Is this just a limit order?',
     answer:
-      'It can feel similar because you choose a sell price, but a covered call has an expiry and an upfront premium. The composer shows both settlement outcomes before you sign.',
+      'It can feel similar because you choose a sell price, but a covered call has an expiry and an upfront premium. The market view shows both settlement outcomes before you sign.',
   },
 ] as const
 
@@ -55,7 +60,7 @@ export function Faq({ t }: { t: (value: string) => string }) {
           size="sm"
           className="mt-[35px] tracking-[0.05em] uppercase"
         >
-          <Link href="#composer">{t('Try the composer')}</Link>
+          <Link href="/app">{t('Open the market')}</Link>
         </Button>
       </div>
       <AnimatedFaqList items={translatedFaqs} />

@@ -7,6 +7,8 @@ import { cn } from "@/lib/utils";
 type CurrencyFieldContextValue = {
   size: "large" | "medium";
   mutedLabel?: boolean;
+  inputId: string;
+  subtitleId: string;
 };
 
 const CurrencyFieldContext =
@@ -26,8 +28,12 @@ type RootProps = React.ComponentProps<"div"> & {
 };
 
 function Root({ size = "large", mutedLabel, className, ...props }: RootProps) {
+  const generatedId = React.useId();
+  const inputId = `${generatedId}-input`;
+  const subtitleId = `${generatedId}-subtitle`;
+
   return (
-    <CurrencyFieldContext.Provider value={{ size, mutedLabel }}>
+    <CurrencyFieldContext.Provider value={{ size, mutedLabel, inputId, subtitleId }}>
       <div
         data-slot="currency-field"
         className={cn("flex w-full flex-col gap-2.5", className)}
@@ -44,19 +50,22 @@ function Label({
   className?: string;
   children: React.ReactNode;
 }) {
-  const { size, mutedLabel } = useCurrencyFieldContext();
+  const { size, mutedLabel, inputId } = useCurrencyFieldContext();
   const isLarge = size === "large";
   return (
-    <Text
-      variant={isLarge ? "subheading-1" : "body-large"}
+    <label
+      htmlFor={inputId}
       className={cn(
+        isLarge
+          ? "text-lg font-medium leading-8 sm:text-xl"
+          : "text-base font-medium leading-7 sm:text-lg",
         isLarge && !mutedLabel ? "text-zinc-800" : "text-muted-foreground",
         "max-w-[90%]",
         className
       )}
     >
       {children}
-    </Text>
+    </label>
   );
 }
 
@@ -83,7 +92,7 @@ function Control({
   trailing,
   inputMode = "decimal",
 }: ControlProps) {
-  const { size } = useCurrencyFieldContext();
+  const { size, inputId, subtitleId } = useCurrencyFieldContext();
   const isEmpty = !value;
   const isLarge = size === "large";
   const textColorClass = hasError
@@ -107,8 +116,11 @@ function Control({
             </span>
           )}
           <input
+            id={inputId}
             disabled={disabled}
             inputMode={inputMode}
+            aria-invalid={hasError || undefined}
+            aria-describedby={subtitle ? subtitleId : undefined}
             placeholder={placeholder ?? "0"}
             value={value}
             onChange={(event) => onChange(event.target.value)}
@@ -122,6 +134,7 @@ function Control({
         </div>
         {subtitle ? (
           <Text
+            id={subtitleId}
             variant="body-default"
             className="shrink-0 whitespace-nowrap text-nowrap italic text-zinc-400"
           >

@@ -36,6 +36,7 @@ export interface ChainAddresses {
   rfqModule: Address;
   subAccounts: Address;
   standardManager: Address;
+  srmViewer: Address;
   cashAsset: Address;
   btcOptionAsset: Address;
   btcBaseAsset: Address;
@@ -60,6 +61,7 @@ function toAddresses(d: RawDeployment): ChainAddresses {
     rfqModule: rec.rfqModule as Address,
     subAccounts: rec.subAccounts as Address,
     standardManager: rec.standardManager as Address,
+    srmViewer: rec.srmViewer as Address,
     cashAsset: rec.cashAsset as Address,
     btcOptionAsset: rec.btcOptionAsset as Address,
     btcBaseAsset: rec.btcBaseAsset as Address,

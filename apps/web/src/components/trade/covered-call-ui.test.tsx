@@ -1,13 +1,12 @@
 // @vitest-environment jsdom
 
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 import {
-  ContractBrowser,
-  MobileOrderSheet,
+  MarketSelector,
   OrderTicket,
+  TradeConfigurator,
   type OrderSnapshot,
 } from "./covered-call-ui";
 import type { StrikeOption } from "@/hooks/protocol/useAvailableStrikes";
@@ -26,7 +25,19 @@ const strike: StrikeOption = {
   premium: 1_000,
   apr: 18.4,
   vol: 0.6,
+  forwardPrice: 70_250,
   usedFallback: false,
+};
+
+const otherStrike: StrikeOption = {
+  ...strike,
+  strike: 80_000,
+  strike18: 80_000n * 10n ** 18n,
+  subId: 2n,
+  instrumentName: "BTC-20270115-80000-C",
+  otmPercent: 14.3,
+  premium: 500,
+  apr: 9.2,
 };
 
 const snapshot: OrderSnapshot = {
@@ -35,341 +46,249 @@ const snapshot: OrderSnapshot = {
   expiryLabel: "Jan 15, 2027",
   spotPrice: 70_000,
   indicativeTotalPremium: 500,
+  estimatedOiFee: 35,
 };
 
-describe("covered-call contract browser", () => {
+const preparedQuote = {
+  rfqId: "rfq-1",
+  chainId: 97 as const,
+  instrumentName: strike.instrumentName,
+  expiry: strike.expiry,
+  strike: strike.strike,
+  amount: "0.5",
+  marketId: "BTC" as const,
+  rawAmount: "0.5",
+  tokenDecimals: 18,
+  uiMultiplier: null,
+  optionAsset: "0x2222222222222222222222222222222222222222" as const,
+  spot: 70_000,
+  indicativePremium: 1_000,
+  quoteCount: 3,
+  premium: 1_050,
+  totalPremium: 525,
+  acceptBy: Date.now() + 30_000,
+};
+
+const history = [
+  { time: 1, value: 67_500 },
+  { time: 2, value: 69_000 },
+  { time: 3, value: 70_000 },
+];
+
+function renderConfigurator(overrides: Partial<Parameters<typeof TradeConfigurator>[0]> = {}) {
+  const props: Parameters<typeof TradeConfigurator>[0] = {
+    expiries: [
+      { epoch: expiryOne, label: "Jan 15, 2027" },
+      { epoch: expiryTwo, label: "Jan 22, 2027" },
+    ],
+    activeExpiry: expiryOne,
+    strikes: [strike, otherStrike],
+    selectedStrike: strike.strike,
+    spotPrice: 70_000,
+    history,
+    historyState: "ready",
+    isLoading: false,
+    disabled: false,
+    coveredAmount: 0.5,
+    onExpiryChange: vi.fn(),
+    onStrikeSelect: vi.fn(),
+    ...overrides,
+  };
+  render(<TradeConfigurator {...props} />);
+  return props;
+}
+
+describe("covered-call terms surface", () => {
   it("switches assets and exposes staged markets without inventing prices", async () => {
     const user = userEvent.setup();
     const onMarketChange = vi.fn();
+    const markets = [
+      { id: "BTC", displayName: "Bitcoin", kind: "crypto", enabled: true, collateral: { symbol: "BTCB", address: null, decimals: 18, scaledUi: false }, contracts: null, pythPriceId: null, marketHours: "24/7", strikeIncrement: 500, riskVolFloor: 0.4, maxSize: "5" },
+      { id: "NVDA", displayName: "NVIDIA", kind: "equity", enabled: false, collateral: { symbol: "NVDAB", address: null, decimals: 18, scaledUi: true }, contracts: null, pythPriceId: null, marketHours: "24/5", strikeIncrement: 5, riskVolFloor: 0.35, maxSize: "100" },
+    ] satisfies Parameters<typeof MarketSelector>[0]["markets"];
+
     render(
-      <ContractBrowser
-        title="Target Composer"
-        markets={[
-          { id: "BTC", displayName: "Bitcoin", kind: "crypto", enabled: true, collateral: { symbol: "BTCB", address: null, decimals: 18, scaledUi: false }, contracts: null, pythPriceId: null, marketHours: "24/7", strikeIncrement: 500, riskVolFloor: 0.4, maxSize: "5" },
-          { id: "NVDA", displayName: "NVIDIA", kind: "equity", enabled: false, collateral: { symbol: "NVDAB", address: null, decimals: 18, scaledUi: true }, contracts: null, pythPriceId: null, marketHours: "24/5", strikeIncrement: 5, riskVolFloor: 0.35, maxSize: "100" },
-        ]}
+      <MarketSelector
+        markets={markets}
         selectedMarketId="NVDA"
-        marketUnavailable
-        expiries={[]}
-        activeExpiry={null}
-        strikes={[]}
-        selectedStrike={null}
-        spotPrice={0}
-        isLoading={false}
         disabled={false}
-        onExpiryChange={vi.fn()}
-        onStrikeSelect={vi.fn()}
         onMarketChange={onMarketChange}
       />,
     );
+    renderConfigurator({
+      markets,
+      selectedMarketId: "NVDA",
+      marketUnavailable: true,
+      unavailableReason: "NVIDIA is staged and will appear after its market infrastructure is enabled.",
+      activeExpiry: null,
+      strikes: [],
+      selectedStrike: null,
+      spotPrice: 0,
+    });
+
     expect(screen.getByText(/staged and will appear/i)).toBeTruthy();
-    await user.click(screen.getByRole("option", { name: "Bitcoin" }));
+    await user.click(screen.getByRole("option", { name: /Bitcoin/i }));
     expect(onMarketChange).toHaveBeenCalledWith("BTC");
   });
 
-  it("selects expiries and strikes with keyboard-accessible buttons", async () => {
+  it("keeps expiry and strike comparison in one accessible market surface", async () => {
     const user = userEvent.setup();
-    const onExpiryChange = vi.fn();
-    const onStrikeSelect = vi.fn();
-    render(
-      <ContractBrowser
-        title="Target Composer"
-        expiries={[
-          { epoch: expiryOne, label: "Jan 15, 2027" },
-          { epoch: expiryTwo, label: "Jan 22, 2027" },
-        ]}
-        activeExpiry={expiryOne}
-        strikes={[strike]}
-        selectedStrike={null}
-        spotPrice={70_000}
-        isLoading={false}
-        disabled={false}
-        onExpiryChange={onExpiryChange}
-        onStrikeSelect={onStrikeSelect}
-      />,
-    );
+    const props = renderConfigurator();
 
-    const secondExpiry = screen.getByRole("tab", { name: /Jan 22/i });
-    secondExpiry.focus();
-    await user.keyboard("{Enter}");
-    expect(onExpiryChange).toHaveBeenCalledWith(expiryTwo);
+    await user.click(screen.getByRole("tab", { name: /Jan 22/i }));
+    expect(props.onExpiryChange).toHaveBeenCalledWith(expiryTwo);
 
-    const strikeButton = screen.getByRole("button", {
-      name: /Select \$75,000 strike/i,
-    });
-    strikeButton.focus();
-    await user.keyboard("{Enter}");
-    expect(onStrikeSelect).toHaveBeenCalledWith(75_000, strikeButton);
+    await user.click(screen.getByRole("button", { name: /\$80,000/i }));
+    expect(props.onStrikeSelect).toHaveBeenCalledWith(80_000);
+    expect(screen.getByRole("img", { name: /Bitcoin 30-day price history/i })).toBeTruthy();
   });
 
-  it("keeps the selected strike available as a reopen target while locked", async () => {
-    const user = userEvent.setup();
-    const onStrikeSelect = vi.fn();
-    const otherStrike: StrikeOption = {
-      ...strike,
-      strike: 80_000,
-      strike18: 80_000n * 10n ** 18n,
-      subId: 2n,
-      instrumentName: "BTC-20270115-80000-C",
+  it("shows amount-scaled premiums and returns side by side instead of hiding contracts behind a slider", () => {
+    renderConfigurator();
+
+    expect(screen.getByText("Term return")).toBeTruthy();
+    expect(screen.getByText("Annualized")).toBeTruthy();
+    expect(screen.getByText("$500.00")).toBeTruthy();
+    expect(screen.getByText("$250.00")).toBeTruthy();
+    expect(screen.getByText(/shown for 0.5 BTCB/i)).toBeTruthy();
+    expect(screen.queryByRole("slider", { name: "Sell target" })).toBeNull();
+  });
+
+  it("reprices every strike row when the covered amount changes", () => {
+    renderConfigurator({ coveredAmount: 0.25 });
+
+    expect(screen.getByText("$250.00")).toBeTruthy();
+    expect(screen.getByText("$125.00")).toBeTruthy();
+    expect(screen.getByText(/shown for 0.25 BTCB/i)).toBeTruthy();
+  });
+
+  it("omits strikes without a meaningful modeled premium", () => {
+    const zeroPremiumStrike: StrikeOption = {
+      ...otherStrike,
+      strike: 90_000,
+      strike18: 90_000n * 10n ** 18n,
+      instrumentName: "BTC-20270115-90000-C",
+      premium: 0,
+      apr: 0,
     };
-    render(
-      <ContractBrowser
-        title="Target Composer"
-        expiries={[{ epoch: expiryOne, label: "Jan 15, 2027" }]}
-        activeExpiry={expiryOne}
-        strikes={[strike, otherStrike]}
-        selectedStrike={strike.strike}
-        spotPrice={70_000}
-        isLoading={false}
-        disabled
-        onExpiryChange={vi.fn()}
-        onStrikeSelect={onStrikeSelect}
-      />,
-    );
+    renderConfigurator({ strikes: [strike, zeroPremiumStrike] });
 
-    const selectedButton = screen.getByRole("button", {
-      name: /Reopen \$75,000 strike/i,
-    });
-    const otherButton = screen.getByRole("button", {
-      name: /Select \$80,000 strike/i,
-    });
-    expect((selectedButton as HTMLButtonElement).disabled).toBe(false);
-    expect((otherButton as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getAllByText("$75,000").length).toBeGreaterThan(0);
+    expect(screen.queryByText("$90,000")).toBeNull();
+    expect(screen.getAllByRole("button", { pressed: true })).toHaveLength(1);
+  });
 
-    await user.click(selectedButton);
-    expect(onStrikeSelect).toHaveBeenCalledWith(75_000, selectedButton);
+  it("does not invent a price path when BTC history is unavailable", () => {
+    renderConfigurator({ history: [], historyState: "unavailable" });
+
+    expect(screen.getByText("30-day BTC history unavailable")).toBeTruthy();
+    expect(screen.getByRole("img", { name: /currently unavailable/i })).toBeTruthy();
   });
 });
 
-describe("covered-call order ticket", () => {
-  it("validates balance and exposes the live-quote action", async () => {
-    const user = userEvent.setup();
-    const onAmountChange = vi.fn();
-    const onRequestQuote = vi.fn();
-    render(
-      <OrderTicket
-        snapshot={snapshot}
-        amount="0.5"
-        balance={0.25}
-        maxAmount="1"
-        isConnected
-        amountLocked={false}
-        setupPhase="idle"
-        sellPhase="idle"
-        auction={null}
-        quote={null}
-        error={null}
-        doneInfo={null}
-        onAmountChange={onAmountChange}
-        onClose={vi.fn()}
-        onRequestQuote={onRequestQuote}
-        onAcceptQuote={vi.fn()}
-        onCreateAnother={vi.fn()}
-      />,
-    );
+function renderTicket(overrides: Partial<Parameters<typeof OrderTicket>[0]> = {}) {
+  const props: Parameters<typeof OrderTicket>[0] = {
+    snapshot,
+    amount: "0.5",
+    balance: 1,
+    maxAmount: "1",
+    hasSubaccount: true,
+    depositedBalance: 1,
+    isConnected: true,
+    setupPhase: "idle",
+    sellPhase: "idle",
+    auction: null,
+    quote: null,
+    error: null,
+    doneInfo: null,
+    feeReadState: "ready",
+    controlsDisabled: false,
+    onAmountChange: vi.fn(),
+    onRequestQuote: vi.fn(),
+    onAcceptQuote: vi.fn(),
+    onCreateAnother: vi.fn(),
+    ...overrides,
+  };
+  render(<OrderTicket {...props} />);
+  return props;
+}
 
-    expect(screen.getByRole("alert").textContent).toMatch(/no greater/i);
-    expect(
-      (screen.getByRole("button", { name: "Get live quote" }) as HTMLButtonElement)
-        .disabled,
-    ).toBe(true);
+describe("covered-call quote rail", () => {
+  it("shows expected net cash change after the live protocol fee estimate", () => {
+    renderTicket();
 
-    await user.click(screen.getByRole("button", { name: "MAX" }));
-    expect(onAmountChange).toHaveBeenCalledWith("0.25");
+    expect(screen.getByText("Expected net cash change")).toBeTruthy();
+    expect(screen.getByText("$465.00")).toBeTruthy();
+    expect(screen.getByText("−$35.00")).toBeTruthy();
   });
 
-  it("enforces the market maximum and clamps MAX to that limit", async () => {
+  it("blocks a quote when the amount exceeds the detected balance", () => {
+    renderTicket({ balance: 0.25 });
+    expect(
+      (screen.getByRole("button", { name: "Insufficient BTCB" }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(true);
+  });
+
+  it("enforces the market maximum before opening an auction", async () => {
     const user = userEvent.setup();
-    const onAmountChange = vi.fn();
     const onRequestQuote = vi.fn();
-    render(
-      <OrderTicket
-        snapshot={snapshot}
-        amount="0.010000000000000001"
-        balance={0.25}
-        maxAmount="0.01"
-        isConnected
-        amountLocked={false}
-        setupPhase="idle"
-        sellPhase="idle"
-        auction={null}
-        quote={null}
-        error={null}
-        doneInfo={null}
-        onAmountChange={onAmountChange}
-        onClose={vi.fn()}
-        onRequestQuote={onRequestQuote}
-        onAcceptQuote={vi.fn()}
-        onCreateAnother={vi.fn()}
-      />,
-    );
+    renderTicket({
+      amount: "0.010000000000000001",
+      balance: 0.25,
+      maxAmount: "0.01",
+      onRequestQuote,
+    });
 
     expect(screen.getByRole("alert").textContent).toMatch(/maximum order size is 0\.01/i);
-    const quoteButton = screen.getByRole("button", { name: "Get live quote" });
+    const quoteButton = screen.getByRole("button", { name: "Amount exceeds maximum" });
     expect((quoteButton as HTMLButtonElement).disabled).toBe(true);
     await user.click(quoteButton);
     expect(onRequestQuote).not.toHaveBeenCalled();
-
-    await user.click(screen.getByRole("button", { name: "MAX" }));
-    expect(onAmountChange).toHaveBeenCalledWith("0.01");
   });
 
-  it("shows a verified quote and requires an explicit acceptance action", async () => {
+  it("shows a verified quote and requires explicit acceptance", async () => {
     const user = userEvent.setup();
     const onAcceptQuote = vi.fn();
-    render(
-      <OrderTicket
-        snapshot={snapshot}
-        amount="0.5"
-        balance={1}
-        maxAmount="1"
-        isConnected
-        amountLocked
-        setupPhase="idle"
-        sellPhase="quoted"
-        auction={null}
-        quote={{
-          rfqId: "rfq-1",
-          chainId: 97,
-          instrumentName: strike.instrumentName,
-          expiry: strike.expiry,
-          strike: strike.strike,
-          amount: "0.5",
-          marketId: "BTC",
-          rawAmount: "0.5",
-          tokenDecimals: 18,
-          uiMultiplier: null,
-          optionAsset: "0x2222222222222222222222222222222222222222",
-          spot: 70_000,
-          indicativePremium: 1_000,
-          quoteCount: 3,
-          premium: 1_050,
-          totalPremium: 525,
-          acceptBy: Date.now() + 30_000,
-        }}
-        error={null}
-        doneInfo={null}
-        onAmountChange={vi.fn()}
-        onClose={vi.fn()}
-        onRequestQuote={vi.fn()}
-        onAcceptQuote={onAcceptQuote}
-        onCreateAnother={vi.fn()}
-      />,
-    );
+    renderTicket({
+      sellPhase: "quoted",
+      quote: preparedQuote,
+      onAcceptQuote,
+    });
 
     expect(screen.getByText("Winning executable quote")).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "Accept & sign" }));
     expect(onAcceptQuote).toHaveBeenCalledOnce();
   });
 
-  it("updates the expiry explanation when the scenario moves above strike", () => {
-    render(
-      <OrderTicket
-        snapshot={snapshot}
-        amount="0.5"
-        balance={1}
-        maxAmount="1"
-        isConnected
-        amountLocked={false}
-        setupPhase="idle"
-        sellPhase="idle"
-        auction={null}
-        quote={null}
-        error={null}
-        doneInfo={null}
-        onAmountChange={vi.fn()}
-        onClose={vi.fn()}
-        onRequestQuote={vi.fn()}
-        onAcceptQuote={vi.fn()}
-        onCreateAnother={vi.fn()}
-      />,
-    );
+  it("states first-trade account and collateral preparation inline", () => {
+    renderTicket({ hasSubaccount: false, depositedBalance: 0 });
 
+    expect(screen.getByText(/create the covered-call account/i)).toBeTruthy();
+    expect(screen.getByText(/deposit 0.5 BTCB/i)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Prepare & request quote" })).toBeTruthy();
+  });
+
+  it("updates the expiry explanation when the scenario moves above the cap", () => {
+    renderTicket();
     fireEvent.change(
       screen.getByRole("slider", { name: "Simulated BTC price at expiry" }),
       { target: { value: "90000" } },
     );
-    expect(screen.getByText(/USDT settlement offsets gains above/i)).toBeTruthy();
+    expect(screen.getByText(/subaccount is debited/i)).toBeTruthy();
   });
 
-  it("uses indicative pricing after an expired quote when the amount changes", () => {
-    render(
-      <OrderTicket
-        snapshot={snapshot}
-        amount="1"
-        balance={2}
-        maxAmount="2"
-        isConnected
-        amountLocked={false}
-        setupPhase="idle"
-        sellPhase="expired"
-        auction={null}
-        quote={{
-          rfqId: "rfq-1",
-          chainId: 97,
-          instrumentName: strike.instrumentName,
-          expiry: strike.expiry,
-          strike: strike.strike,
-          amount: "0.5",
-          marketId: "BTC",
-          rawAmount: "0.5",
-          tokenDecimals: 18,
-          uiMultiplier: null,
-          optionAsset: "0x2222222222222222222222222222222222222222",
-          spot: 70_000,
-          indicativePremium: 1_000,
-          quoteCount: 3,
-          premium: 1_050,
-          totalPremium: 525,
-          acceptBy: Date.now() - 1_000,
-        }}
-        error={null}
-        doneInfo={null}
-        onAmountChange={vi.fn()}
-        onClose={vi.fn()}
-        onRequestQuote={vi.fn()}
-        onAcceptQuote={vi.fn()}
-        onCreateAnother={vi.fn()}
-      />,
-    );
+  it("returns to indicative economics after a quote expires", () => {
+    renderTicket({
+      amount: "1",
+      balance: 2,
+      depositedBalance: 2,
+      sellPhase: "expired",
+      quote: { ...preparedQuote, acceptBy: Date.now() - 1_000 },
+    });
 
     expect(screen.getByText("Quote expired")).toBeTruthy();
-    expect(screen.getAllByText("Indicative premium")).toHaveLength(2);
     expect(screen.getAllByText("$1,000.00").length).toBeGreaterThan(0);
-    expect(screen.getByRole("button", { name: "Get a new quote" })).toBeTruthy();
-  });
-});
-
-describe("mobile order sheet", () => {
-  it("closes on Escape and restores focus to the selected strike", async () => {
-    const user = userEvent.setup();
-    const returnButton = document.createElement("button");
-    returnButton.textContent = "Selected strike";
-    document.body.appendChild(returnButton);
-    const onOpenChange = vi.fn();
-
-    function Harness() {
-      const [open, setOpen] = useState(true);
-      return (
-        <MobileOrderSheet
-          open={open}
-          preventClose={false}
-          returnFocus={returnButton}
-          onOpenChange={(next) => {
-            onOpenChange(next);
-            setOpen(next);
-          }}
-        >
-          <button type="button">Inside ticket</button>
-        </MobileOrderSheet>
-      );
-    }
-
-    render(<Harness />);
-    await user.keyboard("{Escape}");
-
-    expect(onOpenChange).toHaveBeenCalledWith(false);
-    await waitFor(() => expect(document.activeElement).toBe(returnButton));
-    returnButton.remove();
+    expect(screen.getByRole("button", { name: "Request a new quote" })).toBeTruthy();
   });
 });

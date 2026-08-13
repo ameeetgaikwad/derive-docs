@@ -11,14 +11,14 @@ const ASSET_BASE = '/images/marketing/landing'
 const footerLinks = {
   Product: [
     { label: 'Home', href: '/' },
-    { label: 'Build Target', href: '#composer' },
+    { label: 'Open Market', href: '/app' },
     { label: 'How It Works', href: '#learn-more' },
     { label: 'FAQs', href: '#faq' },
   ],
   Protocol: [
-    { label: 'Decentralized rails', href: '/' },
-    { label: 'Wallet signed', href: '/' },
-    { label: 'Self-custody', href: '/' },
+    { label: 'Wallet-signed orders', href: '#learn-more' },
+    { label: 'On-chain settlement', href: '#outcomes' },
+    { label: 'RFQ pricing', href: '#faq' },
   ],
 } as const
 
@@ -37,7 +37,7 @@ export function MarketingFooter({ t }: { t: (value: string) => string }) {
             variant="secondary"
             className="w-fit rounded-[5px] px-5 py-[15px] tracking-[0.05em] uppercase lg:mb-[9px]"
           >
-            <Link href="#composer">{t('Build Target')}</Link>
+            <Link href="/app">{t('Open Market')}</Link>
           </Button>
         </div>
         <div className="mt-[50px] h-[64px] w-full overflow-hidden">

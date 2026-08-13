@@ -10,11 +10,11 @@ const trustItems = [
   },
   {
     icon: `${ASSET_BASE}/trust-privacy.svg`,
-    label: 'Decentralized execution.',
+    label: 'On-chain settlement.',
   },
   {
     icon: `${ASSET_BASE}/trust-speed.svg`,
-    label: 'Live premium quotes.',
+    label: 'Executable RFQ quotes.',
   },
 ] as const
 
