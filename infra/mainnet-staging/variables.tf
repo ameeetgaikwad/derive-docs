@@ -116,7 +116,9 @@ variable "oracle_rwa_iv" {
   }
 
   validation {
-    condition = setequals(toset(keys(var.oracle_rwa_iv)), toset(["XAU", "SPY", "NVDA"])) && alltrue([
+    condition = length(var.oracle_rwa_iv) == 3 && alltrue([
+      for market in ["XAU", "SPY", "NVDA"] : contains(keys(var.oracle_rwa_iv), market)
+      ]) && alltrue([
       for volatility in values(var.oracle_rwa_iv) : can(tonumber(volatility)) && tonumber(volatility) > 0
     ])
     error_message = "oracle_rwa_iv must contain positive XAU, SPY, and NVDA values."
