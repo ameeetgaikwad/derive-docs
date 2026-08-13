@@ -31,6 +31,13 @@ import { useCoveredCallStore } from "@/stores/covered-call";
 import { useNetwork } from "@/hooks/protocol/useNetwork";
 
 const DEFAULT_AMOUNT = "0.5";
+const DEFAULT_AMOUNTS: Record<MarketId, string> = {
+  BTC: DEFAULT_AMOUNT,
+  XAU: "0.01",
+  SPY: "0.1",
+  NVDA: "0.25",
+  SPCX: "1",
+};
 
 function sanitizeDecimal(value: string): string {
   const normalized = value.replace(/[^\d.]/g, "");
@@ -67,13 +74,7 @@ export default function CoveredCallTrade({
   const { chainId } = useNetwork();
   const markets = useMemo(() => getSelectableMarkets(chainId), [chainId]);
   const [selectedMarketId, setSelectedMarketId] = useState<MarketId>("BTC");
-  const [amounts, setAmounts] = useState<Record<MarketId, string>>({
-    BTC: DEFAULT_AMOUNT,
-    XAU: "1",
-    SPY: "1",
-    NVDA: "1",
-    SPCX: "1",
-  });
+  const [amounts, setAmounts] = useState<Record<MarketId, string>>(DEFAULT_AMOUNTS);
   const storedAmount = amounts[selectedMarketId];
   const setAmount = useCallback((value: string) => {
     setAmounts((current) => ({ ...current, [selectedMarketId]: value }));
@@ -282,6 +283,12 @@ export default function CoveredCallTrade({
     setDoneInfo(null);
 
     try {
+      // Freeze and validate the exact canonical raw amount before any approval,
+      // subaccount creation, or collateral deposit. The RFQ engine repeats the
+      // scaled-UI cap check against the live checkpointed multiplier.
+      const rawAmount = fromUnit(
+        uiAmount18ToRaw18(toUnit(submitted.amount.toString()), multiplier),
+      );
       await assertRfqEngineChain(chainId);
 
       setSetupPhase("subaccount");
@@ -296,7 +303,6 @@ export default function CoveredCallTrade({
       }
 
       setSetupPhase("idle");
-      const rawAmount = fromUnit(uiAmount18ToRaw18(toUnit(submitted.amount.toString()), multiplier));
       await sellCall.requestQuote({
         marketId: selectedMarketId,
         subaccountId: subId,

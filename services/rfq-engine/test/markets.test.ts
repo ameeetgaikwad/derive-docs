@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { readMarketManifest, type MarketDefinition } from "@hedge/shared";
 import {
+  assertMarketFeedsReady,
   assertMarketTradeable,
   isMarketOpen,
   isUsEarlyCloseSession,
@@ -37,8 +38,69 @@ describe("market readiness", () => {
   });
 
   it("enforces per-market maximum size", () => {
-    const enabled = { ...staged, enabled: true, contracts: btc.contracts, pythPriceId: btc.pythPriceId } as MarketDefinition;
+    const enabled = {
+      ...staged,
+      enabled: true,
+      collateral: { ...staged.collateral, scaledUi: false },
+      contracts: btc.contracts,
+      pythPriceId: btc.pythPriceId,
+    } as MarketDefinition;
     const [expiry] = rwaExpiries(1, Date.UTC(2026, 7, 6));
     expect(() => assertMarketTradeable(enabled, 101n * 10n ** 18n, BigInt(expiry), Date.UTC(2026, 7, 6))).toThrow(/maximum size/);
+  });
+
+  it("defers scaled maximum-size validation to the live multiplier check", () => {
+    const enabled = { ...staged, enabled: true, contracts: btc.contracts, pythPriceId: btc.pythPriceId } as MarketDefinition;
+    const [expiry] = rwaExpiries(1, Date.UTC(2026, 7, 6));
+    expect(() => assertMarketTradeable(
+      enabled,
+      101n * 10n ** 18n,
+      BigInt(expiry),
+      Date.UTC(2026, 7, 6),
+    )).not.toThrow();
+  });
+
+  it("rejects a scaled raw amount above the displayed market cap", async () => {
+    const scaled = {
+      ...staged,
+      enabled: true,
+      maxSize: "0.1",
+      collateral: { ...staged.collateral, address: "0x0000000000000000000000000000000000000011" },
+      contracts: {
+        ...btc.contracts!,
+        multiplierRegistry: "0x0000000000000000000000000000000000000012",
+      },
+      pythPriceId: btc.pythPriceId,
+    } as MarketDefinition;
+    const currentMultiplier = 2n * 10n ** 18n;
+    const client = {
+      readContract: async ({ functionName }: { functionName: string }) => {
+        if (functionName === "getSpot") return [1n, 1n];
+        if (functionName === "getForwardPrice") return [1n, 1n];
+        if (functionName === "getVol") return [1n, 1n];
+        if (functionName === "getInterestRate") return [0n, 1n];
+        if (functionName === "uiMultiplier" || functionName === "multiplierAt") {
+          return currentMultiplier;
+        }
+        if (functionName === "newUIMultiplier" || functionName === "effectiveAt") return 0n;
+        throw new Error(`unexpected read ${functionName}`);
+      },
+      getBlock: async () => ({ timestamp: 1_000n }),
+    };
+
+    await expect(assertMarketFeedsReady(
+      client as never,
+      scaled,
+      2_000n,
+      100n,
+      50_000_000_000_000_001n,
+    )).rejects.toThrow(/maximum size 0.1/);
+    await expect(assertMarketFeedsReady(
+      client as never,
+      scaled,
+      2_000n,
+      100n,
+      50_000_000_000_000_000n,
+    )).resolves.toBeUndefined();
   });
 });

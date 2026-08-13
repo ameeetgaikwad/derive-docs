@@ -36,6 +36,8 @@ and separate ALBs isolate them.
    - `/hedge/maker_private_key` must derive to
      `0xE37515eF43C884e04147F4714A7fC1C70059C392`; chain-56 subaccount `4`
      must remain owned and funded by that address.
+   - `/hedge/mainnet-staging/pyth_api_key` contains the Hermes API token. The
+     ECS task consumes it as `PYTH_API_KEY`; do not put the value in tfvars.
    Raw keys are permitted only for this pre-production staging deployment;
    production must use independently controlled signing identities.
 4. Plan and apply with all desired counts at zero:
@@ -56,8 +58,68 @@ and separate ALBs isolate them.
    feed-signer nonce stream.
 8. Set `maker_bot_desired_count` to one and apply. Keep exactly one staging
    maker task for this key and verify its CloudWatch authentication log.
-9. Attach ACM/DNS and configure the deployed frontend's
+9. Attach ACM/DNS, set `certificate_arn` and `rfq_public_hostname`, and apply.
+   The staging maker then uses `wss://<rfq_public_hostname>/maker`; it must not
+   use TLS against the raw ALB hostname because the certificate does not cover it.
+10. Configure the deployed frontend's
    `NEXT_PUBLIC_RFQ_ENGINE_URL_56=https://<staging-host>`.
+
+## RWA rollout
+
+Gold, S&P 500, and NVIDIA are deployed and activated one at a time. SpaceX is
+intentionally excluded. Deployment is permanently ordered `XAU -> SPY -> NVDA`
+so a retry cannot create a duplicate SRM market.
+
+```bash
+# Dry-run locally first.
+pnpm deploy:rwa:mainnet-staging --market XAU
+
+# Operator-only broadcast after reviewing the simulation and balances.
+pnpm deploy:rwa:mainnet-staging --market XAU --broadcast --confirm
+
+# Verify fresh Hermes data, then seed the disabled market's Pyth adapter.
+pnpm bootstrap:rwa:mainnet-staging --market XAU
+pnpm bootstrap:rwa:mainnet-staging --market XAU --broadcast --confirm
+
+# Readiness check, then local manifest activation.
+pnpm activate:rwa:mainnet-staging --market XAU
+pnpm activate:rwa:mainnet-staging --market XAU --confirm
+```
+
+The local operator environment must provide `PYTH_API_KEY`. These commands pin
+`HERMES_URL=https://pyth.dourolabs.app/hermes`, matching the upgraded chain-56
+Pyth contract; legacy Hermes VAAs are rejected. Put the token in the ignored
+`services/oracle-feeds/.env.staging.mainnet` file or export it in the shell.
+SPY and NVDA additionally require U.S.-equities access on that API key and the
+exact feed ID to be available from upgraded Hermes. An HTTP 401/403 is a hard
+deployment stop, not a stale-market condition; do not fall back to legacy
+Hermes or deploy the market until its dry run succeeds.
+
+The bootstrap step exists because the singleton oracle intentionally publishes
+only enabled markets, while activation requires a fresh on-chain source. It
+does not publish signed forward/vol/rate feeds and never enables the market.
+
+Commit the new staging sidecar and manifest, publish all service/web images, and
+roll oracle, RFQ, maker, then web. Verify `/markets`, complete a tiny RFQ, and
+only then repeat for SPY and NVDA. Equity activation can use `--deferred` when
+Pyth is outside its publishing window; the market remains runtime-closed until
+fresh Pyth and signed feeds arrive.
+
+The staging caps are deliberately small:
+
+- aggregate XAU 0.05, per RFQ 0.01 XAUt;
+- aggregate SPY 0.5, per RFQ 0.1 displayed SPYB;
+- aggregate NVDA 1.0, per RFQ 0.25 displayed NVDAB.
+
+For scaled bStocks, the protocol cap is set in canonical raw units from the
+deployment-time multiplier. The RFQ engine separately enforces the displayed
+per-order cap against the live, checkpointed multiplier.
+
+RWA expiries settle from a Pyth benchmark proof for the first valid update in
+the five-minute window at/after expiry. This path is not automatic yet: an
+operator must obtain the reviewed benchmark update, set `ORACLE_MARKET`, and run
+the oracle `settle` command. Do not enable a market without an expiry-day owner
+for this procedure.
 
 Raw keys are accepted only for this isolated pre-production staging stack.
 Production must use controlled signing infrastructure for executor, oracle,

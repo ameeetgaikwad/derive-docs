@@ -1,0 +1,34 @@
+{
+  "chainId": 56,
+  "generatedAt": "2026-08-13T12:07:39.346Z",
+  "deployer": "0x1DDAACC770033feCfcFE2a43e3C2a73b8fe3edFd",
+  "feedSigner": "0x7a5e6A644A97d1E4Be9a0cd87092C3e9d3b8400c",
+  "market": {
+    "id": "XAU",
+    "displayName": "Gold",
+    "kind": "metal",
+    "enabled": false,
+    "collateral": {
+      "symbol": "XAUt",
+      "address": "0x21cAef8A43163Eea865baeE23b9C2E327696A3bf",
+      "decimals": 6,
+      "scaledUi": false
+    },
+    "contracts": {
+      "marketId": 2,
+      "optionAsset": "0x6163f1B1667DD53B3e9fEf36E9182637D5033bDd",
+      "baseAsset": "0xD9d5c6dB77287D5f7bBEccdc60B78C79B2696Cca",
+      "spotFeed": "0x0cA06cD1926443e380a256C6D47C3Fb79c994a9f",
+      "signedSpotFeed": "0xFD6d28d8398fBbC613d1B0BF611f25cf39916537",
+      "forwardFeed": "0x9b25631fb874B7ae45675080FadE009B5f1C95FA",
+      "volFeed": "0xaB06114a526054Cef31e57394d4C5895B5682976",
+      "rateFeed": "0x7A94666eAD74c05aA53cc8da67683936C80BEED2",
+      "settlementFeed": "0x30f2365a57dfbc64c1Ae204Df21ee1140F89e978"
+    },
+    "pythPriceId": "0x765d2ba906dbc32ca17cc11f5310a89e9ee1f6420508c63861f2f8ba4ee34bb2",
+    "marketHours": "24/5",
+    "strikeIncrement": 25,
+    "riskVolFloor": 0.18,
+    "maxSize": "0.01"
+  }
+}

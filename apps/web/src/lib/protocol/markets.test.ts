@@ -9,10 +9,10 @@ import {
 } from "./markets";
 
 describe("multi-asset amount conversion", () => {
-  it("loads only BTC from the isolated mainnet staging manifest", () => {
+  it("loads XAU and disabled equity placeholders from the isolated mainnet staging manifest", () => {
     const markets = getMarkets(56);
-    expect(markets.map((market) => market.id)).toEqual(["BTC"]);
-    expect(markets.filter((market) => market.enabled).map((market) => market.id)).toEqual(["BTC"]);
+    expect(markets.map((market) => market.id)).toEqual(["BTC", "XAU", "SPY", "NVDA"]);
+    expect(markets.filter((market) => market.enabled).map((market) => market.id)).toEqual(["BTC", "XAU"]);
     expect(markets[0]?.contracts?.optionAsset).toBe("0x3464351F36fb79Eb06a04785bDaF8DCb8FBC42bc");
   });
 

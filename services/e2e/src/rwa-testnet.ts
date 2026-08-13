@@ -122,17 +122,23 @@ export function parseMocksFile(input: unknown): RwaMocksFile {
   };
 }
 
-export function parseAddMarketSidecar(input: unknown, expected: RwaMarketId): AddMarketSidecar {
+export function parseAddMarketSidecar(
+  input: unknown,
+  expected: RwaMarketId,
+  expectedChainId = 97,
+): AddMarketSidecar {
   if (!input || typeof input !== "object") throw new Error(`${expected} sidecar must be an object`);
   const raw = input as Record<string, unknown>;
-  if (Number(raw.chainId) !== 97) throw new Error(`${expected} sidecar must target chain 97`);
+  if (Number(raw.chainId) !== expectedChainId) {
+    throw new Error(`${expected} sidecar must target chain ${expectedChainId}`);
+  }
   if (raw.name !== expected) throw new Error(`${expected} sidecar name mismatch`);
   const marketId = Number(raw.marketId);
   if (!Number.isSafeInteger(marketId) || marketId <= 0) {
     throw new Error(`${expected} sidecar marketId is invalid`);
   }
   return {
-    chainId: 97,
+    chainId: expectedChainId,
     name: expected,
     marketId,
     underlying: nonZeroAddress(raw.underlying, `${expected}.underlying`),
@@ -158,8 +164,8 @@ export function parseAddMarketSidecar(input: unknown, expected: RwaMarketId): Ad
   };
 }
 
-export function parseManifestFile(input: unknown): ManifestFile {
-  const manifest = validateMarketManifest(input, 97);
+export function parseManifestFile(input: unknown, expectedChainId = 97): ManifestFile {
+  const manifest = validateMarketManifest(input, expectedChainId);
   return { ...manifest, marketCount: manifest.markets.length };
 }
 
@@ -202,11 +208,11 @@ export function mergeSidecarIntoManifest(
   };
 
   const next: ManifestFile = {
-    chainId: 97,
+    chainId: manifest.chainId,
     marketCount: manifest.markets.length,
     markets: manifest.markets.map((candidate) => candidate.id === marketId ? replacement : candidate),
   };
-  validateMarketManifest(next, 97);
+  validateMarketManifest(next, manifest.chainId);
   return next;
 }
 
@@ -221,13 +227,13 @@ export function setManifestMarketEnabled(
     throw new Error(`${marketId} has not been fully deployed and cannot be enabled`);
   }
   const next: ManifestFile = {
-    chainId: 97,
+    chainId: manifest.chainId,
     marketCount: manifest.markets.length,
     markets: manifest.markets.map((candidate) =>
       candidate.id === marketId ? { ...candidate, enabled } : candidate
     ),
   };
-  validateMarketManifest(next, 97);
+  validateMarketManifest(next, manifest.chainId);
   return next;
 }
 

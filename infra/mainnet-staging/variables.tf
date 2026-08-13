@@ -84,6 +84,45 @@ variable "certificate_arn" {
   nullable    = true
 }
 
+variable "rfq_public_hostname" {
+  description = "Public DNS name covered by certificate_arn and used by browser/maker HTTPS/WSS clients."
+  type        = string
+  default     = "rfq-staging-mainnet.satsterminal.com"
+
+  validation {
+    condition     = can(regex("^[a-z0-9.-]+$", var.rfq_public_hostname))
+    error_message = "rfq_public_hostname must be a DNS hostname without a scheme or path."
+  }
+}
+
+variable "pyth_api_key_parameter_name" {
+  description = "Existing SSM SecureString for authenticated Hermes requests. Terraform references the ARN only."
+  type        = string
+  default     = "/hedge/mainnet-staging/pyth_api_key"
+
+  validation {
+    condition     = startswith(var.pyth_api_key_parameter_name, "/hedge/mainnet-staging/")
+    error_message = "pyth_api_key_parameter_name must stay under /hedge/mainnet-staging/."
+  }
+}
+
+variable "oracle_rwa_iv" {
+  description = "Reviewed flat reference volatility used only for staging RWA indicative/signed feeds."
+  type        = map(string)
+  default = {
+    XAU  = "0.20"
+    SPY  = "0.25"
+    NVDA = "0.50"
+  }
+
+  validation {
+    condition = setequals(toset(keys(var.oracle_rwa_iv)), toset(["XAU", "SPY", "NVDA"])) && alltrue([
+      for volatility in values(var.oracle_rwa_iv) : can(tonumber(volatility)) && tonumber(volatility) > 0
+    ])
+    error_message = "oracle_rwa_iv must contain positive XAU, SPY, and NVDA values."
+  }
+}
+
 variable "maker_allowlist" {
   description = "Maker EOAs allowed to quote; public takers remain enabled."
   type        = list(string)

@@ -64,8 +64,8 @@ async function main(): Promise<void> {
     optionAssets: config.optionAssets,
     forwardFeeds: config.forwardFeeds,
     markets: config.markets,
-    marketReadiness: (market, expiry, strike) =>
-      assertMarketFeedsReady(publicClient, market, expiry, strike),
+    marketReadiness: (market, expiry, strike, rawAmount) =>
+      assertMarketFeedsReady(publicClient, market, expiry, strike, rawAmount),
     auctionWindowMs: config.auctionWindowMs,
     acceptDeadlineMs: config.takerAcceptDeadlineMs,
   });

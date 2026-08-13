@@ -56,7 +56,12 @@ export function assertMarketTradeable(
 ): void {
   if (!market.enabled || !market.contracts) throw new Error(`${market.id} market is disabled`);
   if (!isMarketOpen(market, nowMs)) throw new Error(`${market.id} market is closed`);
-  if (amount > toUnit(market.maxSize)) throw new Error(`amount exceeds ${market.id} maximum size ${market.maxSize}`);
+  // Unscaled option amounts and UI amounts are identical. Scaled bStock RFQs
+  // carry the canonical raw amount, so their UI cap is checked against the
+  // live/checkpointed multiplier in assertMarketFeedsReady below.
+  if (!market.collateral.scaledUi && amount > toUnit(market.maxSize)) {
+    throw new Error(`amount exceeds ${market.id} maximum size ${market.maxSize}`);
+  }
   if (market.marketHours === "24/5") {
     const supported = rwaExpiries(8, nowMs);
     if (!supported.includes(Number(expiry))) throw new Error(`${market.id} expiry is not supported`);
@@ -135,6 +140,7 @@ export async function assertMarketFeedsReady(
   market: MarketDefinition,
   expiry: bigint,
   strike: bigint,
+  rawAmount?: bigint,
 ): Promise<void> {
   if (!market.enabled || !market.contracts) throw new Error(`${market.id} market is disabled`);
   try {
@@ -176,6 +182,15 @@ export async function assertMarketFeedsReady(
         client.readContract({ address: token, abi: scaledTokenAbi, functionName: "effectiveAt" }),
       ]);
       if (current !== checkpointed) throw new Error("current multiplier is not checkpointed");
+      if (rawAmount !== undefined) {
+        // ERC-8056: displayed amount = raw amount * multiplier / 1e18. Use
+        // multiplication for the comparison so truncation can never admit an
+        // order fractionally above the reviewed UI cap.
+        const maximumUiAmount = toUnit(market.maxSize);
+        if (rawAmount * current > maximumUiAmount * 10n ** 18n) {
+          throw new Error(`amount exceeds ${market.id} maximum size ${market.maxSize}`);
+        }
+      }
       if (pending > 0n && effectiveAt > block.timestamp) {
         const scheduled = await client.readContract({
           address: registry,

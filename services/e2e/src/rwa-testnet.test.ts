@@ -75,6 +75,14 @@ describe("RWA testnet deployment helpers", () => {
     assert.equal(market.pythPriceId, PRICE_ID);
   });
 
+  it("preserves a chain-56 staging manifest when merging a sidecar", () => {
+    const manifest = { ...xauManifest(), chainId: 56 };
+    const sidecar = { ...xauSidecar(), chainId: 56 };
+    const next = mergeSidecarIntoManifest(manifest, "XAU", sidecar);
+    assert.equal(next.chainId, 56);
+    assert.equal(next.markets[0]?.enabled, false);
+  });
+
   it("only enables a fully staged market", () => {
     assert.throws(
       () => setManifestMarketEnabled(xauManifest(), "XAU", true),

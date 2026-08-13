@@ -17,7 +17,12 @@ output "ssm_parameter_names" {
     executor_private_key = var.executor_private_key_parameter_name
     feed_signer_key      = var.feed_signer_key_parameter_name
     maker_private_key    = var.maker_private_key_parameter_name
+    pyth_api_key         = var.pyth_api_key_parameter_name
   }
+}
+
+output "rfq_public_url" {
+  value = var.certificate_arn == null ? "http://${aws_lb.rfq_engine.dns_name}" : "https://${var.rfq_public_hostname}"
 }
 
 output "efs_file_system_id" {
