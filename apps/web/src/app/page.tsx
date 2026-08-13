@@ -1,5 +1,5 @@
-import { MarketingLanding } from "@/app/(app)/[locale]/(landing)/_components/marketing-landing";
+import { PublicLanding } from "@/components/marketing/PublicLanding";
 
-export default async function Home() {
-  return <MarketingLanding />;
+export default function Home() {
+  return <PublicLanding />;
 }

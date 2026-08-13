@@ -24,7 +24,7 @@ const steps = [
     numberClassName: 'text-green-500',
     title: 'Get and accept a live quote.',
     description:
-      'Open the RFQ auction, inspect the winning executable premium and countdown, then sign from your wallet.',
+      'Open the RFQ auction, inspect the winning gross premium, protocol fee estimate, expected net cash change, and countdown, then sign from your wallet.',
   },
 ] as const
 
@@ -47,7 +47,7 @@ export function Stats({ t }: { t: (value: string) => string }) {
           size="sm"
           className="w-fit rounded-[5px] tracking-[0.05em] uppercase"
         >
-          <Link href="#composer">{t('Build Target')}</Link>
+          <Link href="/app">{t('Open Market')}</Link>
         </Button>
       </div>
 

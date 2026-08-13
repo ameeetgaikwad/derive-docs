@@ -1,28 +1,20 @@
 "use client";
 
-import * as Dialog from "@radix-ui/react-dialog";
 import {
-  ArrowLeft,
   CheckCircle2,
   Clock3,
-  Info,
   MoveRight,
-  Plus,
-  Target,
-  TrendingUp,
-  X,
 } from "lucide-react";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
-import AsideCard, {
-  AsideContent,
-  AsideHeader,
-  AsideTitle,
-} from "@/components/shared/aside-card";
+import {
+  useEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+} from "react";
 import { CurrencyField } from "@/components/shared/currency-field";
 import { Button } from "@/components/ui/button";
-import { Separator } from "@/components/ui/separator";
+import { MarketIcon } from "@/components/ui/MarketIcon";
 import { Text } from "@/components/ui/text";
-import { TokenIcon } from "@/components/ui/TokenIcon";
 import type {
   AuctionState,
   PreparedQuote,
@@ -32,6 +24,7 @@ import type {
   ExpiryInfo,
   StrikeOption,
 } from "@/hooks/protocol/useAvailableStrikes";
+import type { BitcoinPriceHistoryPoint } from "@/lib/market/bitcoin-history";
 import {
   calculateCoveredCallScenario,
   scenarioRange,
@@ -41,6 +34,7 @@ import { cn } from "@/lib/utils";
 import type { AppMarket, MarketId } from "@/lib/protocol/markets";
 
 export type SetupPhase = "idle" | "subaccount" | "deposit";
+export type FeeReadState = "loading" | "ready" | "unavailable";
 
 export interface CompletedTradeInfo {
   premium: number;
@@ -56,6 +50,7 @@ export interface OrderSnapshot {
   marketId?: MarketId;
   assetName?: string;
   collateralSymbol?: string;
+  estimatedOiFee?: number | null;
 }
 
 export function formatUsd(value: number, maximumFractionDigits = 0): string {
@@ -72,6 +67,12 @@ function formatPercent(value: number): string {
   return `${value.toFixed(Math.abs(value) >= 10 ? 0 : 1)}%`;
 }
 
+function formatTermPercent(value: number): string {
+  if (!Number.isFinite(value)) return "0%";
+  if (Math.abs(value) > 0 && Math.abs(value) < 0.1) return `${value.toFixed(2)}%`;
+  return formatPercent(value);
+}
+
 function shortExpiry(epoch: number): string {
   return new Date(epoch * 1000).toLocaleDateString("en-US", {
     month: "short",
@@ -80,307 +81,507 @@ function shortExpiry(epoch: number): string {
   });
 }
 
+function exactExpiry(epoch: number): string {
+  return `${new Date(epoch * 1000).toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    timeZone: "UTC",
+  })} · 08:00 UTC`;
+}
+
 function dte(epoch: number): number {
   return Math.max(0, Math.ceil((epoch * 1000 - Date.now()) / 86_400_000));
 }
 
-function LiveIndicator({ active, symbol = "BTC" }: { active: boolean; symbol?: string }) {
+function MarketSourceIndicator({
+  isLoading,
+  available,
+  fallbackPricing,
+}: {
+  isLoading: boolean;
+  available: boolean;
+  fallbackPricing: boolean;
+}) {
+  const label = isLoading
+    ? "Loading market"
+    : !available
+      ? "Pricing unavailable"
+      : fallbackPricing
+        ? "Indicative model"
+        : "Protocol pricing inputs";
+  const dot = isLoading
+    ? "animate-pulse bg-zinc-400"
+    : !available
+      ? "bg-red-500"
+      : fallbackPricing
+        ? "bg-amber-500"
+        : "bg-green-500";
+
   return (
-    <div className="flex items-center gap-2 font-mono text-xs text-zinc-700">
-      <span className="relative flex size-2">
-        <span
-          className={cn(
-            "absolute inset-0 rounded-full bg-green-500",
-            active && "motion-safe:animate-ping",
-          )}
-        />
-        <span className="relative size-2 rounded-full bg-green-500" />
-      </span>
-      {symbol} live
+    <div className="flex items-center gap-2 font-mono text-[11px] text-zinc-500">
+      <span className={cn("size-1.5 rounded-full", dot)} />
+      {label}
     </div>
   );
 }
 
-export function ContractBrowser({
-  title,
+export function MarketSelector({
+  markets,
+  selectedMarketId,
+  disabled,
+  onMarketChange,
+}: {
+  markets: AppMarket[];
+  selectedMarketId: MarketId;
+  disabled: boolean;
+  onMarketChange: (marketId: MarketId) => void;
+}) {
+  if (markets.length === 0) return null;
+
+  return (
+    <div className="flex min-h-[62px] items-end gap-7 overflow-hidden border-b-[0.5px] border-zinc-200">
+      <span className="shrink-0 pb-4 font-mono text-[10px] uppercase tracking-[0.08em] text-zinc-400">
+        Market
+      </span>
+      <div
+        role="listbox"
+        aria-label="Covered-call market"
+        className="flex min-w-0 flex-1 gap-8 overflow-x-auto scrollbar-thin"
+      >
+        {markets.map((market) => {
+          const active = market.id === selectedMarketId;
+          return (
+            <button
+              key={market.id}
+              type="button"
+              role="option"
+              aria-selected={active}
+              disabled={disabled}
+              onClick={() => onMarketChange(market.id)}
+              className={cn(
+                "relative inline-flex min-h-[61px] shrink-0 items-center gap-2 rounded-none border-0 px-0 pt-1 font-mono text-xs transition-colors disabled:cursor-not-allowed disabled:opacity-50",
+                active
+                  ? "text-zinc-950 after:absolute after:inset-x-0 after:bottom-0 after:h-0.5 after:bg-orange-500 after:content-['']"
+                  : "text-zinc-500 hover:text-zinc-950",
+              )}
+            >
+              <MarketIcon marketId={market.id} size={17} />
+              {market.displayName}
+              {!market.enabled && (
+                <span className="ml-2 text-[9px] uppercase text-zinc-400">Soon</span>
+              )}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+export function TradeConfigurator({
   expiries,
   activeExpiry,
   strikes,
   selectedStrike,
   spotPrice,
+  history,
+  historyState,
   isLoading,
   disabled,
+  coveredAmount,
   onExpiryChange,
   onStrikeSelect,
   markets = [],
   selectedMarketId = "BTC",
-  onMarketChange,
   marketUnavailable = false,
   unavailableReason,
 }: {
-  title: string;
   expiries: ExpiryInfo[];
   activeExpiry: number | null;
   strikes: StrikeOption[];
   selectedStrike: number | null;
   spotPrice: number;
+  history: BitcoinPriceHistoryPoint[];
+  historyState?: "loading" | "ready" | "unavailable";
   isLoading: boolean;
   disabled: boolean;
+  coveredAmount: number;
   onExpiryChange: (expiry: number) => void;
-  onStrikeSelect: (strike: number, trigger: HTMLButtonElement) => void;
+  onStrikeSelect: (strike: number) => void;
   markets?: AppMarket[];
   selectedMarketId?: MarketId;
-  onMarketChange?: (marketId: MarketId) => void;
   marketUnavailable?: boolean;
   unavailableReason?: string | null;
 }) {
-  const fallbackPricing = strikes.some((strike) => strike.usedFallback);
+  const displayStrikes = strikes.filter(
+    (strike) => strike.premium >= 0.01 || strike.strike === selectedStrike,
+  );
+  const fallbackPricing = displayStrikes.some((strike) => strike.usedFallback);
   const selectedMarket = markets.find((market) => market.id === selectedMarketId);
   const assetName = selectedMarket?.displayName ?? "Bitcoin";
   const collateralSymbol = selectedMarket?.collateral.symbol ?? "BTCB";
+  const selected =
+    displayStrikes.find((strike) => strike.strike === selectedStrike) ??
+    displayStrikes[0] ??
+    null;
+  const suggested = displayStrikes.reduce<StrikeOption | null>(
+    (best, current) =>
+      best === null ||
+      Math.abs(current.otmPercent - 5) < Math.abs(best.otmPercent - 5)
+        ? current
+        : best,
+    null,
+  );
 
   return (
-    <AsideCard className="relative z-10 min-w-0 rounded-lg border-[0.5px] border-zinc-200 bg-white shadow-[0_0_30px_0_rgba(0,0,0,0.05)]">
-      <AsideHeader className="min-h-14 rounded-t-lg bg-zinc-100 px-5 py-4 pr-[1.875rem]">
-        <AsideTitle>{title}</AsideTitle>
-        <LiveIndicator active={isLoading} symbol={selectedMarketId} />
-      </AsideHeader>
-
-      <AsideContent className="p-5 sm:p-6 lg:p-[1.875rem]">
-        <div className="flex flex-col gap-5">
-          {markets.length > 0 && (
-            <div className="flex flex-col gap-2">
-              <Text variant="body-small" className="text-zinc-500">Asset</Text>
-              <div role="listbox" aria-label="Covered call asset" className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1 scrollbar-thin">
-                {markets.map((market) => {
-                  const selected = market.id === selectedMarketId;
-                  return (
-                    <button
-                      key={market.id}
-                      type="button"
-                      role="option"
-                      aria-selected={selected}
-                      disabled={disabled}
-                      onClick={() => onMarketChange?.(market.id)}
-                      className={cn(
-                        "min-h-11 shrink-0 rounded-full border-[0.5px] px-4 font-mono text-xs transition-colors disabled:opacity-60",
-                        selected ? "border-orange-500 bg-orange-50 text-orange-700" : "border-zinc-200 bg-white text-zinc-700 hover:border-zinc-400",
-                      )}
-                    >
-                      {market.displayName}
-                      {!market.enabled && <span className="ml-2 text-[9px] uppercase opacity-60">Soon</span>}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-          {selectedMarket?.collateral.scaledUi && (
-            <div className="rounded-[5px] border-[0.5px] border-zinc-200 bg-zinc-50 px-3 py-2 font-mono text-[10px] text-zinc-600">
-              Tokenized exposure · bStocks · amounts use the token&apos;s current UI multiplier
-            </div>
-          )}
-
-          <div className="flex items-start justify-between gap-4">
-            <div>
-              <Text as="h2" variant="h4" className="text-zinc-950">
-                Choose your covered call
-              </Text>
-              <Text variant="body-small" className="mt-1 text-zinc-500">
-                Select an expiry, then choose how high {assetName} can go.
-              </Text>
-            </div>
-            <span className="shrink-0 rounded-[5px] bg-zinc-100 px-3 py-2 font-mono text-xs text-zinc-700">
-              Sell call
-            </span>
-          </div>
-
-          <div className="flex flex-col gap-2">
-            <Text variant="body-small" className="text-zinc-500">
-              Expiry
+    <section className="min-w-0 py-6 sm:py-8 min-[960px]:pr-10 xl:pr-12">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div className="flex items-center gap-3">
+          <MarketIcon marketId={selectedMarketId} size={34} />
+          <div>
+            <p className="font-mono text-[11px] uppercase tracking-[0.08em] text-zinc-500">
+              {collateralSymbol} / USDT
+            </p>
+            <Text as="h1" variant="h4" className="mt-0.5 text-zinc-950">
+              Covered calls
             </Text>
-            <div
-              role="tablist"
-              aria-label="Covered call expiry"
-              className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1 scrollbar-thin"
-            >
-              {expiries.map((expiry) => {
-                const selected = expiry.epoch === activeExpiry;
-                return (
-                  <button
-                    key={expiry.epoch}
-                    type="button"
-                    role="tab"
-                    aria-selected={selected}
-                    disabled={disabled}
-                    onClick={() => onExpiryChange(expiry.epoch)}
-                    className={cn(
-                      "min-h-12 min-w-[92px] shrink-0 rounded-full border-[0.5px] px-4 py-2 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-60",
-                      selected
-                        ? "border-orange-500 bg-orange-50 text-orange-700"
-                        : "border-zinc-200 bg-white text-zinc-700 hover:border-zinc-400",
-                    )}
-                  >
-                    <span className="block font-mono text-xs font-medium">
-                      {shortExpiry(expiry.epoch)}
-                    </span>
-                    <span className="block font-mono text-[10px] opacity-70">
-                      {dte(expiry.epoch)} DTE
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
           </div>
-
-          <div className="flex items-center justify-between gap-4">
-            <div>
-              <Text variant="body-small" className="text-zinc-700">
-                Available strikes
-              </Text>
-              <Text variant="terminal-small" className="mt-0.5 text-zinc-500">
-                Indicative · final premium comes from live RFQ
-              </Text>
-            </div>
-            {fallbackPricing && (
-              <span className="rounded-full bg-amber-50 px-2.5 py-1 font-mono text-[10px] text-amber-700">
-                Estimated feed
-              </span>
-            )}
-          </div>
-
-          <div className="overflow-hidden rounded-[5px] border-[0.5px] border-zinc-200">
-            <div className="flex min-h-11 items-center justify-between bg-zinc-100 px-4 font-mono text-xs text-zinc-600">
-              <span>{selectedMarketId} spot</span>
-              <span className="font-medium text-zinc-950">
-                {spotPrice > 0 ? formatUsd(spotPrice, 2) : "Loading"}
-              </span>
-            </div>
-
-            <div className="max-h-[420px] overflow-y-auto bg-white scrollbar-thin">
-              {isLoading ? (
-                <div className="space-y-px bg-zinc-100">
-                  {[0, 1, 2, 3].map((key) => (
-                    <div
-                      key={key}
-                      className="h-[78px] animate-pulse bg-white p-4"
-                    >
-                      <div className="h-3 w-24 rounded bg-zinc-100" />
-                      <div className="mt-3 h-2.5 w-36 rounded bg-zinc-100" />
-                    </div>
-                  ))}
-                </div>
-              ) : marketUnavailable ? (
-                <BrowserMessage>
-                  {unavailableReason ?? `${assetName} is staged and will appear here after its oracle, collateral, and maker are enabled.`}
-                </BrowserMessage>
-              ) : spotPrice <= 0 ? (
-                <BrowserMessage>
-                  {assetName} pricing is unavailable. Check the oracle feed and try again.
-                </BrowserMessage>
-              ) : strikes.length === 0 ? (
-                <BrowserMessage>No strikes are available for this expiry yet.</BrowserMessage>
-              ) : (
-                <div className="divide-y divide-zinc-100">
-                  {strikes.map((strike) => {
-                    const selected = strike.strike === selectedStrike;
-                    return (
-                      <button
-                        key={strike.instrumentName}
-                        type="button"
-                        disabled={disabled && !selected}
-                        aria-pressed={selected}
-                        aria-label={`${disabled && selected ? "Reopen" : "Select"} ${formatUsd(strike.strike)} strike, ${formatUsd(strike.premium, 2)} premium per ${selectedMarketId}`}
-                        onClick={(event) =>
-                          onStrikeSelect(strike.strike, event.currentTarget)
-                        }
-                        className={cn(
-                          "flex min-h-[78px] w-full items-center justify-between gap-4 px-4 py-3 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-60",
-                          selected ? "bg-orange-50" : "bg-white hover:bg-zinc-50",
-                        )}
-                      >
-                        <span className="min-w-0">
-                          <span className="block font-heading text-base font-bold text-zinc-950">
-                            {formatUsd(strike.strike)} strike
-                          </span>
-                          <span className="mt-1 flex flex-wrap gap-x-3 font-mono text-[11px] text-zinc-500">
-                            <span>+{formatPercent(strike.otmPercent)} above spot</span>
-                            <span>{formatPercent(strike.apr)} APR</span>
-                          </span>
-                        </span>
-                        <span className="inline-flex min-h-11 shrink-0 items-center overflow-hidden rounded-full border border-orange-500 text-orange-600">
-                          <span className="px-3 font-mono text-xs font-medium">
-                            {formatUsd(strike.premium, strike.premium >= 100 ? 0 : 2)}
-                          </span>
-                          <span className="flex min-h-11 w-10 items-center justify-center border-l border-orange-500">
-                            <Plus className="size-4" />
-                          </span>
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-          </div>
-
-          <Text variant="terminal-small" className="text-zinc-500">
-            Premiums are shown per {selectedMarketId}. Enter your {collateralSymbol} amount after selecting a strike.
-          </Text>
         </div>
-      </AsideContent>
-    </AsideCard>
+        <div className="text-right">
+          <p className="font-mono text-[11px] uppercase tracking-[0.08em] text-zinc-500">
+            {selectedMarketId} spot
+          </p>
+          <p className="mt-1 font-mono text-base font-medium text-zinc-950">
+            {spotPrice > 0 ? formatUsd(spotPrice, 2) : "Loading"}
+          </p>
+          <MarketSourceIndicator
+            isLoading={isLoading}
+            available={!marketUnavailable && spotPrice > 0 && displayStrikes.length > 0}
+            fallbackPricing={fallbackPricing}
+          />
+        </div>
+      </div>
+
+      {selectedMarket?.collateral.scaledUi && (
+        <p className="mt-4 border-l-2 border-zinc-300 pl-3 font-mono text-[10px] leading-5 text-zinc-500">
+          Tokenized exposure via bStocks · amounts use the token&apos;s current UI multiplier
+        </p>
+      )}
+
+      <div className="mt-6 border-y-[0.5px] border-zinc-200">
+        <div className="flex items-center justify-between gap-4 pt-5">
+          <p className="text-sm font-medium text-zinc-800">Expiry</p>
+          <p className="font-mono text-[11px] text-zinc-500">Friday · 08:00 UTC</p>
+        </div>
+        <div
+          role="tablist"
+          aria-label="Covered call expiry"
+          className="mt-3 flex gap-7 overflow-x-auto scrollbar-thin"
+        >
+          {expiries.map((expiry) => {
+            const selectedExpiry = expiry.epoch === activeExpiry;
+            return (
+              <button
+                key={expiry.epoch}
+                type="button"
+                role="tab"
+                aria-selected={selectedExpiry}
+                disabled={disabled}
+                onClick={() => onExpiryChange(expiry.epoch)}
+                className={cn(
+                  "relative min-h-14 shrink-0 rounded-none border-0 px-0 pb-3 pt-1 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-50",
+                  selectedExpiry
+                    ? "text-zinc-950 after:absolute after:inset-x-0 after:bottom-0 after:h-0.5 after:bg-orange-500 after:content-['']"
+                    : "text-zinc-500 hover:text-zinc-950",
+                )}
+              >
+                <span className="block text-sm font-semibold">{shortExpiry(expiry.epoch)}</span>
+                <span className="mt-1 block font-mono text-[11px]">{dte(expiry.epoch)} days</span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      <div className="pt-6">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <p className="text-sm font-medium text-zinc-800">{selectedMarketId} price and selected strike</p>
+            <p className="mt-1 text-sm text-zinc-500">
+              Choose a row below to update the contract and estimate.
+            </p>
+          </div>
+          {selected && (
+            <div className="sm:text-right">
+              <p className="font-heading text-3xl font-bold tracking-[-0.035em] text-zinc-950">
+                {formatUsd(selected.strike)}
+              </p>
+              <p className="mt-1 font-mono text-[11px] text-orange-600">
+                +{formatPercent(selected.otmPercent)} above spot
+              </p>
+            </div>
+          )}
+        </div>
+
+        {!marketUnavailable && spotPrice > 0 && selected ? (
+          <>
+            <BitcoinTargetChart
+              points={history}
+              spotPrice={spotPrice}
+              targetPrice={selected.strike}
+              state={historyState}
+              assetName={assetName}
+              assetSymbol={selectedMarketId}
+            />
+            <StrikeLadder
+              strikes={displayStrikes}
+              selectedStrike={selected.strike}
+              suggestedStrike={suggested?.strike ?? null}
+              spotPrice={spotPrice}
+              coveredAmount={coveredAmount}
+              collateralSymbol={collateralSymbol}
+              disabled={disabled}
+              onStrikeSelect={onStrikeSelect}
+            />
+          </>
+        ) : (
+          <div className="mt-6 flex min-h-64 items-center justify-center border-y-[0.5px] border-zinc-100 text-sm text-zinc-500">
+            <p className="max-w-md px-6 text-center leading-6">
+              {marketUnavailable
+                ? unavailableReason ?? `${assetName} will appear here after its oracle, collateral, and maker are enabled.`
+                : isLoading
+                  ? `Loading ${selectedMarketId} market data…`
+                  : spotPrice <= 0
+                    ? `${assetName} pricing is unavailable. Check the oracle feed and try again.`
+                    : "No meaningful strikes are available for this expiry."}
+            </p>
+          </div>
+        )}
+      </div>
+    </section>
   );
 }
 
-function BrowserMessage({ children }: { children: ReactNode }) {
+function StrikeLadder({
+  strikes,
+  selectedStrike,
+  suggestedStrike,
+  spotPrice,
+  coveredAmount,
+  collateralSymbol,
+  disabled,
+  onStrikeSelect,
+}: {
+  strikes: StrikeOption[];
+  selectedStrike: number;
+  suggestedStrike: number | null;
+  spotPrice: number;
+  coveredAmount: number;
+  collateralSymbol: string;
+  disabled: boolean;
+  onStrikeSelect: (strike: number) => void;
+}) {
   return (
-    <div className="flex min-h-36 items-center justify-center px-6 text-center">
-      <Text variant="body-small" className="max-w-sm text-zinc-500">
-        {children}
-      </Text>
+    <div className="mt-6 border-t-[0.5px] border-zinc-200" aria-label="Available covered-call strikes">
+      <div className="grid grid-cols-[minmax(118px,1.25fr)_minmax(92px,0.8fr)_minmax(84px,0.75fr)] gap-3 px-3 py-3 font-mono text-[11px] uppercase tracking-[0.05em] text-zinc-500 sm:grid-cols-[minmax(148px,1.25fr)_minmax(92px,0.75fr)_minmax(100px,0.85fr)_minmax(80px,0.65fr)_minmax(70px,0.6fr)]">
+        <span>Strike</span>
+        <span className="text-right">Above spot</span>
+        <span className="text-right">Premium</span>
+        <span className="hidden text-right sm:block">Term return</span>
+        <span className="hidden text-right sm:block">Annualized</span>
+      </div>
+      {strikes.map((strike) => {
+        const selected = strike.strike === selectedStrike;
+        const suggested = strike.strike === suggestedStrike;
+        const termReturn = spotPrice > 0 ? (strike.premium / spotPrice) * 100 : 0;
+        const totalPremium = strike.premium * coveredAmount;
+        return (
+          <button
+            key={strike.instrumentName}
+            type="button"
+            aria-pressed={selected}
+            disabled={disabled}
+            onClick={() => onStrikeSelect(strike.strike)}
+            className={cn(
+              "relative grid min-h-[62px] w-full grid-cols-[minmax(118px,1.25fr)_minmax(92px,0.8fr)_minmax(84px,0.75fr)] items-center gap-3 border-t-[0.5px] px-3 py-3 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-60 sm:grid-cols-[minmax(148px,1.25fr)_minmax(92px,0.75fr)_minmax(100px,0.85fr)_minmax(80px,0.65fr)_minmax(70px,0.6fr)]",
+              selected
+                ? "border-zinc-200 bg-orange-50/55"
+                : "border-zinc-100 hover:bg-zinc-50",
+            )}
+          >
+            {selected && <span aria-hidden className="absolute inset-y-0 left-0 w-0.5 bg-orange-500" />}
+            <span className="flex min-w-0 flex-col items-start gap-0.5 lg:flex-row lg:items-center lg:gap-2">
+              <span className="font-mono text-sm font-medium text-zinc-950">{formatUsd(strike.strike)}</span>
+              {suggested && (
+                <span className="font-mono text-[10px] uppercase text-orange-700">Suggested</span>
+              )}
+            </span>
+            <span className="text-right font-mono text-[12px] text-zinc-600">+{formatPercent(strike.otmPercent)}</span>
+            <span className="text-right font-mono text-[12px] font-medium text-zinc-950">
+              {coveredAmount > 0 ? formatUsd(totalPremium, 2) : "—"}
+            </span>
+            <span className="hidden text-right font-mono text-[12px] text-zinc-600 sm:block">{formatTermPercent(termReturn)}</span>
+            <span className="hidden text-right font-mono text-[12px] text-zinc-600 sm:block">{formatPercent(strike.apr)}</span>
+          </button>
+        );
+      })}
+      <p className="border-t-[0.5px] border-zinc-100 px-3 py-3 font-mono text-[11px] leading-5 text-zinc-500">
+        {coveredAmount > 0
+          ? `Indicative gross premiums shown for ${coveredAmount.toLocaleString("en-US", { maximumFractionDigits: 6 })} ${collateralSymbol}.`
+          : `Enter a ${collateralSymbol} amount to compare indicative gross premiums.`} Suggested marks the strike nearest 5% above spot; select any row before requesting competing live quotes.
+      </p>
     </div>
   );
 }
 
-export function MobileOrderSheet({
-  open,
-  onOpenChange,
-  preventClose,
-  returnFocus,
-  children,
+export function BitcoinTargetChart({
+  points,
+  spotPrice,
+  targetPrice,
+  state,
+  assetName = "Bitcoin",
+  assetSymbol = "BTC",
 }: {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  preventClose: boolean;
-  returnFocus?: HTMLElement | null;
-  children: ReactNode;
+  points: BitcoinPriceHistoryPoint[];
+  spotPrice: number;
+  targetPrice: number;
+  state?: "loading" | "ready" | "unavailable";
+  assetName?: string;
+  assetSymbol?: string;
 }) {
-  return (
-    <Dialog.Root open={open} onOpenChange={onOpenChange}>
-      <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 z-50 bg-zinc-950/35 backdrop-blur-[2px] data-[state=closed]:animate-out data-[state=open]:animate-in" />
-        <Dialog.Content
-          aria-describedby={undefined}
-          onEscapeKeyDown={(event) => {
-            if (preventClose) event.preventDefault();
-          }}
-          onPointerDownOutside={(event) => {
-            if (preventClose) event.preventDefault();
-          }}
-          onCloseAutoFocus={(event) => {
-            if (!returnFocus) return;
-            event.preventDefault();
-            returnFocus.focus();
-          }}
-          className="fixed inset-x-0 bottom-0 z-50 flex max-h-[94dvh] flex-col overflow-hidden rounded-t-[14px] border-[0.5px] border-zinc-200 bg-white shadow-[0_-18px_50px_rgba(9,9,11,0.14)] focus:outline-none"
-        >
-          <Dialog.Title className="sr-only">Covered call order ticket</Dialog.Title>
-          {children}
-        </Dialog.Content>
-      </Dialog.Portal>
-    </Dialog.Root>
+  const validPoints = useMemo(
+    () => points.filter((point) => Number.isFinite(point.value) && point.value > 0),
+    [points],
   );
+  const geometry = useMemo(
+    () =>
+      validPoints.length > 1
+        ? chartGeometry(validPoints, spotPrice, targetPrice)
+        : null,
+    [validPoints, spotPrice, targetPrice],
+  );
+  const accessibleLabel = `${assetName} 30-day price history. Current spot ${formatUsd(spotPrice)}. Selected covered-call strike ${formatUsd(targetPrice)}.`;
+
+  if (geometry === null || state === "loading" || state === "unavailable") {
+    return (
+      <div
+        role="img"
+        aria-label={
+          state === "loading"
+            ? `Loading ${assetSymbol} 30-day price history`
+            : `${assetSymbol} 30-day price history is currently unavailable`
+        }
+        className="relative mt-6 flex h-[220px] w-full items-center justify-center overflow-hidden border-y-[0.5px] border-zinc-100"
+      >
+        <div aria-hidden className="absolute inset-0 bg-[linear-gradient(to_bottom,transparent_24%,#f4f4f5_24.5%,transparent_25%,transparent_49%,#f4f4f5_49.5%,transparent_50%,transparent_74%,#f4f4f5_74.5%,transparent_75%)]" />
+        <p className="relative bg-white px-3 font-mono text-[11px] text-zinc-500">
+          {state === "loading" ? `Loading 30-day ${assetSymbol} history…` : `30-day ${assetSymbol} history unavailable`}
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div role="img" className="relative mt-6 h-[220px] w-full" aria-label={accessibleLabel}>
+      <svg
+        viewBox="0 0 720 220"
+        aria-hidden="true"
+        className="h-full w-full overflow-visible"
+        preserveAspectRatio="none"
+      >
+        <defs>
+          <linearGradient id="btcHistoryFade" x1="0" x2="0" y1="0" y2="1">
+            <stop offset="0%" stopColor="#f97316" stopOpacity="0.11" />
+            <stop offset="100%" stopColor="#f97316" stopOpacity="0" />
+          </linearGradient>
+        </defs>
+        {[42, 92, 142, 192].map((y) => (
+          <line key={y} x1="0" x2="720" y1={y} y2={y} stroke="#f4f4f5" strokeWidth="1" />
+        ))}
+        <line
+          x1="0"
+          x2="720"
+          y1={geometry.targetY}
+          y2={geometry.targetY}
+          stroke="#f97316"
+          strokeDasharray="5 6"
+          strokeWidth="1.5"
+        />
+        <path d={geometry.areaPath} fill="url(#btcHistoryFade)" />
+        <path
+          d={geometry.linePath}
+          fill="none"
+          stroke="#18181b"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeWidth="2"
+          vectorEffect="non-scaling-stroke"
+        />
+        <circle cx="708" cy={geometry.spotY} r="4" fill="#18181b" stroke="white" strokeWidth="2" />
+        <rect
+          x="704"
+          y={geometry.targetY - 4}
+          width="8"
+          height="8"
+          fill="#f97316"
+          transform={`rotate(45 708 ${geometry.targetY})`}
+        />
+      </svg>
+      <div
+        className="pointer-events-none absolute right-0 -translate-y-[calc(100%+7px)] bg-white pl-2 font-mono text-[11px] text-orange-700"
+        style={{ top: `${(geometry.targetY / 220) * 100}%` }}
+      >
+        Target {formatUsd(targetPrice)}
+      </div>
+      <div
+        className="pointer-events-none absolute right-0 translate-y-2 bg-white pl-2 font-mono text-[11px] text-zinc-600"
+        style={{ top: `${(geometry.spotY / 220) * 100}%` }}
+      >
+        Now {formatUsd(spotPrice)}
+      </div>
+      <div className="pointer-events-none absolute inset-x-0 bottom-0 flex justify-between font-mono text-[11px] uppercase tracking-[0.05em] text-zinc-500">
+        <span>30 days ago</span>
+        <span>Today</span>
+      </div>
+    </div>
+  );
+}
+
+function chartGeometry(
+  history: BitcoinPriceHistoryPoint[],
+  spotPrice: number,
+  targetPrice: number,
+) {
+  const validHistory = history.filter(
+    (point) => Number.isFinite(point.value) && point.value > 0,
+  );
+  const values = validHistory.map((point, index) =>
+    index === validHistory.length - 1 ? spotPrice : point.value,
+  );
+  const plotTop = 18;
+  const plotBottom = 192;
+  const min = Math.min(...values, spotPrice) * 0.985;
+  const max = Math.max(...values, targetPrice) * 1.015;
+  const span = Math.max(1, max - min);
+  const y = (value: number) =>
+    plotTop + ((max - value) / span) * (plotBottom - plotTop);
+  const coordinates = values.map((value, index) => ({
+    x: values.length === 1 ? 708 : (index / (values.length - 1)) * 708,
+    y: y(value),
+  }));
+  const linePath = coordinates
+    .map((point, index) => `${index === 0 ? "M" : "L"}${point.x.toFixed(2)},${point.y.toFixed(2)}`)
+    .join(" ");
+  const last = coordinates.at(-1) ?? { x: 708, y: y(spotPrice) };
+  const first = coordinates[0] ?? { x: 0, y: y(spotPrice) };
+
+  return {
+    linePath,
+    areaPath: `${linePath} L${last.x.toFixed(2)},${plotBottom} L${first.x.toFixed(2)},${plotBottom} Z`,
+    spotY: y(spotPrice),
+    targetY: y(targetPrice),
+  };
 }
 
 export function OrderTicket({
@@ -388,16 +589,18 @@ export function OrderTicket({
   amount,
   balance,
   maxAmount,
+  hasSubaccount,
+  depositedBalance,
   isConnected,
-  amountLocked,
   setupPhase,
   sellPhase,
   auction,
   quote,
   error,
   doneInfo,
+  feeReadState,
+  controlsDisabled,
   onAmountChange,
-  onClose,
   onRequestQuote,
   onAcceptQuote,
   onCreateAnother,
@@ -406,16 +609,18 @@ export function OrderTicket({
   amount: string;
   balance: number;
   maxAmount: string;
+  hasSubaccount: boolean;
+  depositedBalance: number;
   isConnected: boolean;
-  amountLocked: boolean;
   setupPhase: SetupPhase;
   sellPhase: SellPhase;
   auction: AuctionState | null;
   quote: PreparedQuote | null;
   error: string | null;
   doneInfo: CompletedTradeInfo | null;
+  feeReadState: FeeReadState;
+  controlsDisabled: boolean;
   onAmountChange: (amount: string) => void;
-  onClose: () => void;
   onRequestQuote: () => void;
   onAcceptQuote: () => void;
   onCreateAnother: () => void;
@@ -424,6 +629,7 @@ export function OrderTicket({
   const assetName = snapshot.assetName ?? "Bitcoin";
   const collateralSymbol = snapshot.collateralSymbol ?? "BTCB";
   const amountNumber = Math.max(0, Number.parseFloat(amount) || 0);
+  const hasAmount = amountNumber > 0;
   const indicativeTotal = snapshot.strike.premium * amountNumber;
   const executableQuote =
     quote !== null &&
@@ -431,14 +637,17 @@ export function OrderTicket({
       ? quote
       : null;
   const displayPremium = executableQuote?.totalPremium ?? indicativeTotal;
+  const estimatedOiFee = snapshot.estimatedOiFee ?? null;
+  const estimatedNet =
+    estimatedOiFee === null ? null : displayPremium - estimatedOiFee;
   const insufficient = isConnected && amountNumber > balance;
   const exceedsMaximum = amountExceedsLimit(amount || "0", maxAmount);
+  const depositDeficit = Math.max(0, amountNumber - depositedBalance);
+  const requiresSetup = isConnected && (!hasSubaccount || depositDeficit > 0);
   const busy =
     setupPhase !== "idle" ||
     ["requesting", "auction", "signing", "executing"].includes(sellPhase);
-  const [scenarioPrice, setScenarioPrice] = useState(
-    () => snapshot.spotPrice,
-  );
+  const [scenarioPrice, setScenarioPrice] = useState(() => snapshot.spotPrice);
 
   const range = useMemo(
     () => scenarioRange(snapshot.spotPrice),
@@ -459,8 +668,7 @@ export function OrderTicket({
     100,
     Math.max(
       0,
-      ((snapshot.strike.strike - range.min) / (range.max - range.min || 1)) *
-        100,
+      ((snapshot.strike.strike - range.min) / (range.max - range.min || 1)) * 100,
     ),
   );
   const spotMarker = Math.min(
@@ -478,6 +686,8 @@ export function OrderTicket({
     exceedsMaximum,
     setupPhase,
     sellPhase,
+    requiresSetup,
+    feeReadState,
     done: doneInfo !== null,
     collateralSymbol,
   });
@@ -493,163 +703,155 @@ export function OrderTicket({
   };
 
   return (
-    <section className="flex min-h-0 flex-1 flex-col bg-white lg:overflow-hidden lg:rounded-lg lg:border-[0.5px] lg:border-zinc-200 lg:shadow-[0_0_30px_0_rgba(0,0,0,0.05)]">
-      <div className="flex min-h-14 items-center justify-between border-b-[0.5px] border-zinc-200 bg-zinc-100 px-5 py-3">
-        <button
-          type="button"
-          onClick={onClose}
-          disabled={sellPhase === "signing" || sellPhase === "executing"}
-          className="inline-flex min-h-11 items-center gap-2 font-mono text-xs text-zinc-500 transition-colors hover:text-zinc-950 disabled:opacity-40"
-        >
-          <ArrowLeft className="size-4" />
-          Back
-        </button>
-        <div className="text-center">
-          <Text variant="terminal-small" className="text-zinc-950">
-            Order ticket
-          </Text>
-          <Text variant="terminal-small" className="text-zinc-500">
-            Covered call
-          </Text>
+    <aside id="order-review" className="border-t-[0.5px] border-zinc-200 py-7 sm:py-8 min-[960px]:border-l-[0.5px] min-[960px]:border-t-0 min-[960px]:pl-8 xl:pl-10">
+      <div className="min-[960px]:sticky min-[960px]:top-[96px]">
+        <div className="flex items-center justify-between gap-4">
+          <p className="font-mono text-[11px] uppercase tracking-[0.08em] text-zinc-500">
+            Sell call
+          </p>
+          <p className="font-mono text-[11px] text-zinc-500">{shortExpiry(snapshot.strike.expiry)}</p>
         </div>
-        <button
-          type="button"
-          aria-label="Close order ticket"
-          onClick={onClose}
-          disabled={sellPhase === "signing" || sellPhase === "executing"}
-          className="flex size-11 items-center justify-center rounded-full text-zinc-500 hover:bg-zinc-200 hover:text-zinc-950 disabled:opacity-40"
-        >
-          <X className="size-4" />
-        </button>
-      </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto p-5 sm:p-6 lg:p-7 scrollbar-thin">
-        <div className="mx-auto flex w-full max-w-2xl flex-col gap-6">
-          <div>
-            <Text as="h2" variant="h3" className="text-zinc-950">
-              Sell {assetName} higher
-            </Text>
-            <Text variant="body-small" className="mt-1 text-zinc-500">
-              {shortExpiry(snapshot.strike.expiry)} · {dte(snapshot.strike.expiry)} DTE · {formatUsd(snapshot.strike.strike)} strike
-            </Text>
-          </div>
-
-          <CurrencyField size="large">
-            <CurrencyField.Label>How much {collateralSymbol} will you cover?</CurrencyField.Label>
+        <div className="mt-5 border-b-[0.5px] border-zinc-200 pb-6">
+          <CurrencyField size="medium">
+            <CurrencyField.Label className="!text-sm !font-medium !leading-6 text-zinc-800">
+              Amount to cover
+            </CurrencyField.Label>
             <CurrencyField.Control
-              disabled={amountLocked}
+              disabled={controlsDisabled}
               value={amount}
               onChange={onAmountChange}
               prefix=""
               hasError={insufficient || exceedsMaximum}
-              subtitle={`Available ${balance.toLocaleString("en-US", { maximumFractionDigits: 6 })} ${collateralSymbol}`}
               trailing={
-                <div className="flex shrink-0 items-center gap-2">
-                  <button
-                    type="button"
-                    disabled={amountLocked || balance <= 0}
-                    onClick={() =>
-                      onAmountChange(
-                        Math.min(balance, Number.parseFloat(maxAmount))
-                          .toFixed(18)
-                          .replace(/\.?0+$/, ""),
-                      )
-                    }
-                    className="min-h-11 rounded-[5px] border-[0.5px] border-zinc-200 px-3 font-mono text-xs text-zinc-600 hover:border-orange-400 hover:text-orange-600 disabled:opacity-40"
-                  >
-                    MAX
-                  </button>
-                  <span className="flex min-h-11 items-center gap-2 rounded-[5px] bg-zinc-100 px-3 text-sm text-zinc-800">
-                    <TokenIcon symbol={assetSymbol} size={22} /> {collateralSymbol}
-                  </span>
-                </div>
+                <span className="flex min-h-10 shrink-0 items-center gap-2 border-l-[0.5px] border-zinc-200 pl-3 text-sm font-medium text-zinc-800">
+                  <MarketIcon marketId={assetSymbol} size={18} /> {collateralSymbol}
+                </span>
               }
             />
           </CurrencyField>
-
+          <p className="mt-3 font-mono text-[11px] leading-5 text-zinc-500">
+            {isConnected
+              ? `${balance.toLocaleString("en-US", { maximumFractionDigits: 6 })} ${collateralSymbol} detected · maximum order ${maxAmount} ${collateralSymbol}`
+              : "Connect a wallet to check collateral"}
+          </p>
           {insufficient && (
-            <Text role="alert" variant="terminal-small" className="text-red-600">
-              Enter an amount no greater than your available {collateralSymbol} balance.
-            </Text>
+            <p role="alert" className="mt-2 text-xs leading-5 text-red-600">
+              This exceeds the {collateralSymbol} detected across your wallet and covered-call account.
+            </p>
           )}
-
           {!insufficient && exceedsMaximum && (
-            <Text role="alert" variant="terminal-small" className="text-red-600">
+            <p role="alert" className="mt-2 text-xs leading-5 text-red-600">
               Maximum order size is {maxAmount} {collateralSymbol}.
-            </Text>
+            </p>
           )}
+        </div>
 
-          <div className="grid grid-cols-2 gap-px overflow-hidden rounded-[5px] border-[0.5px] border-zinc-200 bg-zinc-200 sm:grid-cols-4">
-            <TicketMetric label="Strike" value={formatUsd(snapshot.strike.strike)} />
-            <TicketMetric
-              label="Above spot"
-              value={`+${formatPercent(snapshot.strike.otmPercent)}`}
-            />
-            <TicketMetric
-              label={executableQuote ? "Executable premium" : "Indicative premium"}
-              value={formatUsd(displayPremium, 2)}
-              accent={executableQuote !== null}
-            />
-            <TicketMetric label="Projected APR" value={formatPercent(snapshot.strike.apr)} />
-          </div>
-
-          {(setupPhase !== "idle" || sellPhase === "requesting") && (
-            <StatusPanel
-              icon={<MoveRight className="size-4" />}
-              title={
-                setupPhase === "subaccount"
-                  ? "Creating your covered-call account"
-                  : setupPhase === "deposit"
-                    ? `Depositing ${collateralSymbol} collateral`
-                    : "Opening the RFQ auction"
+        <div className="py-6">
+          <p className="font-mono text-[11px] uppercase tracking-[0.08em] text-zinc-500">
+            {!hasAmount
+              ? "Estimated trade economics"
+              : estimatedNet === null
+                ? "Estimated gross premium"
+                : "Expected net cash change"}
+          </p>
+          <Text as="p" variant="h2" className={cn("mt-2", estimatedNet !== null && estimatedNet < 0 ? "text-red-600" : "text-zinc-950")}>
+            {hasAmount ? formatUsd(estimatedNet ?? displayPremium, 2) : "—"}
+          </Text>
+          <p className="mt-2 text-sm leading-6 text-zinc-500">
+            {executableQuote
+              ? `${formatUsd(executableQuote.premium, 2)} per ${assetSymbol} from the winning executable quote.`
+              : `${formatPercent(snapshot.strike.apr)} gross annualized model · final premium comes from the live RFQ.`}
+          </p>
+          <dl className="mt-5 border-y-[0.5px] border-zinc-200">
+            <DetailRow label="Gross premium" value={hasAmount ? formatUsd(displayPremium, 2) : "Calculated after amount"} />
+            <DetailRow
+              label="Estimated protocol OI fee"
+              value={
+                !hasAmount
+                  ? "Calculated after amount"
+                  : estimatedOiFee !== null
+                  ? `−${formatUsd(estimatedOiFee, 2)}`
+                  : feeReadState === "loading"
+                    ? "Loading…"
+                    : "Unavailable"
               }
-              text="Keep this window open while the transaction is prepared."
             />
+          </dl>
+          {hasAmount && estimatedNet !== null && estimatedNet < 0 && (
+            <p className="mt-4 border-l-2 border-red-400 pl-3 text-xs leading-5 text-red-700">
+              The estimated protocol fee is greater than the premium at this size. Increase the amount or compare a closer strike before requesting quotes.
+            </p>
           )}
+        </div>
 
-          {sellPhase === "auction" && auction && (
-            <AuctionPanel auction={auction} />
-          )}
-
-          {quote && ["quoted", "signing", "executing", "expired"].includes(sellPhase) && (
-            <ExecutableQuotePanel
-              quote={quote}
-              indicativeTotal={snapshot.indicativeTotalPremium}
-              expired={sellPhase === "expired"}
-              assetSymbol={assetSymbol}
-            />
-          )}
-
-          {error && sellPhase === "error" && (
-            <div role="alert" className="rounded-[5px] border-[0.5px] border-red-200 bg-red-50 p-4">
-              <Text variant="body-small" className="text-red-700">
-                {error}
-              </Text>
+        <div className="border-b-[0.5px] border-zinc-200 py-6">
+          <p className="text-sm font-semibold text-zinc-950">
+            {hasAmount ? `${amountNumber.toLocaleString("en-US", { maximumFractionDigits: 6 })} ${collateralSymbol}` : `Choose ${collateralSymbol} amount`} · {formatUsd(snapshot.strike.strike)} cap · {shortExpiry(snapshot.strike.expiry)}
+          </p>
+          <div className="mt-5 space-y-4 text-sm leading-6">
+            <div className="flex gap-3">
+              <span className="mt-2 size-1.5 shrink-0 rounded-full bg-green-500" />
+              <p className="text-zinc-600">
+                <span className="font-medium text-zinc-900">{assetName} ends below the cap:</span>{" "}
+                keep the covered {collateralSymbol} and the premium after fees.
+              </p>
             </div>
-          )}
-
-          {doneInfo && (
-            <div className="rounded-[5px] border-[0.5px] border-green-200 bg-green-50 p-5">
-              <div className="flex items-center gap-3 text-green-700">
-                <CheckCircle2 className="size-5" />
-                <Text variant="h5" className="text-green-800">
-                  Covered call created
-                </Text>
-              </div>
-              <Text variant="body-small" className="mt-2 text-green-800">
-                You received {formatUsd(doneInfo.premium, 2)} in premium.
-              </Text>
-              <a
-                href={doneInfo.txUrl}
-                target="_blank"
-                rel="noreferrer"
-                className="mt-3 inline-flex min-h-11 items-center font-mono text-xs text-green-800 underline underline-offset-4"
-              >
-                View transaction
-              </a>
+            <div className="flex gap-3">
+              <span className="mt-2 size-2 shrink-0 rotate-45 bg-orange-500" />
+              <p className="text-zinc-600">
+                <span className="font-medium text-zinc-900">{assetName} ends above the cap:</span>{" "}
+                the account owes (settlement − {formatUsd(snapshot.strike.strike)}) × {hasAmount ? amountNumber.toLocaleString("en-US", { maximumFractionDigits: 6 }) : "the covered amount"} in USDT. A cash shortfall becomes borrowing against {collateralSymbol}.
+              </p>
             </div>
+          </div>
+        </div>
+
+        <ExecutionState
+          setupPhase={setupPhase}
+          sellPhase={sellPhase}
+          auction={auction}
+          quote={quote}
+          indicativeTotal={snapshot.indicativeTotalPremium}
+          error={error}
+          doneInfo={doneInfo}
+          assetSymbol={assetSymbol}
+          collateralSymbol={collateralSymbol}
+        />
+
+        {isConnected &&
+          setupPhase === "idle" &&
+          !doneInfo &&
+          ["idle", "error", "expired"].includes(sellPhase) &&
+          requiresSetup && hasAmount && (
+            <p className="mt-5 border-l-2 border-orange-400 pl-4 text-xs leading-5 text-zinc-600">
+              <span className="font-semibold text-zinc-900">First-trade preparation:</span>{" "}
+              {!hasSubaccount ? "create the covered-call account" : "account ready"}
+              {depositDeficit > 0
+                ? `, then deposit ${depositDeficit.toLocaleString("en-US", { maximumFractionDigits: 6 })} ${collateralSymbol}. Approval may be required before the quote auction starts.`
+                : ". Collateral is ready; the quote auction starts next."}
+            </p>
           )}
 
+        <Button
+          type="button"
+          action
+          size="lg"
+          disabled={primary.disabled || busy}
+          onClick={handlePrimary}
+          className="mt-7 w-full"
+        >
+          {primary.label}
+        </Button>
+        <p className="mt-3 text-center font-mono text-[11px] leading-5 text-zinc-500">
+          {assetSymbol} downside remains · runs to expiry · no early exit in this version
+        </p>
+
+        <details className="group mt-8 border-t-[0.5px] border-zinc-200">
+          <summary className="flex min-h-14 list-none items-center justify-between text-sm font-medium text-zinc-700 marker:hidden hover:text-zinc-950">
+            Payoff at expiry
+            <span className="font-mono text-xs text-zinc-400 transition-transform group-open:rotate-45">+</span>
+          </summary>
           <ExpirySimulator
             spotPrice={snapshot.spotPrice}
             strikePrice={snapshot.strike.strike}
@@ -667,41 +869,24 @@ export function OrderTicket({
             assetSymbol={assetSymbol}
             collateralSymbol={collateralSymbol}
           />
+        </details>
 
-          <div className="rounded-[5px] bg-zinc-50 p-4">
-            <div className="flex items-start gap-3">
-              <Info className="mt-0.5 size-4 shrink-0 text-zinc-500" />
-              <Text variant="body-small" className="text-zinc-600">
-                Your {collateralSymbol} remains in the covered-call subaccount. If {assetName} settles above the strike, the gain above the strike is offset through USDT cash settlement.
-              </Text>
-            </div>
-          </div>
-        </div>
+        <details className="group border-y-[0.5px] border-zinc-200">
+          <summary className="flex min-h-14 list-none items-center justify-between text-sm font-medium text-zinc-700 marker:hidden hover:text-zinc-950">
+            Market and contract details
+            <span className="font-mono text-xs text-zinc-400 transition-transform group-open:rotate-45">+</span>
+          </summary>
+          <dl className="pb-5">
+            <DetailRow label="Exact expiry" value={exactExpiry(snapshot.strike.expiry)} />
+            <DetailRow label="Strike" value={formatUsd(snapshot.strike.strike)} />
+            <DetailRow label="Distance above spot" value={`+${formatPercent(snapshot.strike.otmPercent)}`} />
+            <DetailRow label="Indicative annualized rate" value={formatPercent(snapshot.strike.apr)} />
+            <DetailRow label="Implied volatility input" value={formatPercent(snapshot.strike.vol * 100)} />
+            <DetailRow label="Instrument" value={snapshot.strike.instrumentName} />
+          </dl>
+        </details>
       </div>
-
-      <div className="border-t-[0.5px] border-zinc-200 bg-white/95 px-5 py-4 backdrop-blur sm:px-6 lg:px-7">
-        <div className="mx-auto flex w-full max-w-2xl flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <Text variant="terminal-small" className="text-zinc-500">
-              {executableQuote ? "Executable premium" : "Indicative premium"}
-            </Text>
-            <Text variant="h5" className="mt-0.5 text-zinc-950">
-              {formatUsd(displayPremium, 2)}
-            </Text>
-          </div>
-          <Button
-            type="button"
-            action
-            size="lg"
-            disabled={primary.disabled || busy}
-            onClick={handlePrimary}
-            className="w-full sm:w-auto sm:min-w-52"
-          >
-            {primary.label}
-          </Button>
-        </div>
-      </div>
-    </section>
+    </aside>
   );
 }
 
@@ -712,6 +897,8 @@ function primaryAction({
   exceedsMaximum,
   setupPhase,
   sellPhase,
+  requiresSetup,
+  feeReadState,
   done,
   collateralSymbol,
 }: {
@@ -721,11 +908,18 @@ function primaryAction({
   exceedsMaximum: boolean;
   setupPhase: SetupPhase;
   sellPhase: SellPhase;
+  requiresSetup: boolean;
+  feeReadState: FeeReadState;
   done: boolean;
   collateralSymbol: string;
 }): { label: string; disabled: boolean } {
-  if (done) return { label: "Create another target", disabled: false };
-  if (!isConnected) return { label: "Connect wallet", disabled: false };
+  if (done) return { label: "Sell another call", disabled: false };
+  if (!isConnected) return { label: "Connect wallet to continue", disabled: false };
+  if (amountNumber <= 0) return { label: `Enter ${collateralSymbol} amount`, disabled: true };
+  if (insufficient) return { label: `Insufficient ${collateralSymbol}`, disabled: true };
+  if (exceedsMaximum) return { label: "Amount exceeds maximum", disabled: true };
+  if (feeReadState === "loading") return { label: "Loading protocol fee…", disabled: true };
+  if (feeReadState === "unavailable") return { label: "Fee data unavailable", disabled: true };
   if (setupPhase === "subaccount") return { label: "Creating account…", disabled: true };
   if (setupPhase === "deposit") return { label: `Depositing ${collateralSymbol}…`, disabled: true };
   if (sellPhase === "requesting") return { label: "Opening auction…", disabled: true };
@@ -733,39 +927,98 @@ function primaryAction({
   if (sellPhase === "quoted") return { label: "Accept & sign", disabled: false };
   if (sellPhase === "signing") return { label: "Confirm in wallet…", disabled: true };
   if (sellPhase === "executing") return { label: "Creating position…", disabled: true };
-  if (sellPhase === "expired") return { label: "Get a new quote", disabled: false };
+  if (sellPhase === "expired") return { label: "Request a new quote", disabled: false };
   if (sellPhase === "error") return { label: "Try again", disabled: false };
   return {
-    label: "Get live quote",
+    label: requiresSetup ? "Prepare & request quote" : "Request live quote",
     disabled: amountNumber <= 0 || insufficient || exceedsMaximum,
   };
 }
 
-function TicketMetric({
-  label,
-  value,
-  accent = false,
+function ExecutionState({
+  setupPhase,
+  sellPhase,
+  auction,
+  quote,
+  indicativeTotal,
+  error,
+  doneInfo,
+  assetSymbol,
+  collateralSymbol,
 }: {
-  label: string;
-  value: string;
-  accent?: boolean;
+  setupPhase: SetupPhase;
+  sellPhase: SellPhase;
+  auction: AuctionState | null;
+  quote: PreparedQuote | null;
+  indicativeTotal: number;
+  error: string | null;
+  doneInfo: CompletedTradeInfo | null;
+  assetSymbol: string;
+  collateralSymbol: string;
 }) {
-  return (
-    <div className="min-w-0 bg-white p-3.5">
-      <Text variant="terminal-small" className="text-zinc-500">
-        {label}
-      </Text>
-      <Text
-        variant="body-small"
-        className={cn("mt-1 truncate text-zinc-950", accent && "text-orange-600")}
-      >
-        {value}
-      </Text>
-    </div>
-  );
+  if (doneInfo) {
+    return (
+      <div className="mt-6 border-y-[0.5px] border-green-300 py-5">
+        <div className="flex items-center gap-2 text-green-700">
+          <CheckCircle2 className="size-4" />
+          <p className="text-sm font-semibold">Covered call created</p>
+        </div>
+        <p className="mt-2 text-xs leading-5 text-zinc-600">
+          Trade premium: {formatUsd(doneInfo.premium, 2)} before protocol fees. Check the subaccount cash balance for the net effect.
+        </p>
+        <a
+          href={doneInfo.txUrl}
+          target="_blank"
+          rel="noreferrer"
+          className="mt-3 inline-flex min-h-11 items-center font-mono text-[11px] text-green-800 underline underline-offset-4"
+        >
+          View transaction
+        </a>
+      </div>
+    );
+  }
+
+  if (error && sellPhase === "error") {
+    return (
+      <div role="alert" className="mt-6 border-l-2 border-red-500 pl-4 text-sm leading-6 text-red-700">
+        {error}
+      </div>
+    );
+  }
+
+  if (setupPhase !== "idle" || sellPhase === "requesting") {
+    return (
+      <StatusLine
+        icon={<MoveRight className="size-4" />}
+        title={
+          setupPhase === "subaccount"
+            ? "Creating the covered-call account"
+            : setupPhase === "deposit"
+              ? `Depositing ${collateralSymbol} collateral`
+              : "Opening the quote auction"
+        }
+        text="Keep this page open while the wallet step is prepared."
+      />
+    );
+  }
+
+  if (sellPhase === "auction" && auction) return <AuctionLine auction={auction} />;
+
+  if (quote && ["quoted", "signing", "executing", "expired"].includes(sellPhase)) {
+    return (
+      <ExecutableQuote
+        quote={quote}
+        indicativeTotal={indicativeTotal}
+        expired={sellPhase === "expired"}
+        assetSymbol={assetSymbol}
+      />
+    );
+  }
+
+  return null;
 }
 
-function StatusPanel({
+function StatusLine({
   icon,
   title,
   text,
@@ -775,21 +1028,17 @@ function StatusPanel({
   text: string;
 }) {
   return (
-    <div className="rounded-[5px] border-[0.5px] border-orange-200 bg-orange-50 p-4">
+    <div className="mt-6 border-l-2 border-orange-400 pl-4">
       <div className="flex items-center gap-2 text-orange-700">
         {icon}
-        <Text variant="body-small" className="text-orange-800">
-          {title}
-        </Text>
+        <p className="text-sm font-semibold">{title}</p>
       </div>
-      <Text variant="terminal-small" className="mt-2 text-orange-700">
-        {text}
-      </Text>
+      <p className="mt-1 font-mono text-[11px] leading-5 text-zinc-500">{text}</p>
     </div>
   );
 }
 
-function AuctionPanel({ auction }: { auction: AuctionState }) {
+function AuctionLine({ auction }: { auction: AuctionState }) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 200);
@@ -798,7 +1047,7 @@ function AuctionPanel({ auction }: { auction: AuctionState }) {
   const remaining = Math.max(0, (auction.endsAt - now) / 1000);
 
   return (
-    <StatusPanel
+    <StatusLine
       icon={<MoveRight className="size-4" />}
       title={`Collecting live quotes · ${remaining.toFixed(1)}s`}
       text={`${auction.quoteCount} quote${auction.quoteCount === 1 ? "" : "s"} received${auction.bestTotalPremium === null ? "" : ` · best ${formatUsd(auction.bestTotalPremium, 2)}`}`}
@@ -806,7 +1055,7 @@ function AuctionPanel({ auction }: { auction: AuctionState }) {
   );
 }
 
-function ExecutableQuotePanel({
+function ExecutableQuote({
   quote,
   indicativeTotal,
   expired,
@@ -826,38 +1075,25 @@ function ExecutableQuotePanel({
   const difference = quote.totalPremium - indicativeTotal;
 
   return (
-    <div
-      className={cn(
-        "rounded-[5px] border-[0.5px] p-5",
-        expired
-          ? "border-zinc-200 bg-zinc-50"
-          : "border-orange-300 bg-orange-50",
-      )}
-    >
+    <div className={cn("mt-6 border-y-[0.5px] py-5", expired ? "border-zinc-300" : "border-orange-300")}>
       <div className="flex items-start justify-between gap-4">
         <div>
-          <Text variant="terminal-small" className="text-zinc-500">
+          <p className="font-mono text-[11px] uppercase tracking-[0.06em] text-zinc-500">
             {expired ? "Quote expired" : "Winning executable quote"}
-          </Text>
-          <Text variant="h3" className="mt-1 text-zinc-950">
+          </p>
+          <p className="mt-1 font-heading text-3xl font-bold text-zinc-950">
             {formatUsd(quote.totalPremium, 2)}
-          </Text>
-          <Text variant="terminal-small" className="mt-1 text-zinc-500">
+          </p>
+          <p className="mt-1 font-mono text-[11px] text-zinc-500">
             {formatUsd(quote.premium, 2)}/{assetSymbol} · {quote.quoteCount} quote{quote.quoteCount === 1 ? "" : "s"}
-          </Text>
+          </p>
         </div>
-        <span
-          className={cn(
-            "inline-flex min-h-9 items-center gap-2 rounded-full px-3 font-mono text-xs",
-            expired ? "bg-zinc-200 text-zinc-600" : "bg-white text-orange-700",
-          )}
-        >
+        <span className="inline-flex min-h-9 items-center gap-2 font-mono text-xs text-orange-700">
           <Clock3 className="size-3.5" />
           {expired ? "Refresh" : `${seconds}s`}
         </span>
       </div>
-      <Separator className="my-4" />
-      <div className="flex items-center justify-between gap-4 font-mono text-xs">
+      <div className="mt-4 flex items-center justify-between gap-4 border-t-[0.5px] border-zinc-200 pt-4 font-mono text-[11px]">
         <span className="text-zinc-500">Versus indicative</span>
         <span className={difference >= 0 ? "text-green-700" : "text-zinc-700"}>
           {difference >= 0 ? "+" : ""}{formatUsd(difference, 2)}
@@ -901,27 +1137,19 @@ function ExpirySimulator({
   collateralSymbol: string;
 }) {
   return (
-    <div className="rounded-[5px] border-[0.5px] border-zinc-200 p-5">
-      <div className="flex items-start justify-between gap-4">
+    <div className="pb-6">
+      <div className="flex items-start justify-between gap-4 pt-2">
         <div>
-          <Text variant="terminal-small" className="text-zinc-500">
-            {assetName} price at expiry
-          </Text>
-          <Text variant="h3" className="mt-1 text-zinc-950">
-            {formatUsd(scenarioPrice)}
-          </Text>
+          <p className="font-mono text-[11px] uppercase tracking-[0.06em] text-zinc-500">{assetName} at expiry</p>
+          <p className="mt-1 font-heading text-2xl font-bold text-zinc-950">{formatUsd(scenarioPrice)}</p>
         </div>
         <div className="text-right">
-          <Text variant="terminal-small" className="text-zinc-500">
-            Position value + premium
-          </Text>
-          <Text variant="h5" className="mt-1 text-zinc-950">
-            {formatUsd(coveredPositionValue, 2)}
-          </Text>
+          <p className="font-mono text-[11px] uppercase tracking-[0.06em] text-zinc-500">Position + gross premium</p>
+          <p className="mt-1 text-sm font-semibold text-zinc-950">{formatUsd(coveredPositionValue, 2)}</p>
         </div>
       </div>
 
-      <div className="relative mt-8 px-1 pb-8">
+      <div className="relative mt-7 px-1 pb-14">
         <input
           type="range"
           aria-label={`Simulated ${assetSymbol} price at expiry`}
@@ -932,50 +1160,28 @@ function ExpirySimulator({
           onChange={(event) => onScenarioPriceChange(Number(event.target.value))}
           className="hedge-target-slider"
         />
-        <Marker
-          left={spotMarker}
-          label="Spot"
-          value={formatUsd(spotPrice)}
-          offsetClass="top-8"
-        />
-        <Marker
-          left={strikeMarker}
-          label="Strike"
-          value={formatUsd(strikePrice)}
-          offsetClass="top-14"
-        />
+        <Marker left={spotMarker} label="Now" value={formatUsd(spotPrice)} offsetClass="top-8" />
+        <Marker left={strikeMarker} label="Cap" value={formatUsd(strikePrice)} offsetClass="top-14" />
       </div>
 
-      <div className="mt-2 grid gap-3 sm:grid-cols-2">
-        <div className="rounded-[5px] bg-zinc-50 p-4">
-          <div className="flex items-center gap-2 text-zinc-600">
-            <Target className="size-4" />
-            <Text variant="terminal-small" className="text-zinc-500">
-              Settlement payment
-            </Text>
-          </div>
-          <Text variant="h5" className="mt-2 text-zinc-950">
-            {formatUsd(settlementPayment, 2)}
-          </Text>
-        </div>
-        <div className="rounded-[5px] bg-zinc-50 p-4">
-          <div className="flex items-center gap-2 text-zinc-600">
-            <TrendingUp className="size-4" />
-            <Text variant="terminal-small" className="text-zinc-500">
-              Premium included
-            </Text>
-          </div>
-          <Text variant="h5" className="mt-2 text-zinc-950">
-            {formatUsd(premium, 2)}
-          </Text>
-        </div>
-      </div>
-
-      <Text variant="body-small" className="mt-4 text-zinc-600">
+      <dl className="border-y-[0.5px] border-zinc-200">
+        <DetailRow label="Settlement payment" value={formatUsd(settlementPayment, 2)} />
+        <DetailRow label="Gross premium included" value={formatUsd(premium, 2)} />
+      </dl>
+      <p className="mt-4 text-xs leading-5 text-zinc-600">
         {isAboveStrike
-          ? `${collateralSymbol} remains held. USDT settlement offsets gains above ${formatUsd(strikePrice)} for the covered ${amount.toLocaleString("en-US", { maximumFractionDigits: 6 })} ${collateralSymbol}.`
-          : `${assetName} is below the strike, so you keep the covered ${amount.toLocaleString("en-US", { maximumFractionDigits: 6 })} ${collateralSymbol} and the premium.`}
-      </Text>
+          ? `The subaccount is debited (settlement − ${formatUsd(strikePrice)}) × ${amount.toLocaleString("en-US", { maximumFractionDigits: 6 })} in USDT. Any cash shortfall becomes borrowing against ${collateralSymbol}.`
+          : `Below the cap, you keep the covered ${amount.toLocaleString("en-US", { maximumFractionDigits: 6 })} ${collateralSymbol} and the gross premium before fees.`}
+      </p>
+    </div>
+  );
+}
+
+function DetailRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="grid grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)] gap-4 border-t-[0.5px] border-zinc-100 py-3 first:border-t-0">
+      <dt className="font-mono text-[11px] leading-5 text-zinc-500">{label}</dt>
+      <dd className="break-words text-right font-mono text-[11px] leading-5 text-zinc-700">{value}</dd>
     </div>
   );
 }
@@ -993,14 +1199,11 @@ function Marker({
 }) {
   return (
     <div
-      className={cn(
-        "pointer-events-none absolute -translate-x-1/2 text-center",
-        offsetClass,
-      )}
+      className={cn("pointer-events-none absolute -translate-x-1/2 text-center", offsetClass)}
       style={{ left: `${left}%` }}
     >
       <span className="mx-auto block h-2 w-px bg-zinc-400" />
-      <span className="mt-1 block whitespace-nowrap font-mono text-[9px] text-zinc-500">
+      <span className="mt-1 block whitespace-nowrap font-mono text-[11px] text-zinc-500">
         {label} {value}
       </span>
     </div>

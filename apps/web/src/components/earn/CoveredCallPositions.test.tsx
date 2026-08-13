@@ -82,7 +82,7 @@ describe("covered-call position rows", () => {
     expect(screen.getByText("Exact expiry")).toBeTruthy();
     expect(screen.getByText("0.25 BTCB")).toBeTruthy();
     expect(screen.getByText("Cash settled at expiry")).toBeTruthy();
-    expect(screen.getByText(/BTCB remains held/i)).toBeTruthy();
+    expect(screen.getByText(/BTCB remains in the covered-call subaccount/i)).toBeTruthy();
   });
 
   it("does not infer moneyness while spot is unavailable", () => {

@@ -246,3 +246,25 @@ export const lyraRateFeedAbi = [
     stateMutability: "view",
   },
 ] as const;
+
+/** Fee surface inherited by StandardManager from BaseManager. */
+export const standardManagerFeeAbi = [
+  {
+    type: "function",
+    name: "minOIFee",
+    inputs: [],
+    outputs: [{ name: "", type: "uint256", internalType: "uint256" }],
+    stateMutability: "view",
+  },
+] as const;
+
+/** Live per-asset OI fee multiplier configured on SRMPortfolioViewer. */
+export const srmPortfolioViewerAbi = [
+  {
+    type: "function",
+    name: "OIFeeRateBPS",
+    inputs: [{ name: "asset", type: "address", internalType: "address" }],
+    outputs: [{ name: "", type: "uint256", internalType: "uint256" }],
+    stateMutability: "view",
+  },
+] as const;

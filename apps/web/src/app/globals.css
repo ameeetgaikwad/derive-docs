@@ -107,24 +107,10 @@ body {
   box-shadow: 0 8px 20px rgba(9, 9, 11, 0.18);
 }
 
-/* Remove default focus outlines */
-button:focus,
-select:focus,
-input:focus,
-a:focus {
-  outline: none;
-}
-
-button:focus-visible,
-select:focus-visible,
-a:focus-visible {
-  outline: none;
-  box-shadow: 0 0 0 1px var(--border);
-  border-radius: 6px;
-}
-
-input:focus-visible {
-  outline: none;
+/* Preserve a visible, consistent keyboard focus indicator. */
+:where(button, select, input, a, [role="button"]):focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
 }
 
 /* All interactive elements get pointer cursor */
@@ -175,6 +161,21 @@ select {
 .scrollbar-thin::-webkit-scrollbar-thumb {
   background: var(--border);
   border-radius: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
 }
 
 /* RainbowKit overrides */

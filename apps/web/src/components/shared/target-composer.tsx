@@ -5,10 +5,11 @@ import { useConnectModal } from "@rainbow-me/rainbowkit";
 import { toast } from "sonner";
 import { useAccount } from "wagmi";
 import {
-  ContractBrowser,
-  MobileOrderSheet,
+  MarketSelector,
   OrderTicket,
+  TradeConfigurator,
   type CompletedTradeInfo,
+  type FeeReadState,
   type OrderSnapshot,
   type SetupPhase,
 } from "@/components/trade/covered-call-ui";
@@ -18,17 +19,18 @@ import {
   type StrikeOption,
 } from "@/hooks/protocol/useAvailableStrikes";
 import { useCollateralBalance, useDepositCollateral } from "@/hooks/protocol/useCollateral";
+import { useOIFeeEstimate } from "@/hooks/protocol/useOIFeeEstimate";
 import { usePositionMonitor } from "@/hooks/protocol/usePositionMonitor";
 import { useSellCall } from "@/hooks/protocol/useSellCall";
+import { useBitcoinPriceHistory } from "@/hooks/useBitcoinPriceHistory";
 import { explorerTxUrl } from "@/lib/protocol/deployments";
 import { assertRfqEngineChain } from "@/lib/protocol/rfq-engine";
 import { amountExceedsLimit, fromUnit, toUnit } from "@/lib/protocol/units";
 import { getSelectableMarkets, uiAmount18ToRaw18, type MarketId } from "@/lib/protocol/markets";
-import { cn } from "@/lib/utils";
 import { useCoveredCallStore } from "@/stores/covered-call";
 import { useNetwork } from "@/hooks/protocol/useNetwork";
 
-const DEFAULT_AMOUNT = "0.05";
+const DEFAULT_AMOUNT = "0.5";
 
 function sanitizeDecimal(value: string): string {
   const normalized = value.replace(/[^\d.]/g, "");
@@ -45,28 +47,21 @@ function expiryLabel(epoch: number): string {
   });
 }
 
-function useDesktopLayout(): boolean {
-  const [isDesktop, setIsDesktop] = useState(false);
-
-  useEffect(() => {
-    const media = window.matchMedia("(min-width: 1024px)");
-    const update = () => setIsDesktop(media.matches);
-    update();
-    media.addEventListener("change", update);
-    return () => media.removeEventListener("change", update);
-  }, []);
-
-  return isDesktop;
+function suggestedStrike(strikes: StrikeOption[]): StrikeOption | null {
+  const meaningful = strikes.filter((strike) => strike.premium >= 0.01);
+  if (meaningful.length === 0) return null;
+  return meaningful.reduce((best, current) =>
+    Math.abs(current.otmPercent - 5) < Math.abs(best.otmPercent - 5)
+      ? current
+      : best,
+  );
 }
 
-export default function TargetComposer({
-  variant = "landing",
+export default function CoveredCallTrade({
   onReviewModeChange,
 }: {
-  variant?: "landing" | "borrow";
   onReviewModeChange?: (reviewMode: boolean) => void;
-}) {
-  const isDesktop = useDesktopLayout();
+} = {}) {
   const { isConnected, address } = useAccount();
   const { openConnectModal } = useConnectModal();
   const { chainId } = useNetwork();
@@ -87,12 +82,15 @@ export default function TargetComposer({
   const [selectedStrike, setSelectedStrike] = useState<number | null>(null);
   const [selectedStrikeSnapshot, setSelectedStrikeSnapshot] =
     useState<StrikeOption | null>(null);
-  const [ticketOpen, setTicketOpen] = useState(false);
   const [setupPhase, setSetupPhase] = useState<SetupPhase>("idle");
   const [frozenOrder, setFrozenOrder] = useState<OrderSnapshot | null>(null);
+  const [frozenMarketStrikes, setFrozenMarketStrikes] = useState<StrikeOption[] | null>(null);
   const [preparedSubaccountId, setPreparedSubaccountId] = useState<bigint | null>(null);
   const [doneInfo, setDoneInfo] = useState<CompletedTradeInfo | null>(null);
-  const [returnFocus, setReturnFocus] = useState<HTMLButtonElement | null>(null);
+
+  useEffect(() => {
+    onReviewModeChange?.(false);
+  }, [onReviewModeChange]);
 
   const {
     expiries,
@@ -105,6 +103,7 @@ export default function TargetComposer({
     isUnavailable,
     unavailableReason,
   } = useAvailableStrikes(selectedExpiry, selectedMarketId);
+  const history = useBitcoinPriceHistory();
   const { subaccountId, ensureSubaccount } = useCoveredCallSubaccount();
   const depositCollateral = useDepositCollateral(selectedMarketId, multiplier);
   const sellCall = useSellCall();
@@ -120,21 +119,36 @@ export default function TargetComposer({
   const amountNumber = Math.max(0, Number.parseFloat(amount) || 0);
   const liveSelectedStrike =
     strikes.find((strike) => strike.strike === selectedStrike) ?? null;
-  const selectedStrikeData = liveSelectedStrike ?? selectedStrikeSnapshot;
-  const browserStrikes = useMemo(() => {
+  const activeSnapshot =
+    selectedStrikeSnapshot?.expiry === activeExpiry
+      ? selectedStrikeSnapshot
+      : null;
+  const defaultStrike = useMemo(() => suggestedStrike(strikes), [strikes]);
+  const selectedStrikeData =
+    liveSelectedStrike ?? activeSnapshot ?? defaultStrike;
+  const oiFee = useOIFeeEstimate({
+    amount,
+    forwardPrice: selectedStrikeData?.forwardPrice ?? 0,
+    optionAsset: market.contracts?.optionAsset,
+    enabled:
+      market.contracts !== null &&
+      selectedStrikeData !== null &&
+      amountNumber > 0,
+  });
+
+  const marketStrikes = useMemo(() => {
     if (
-      selectedStrikeSnapshot === null ||
-      selectedStrikeSnapshot.expiry !== activeExpiry ||
+      activeSnapshot === null ||
       strikes.some(
-        (strike) => strike.instrumentName === selectedStrikeSnapshot.instrumentName,
+        (strike) => strike.instrumentName === activeSnapshot.instrumentName,
       )
     ) {
       return strikes;
     }
-    return [...strikes, selectedStrikeSnapshot].sort(
+    return [...strikes, activeSnapshot].sort(
       (left, right) => left.strike - right.strike,
     );
-  }, [activeExpiry, selectedStrikeSnapshot, strikes]);
+  }, [activeSnapshot, strikes]);
 
   const currentOrder = useMemo<OrderSnapshot | null>(() => {
     if (!selectedStrikeData || activeExpiry === null) return null;
@@ -147,9 +161,29 @@ export default function TargetComposer({
       marketId: selectedMarketId,
       assetName: market.displayName,
       collateralSymbol: market.collateral.symbol,
+      estimatedOiFee: oiFee.perSideFeeUsd,
     };
-  }, [activeExpiry, amountNumber, market, selectedMarketId, selectedStrikeData, spotPrice]);
+  }, [
+    activeExpiry,
+    amountNumber,
+    market.collateral.symbol,
+    market.displayName,
+    oiFee.perSideFeeUsd,
+    selectedMarketId,
+    selectedStrikeData,
+    spotPrice,
+  ]);
   const displayOrder = frozenOrder ?? currentOrder;
+  const feeReadState: FeeReadState = frozenOrder?.estimatedOiFee !== undefined && frozenOrder.estimatedOiFee !== null
+    ? "ready"
+    : oiFee.isLoading
+      ? "loading"
+      : oiFee.isAvailable
+        ? "ready"
+        : "unavailable";
+  const configuratorStrikes = frozenMarketStrikes ?? marketStrikes;
+  const configuratorSpot = frozenOrder?.spotPrice ?? spotPrice;
+  const configuratorStrike = frozenOrder?.strike.strike ?? selectedStrikeData?.strike ?? null;
 
   const sellBusy = [
     "requesting",
@@ -160,31 +194,19 @@ export default function TargetComposer({
     "done",
   ].includes(sellCall.phase);
   const controlsLocked = setupPhase !== "idle" || sellBusy || doneInfo !== null;
-  const closePrevented =
-    setupPhase !== "idle" ||
-    sellCall.phase === "signing" ||
-    sellCall.phase === "executing";
-
-  const setExpanded = useCallback(
-    (expanded: boolean) => {
-      setTicketOpen(expanded);
-      onReviewModeChange?.(expanded);
-    },
-    [onReviewModeChange],
-  );
 
   const handleExpiryChange = useCallback(
     (expiry: number) => {
       if (controlsLocked) return;
       sellCall.reset();
       setFrozenOrder(null);
+      setFrozenMarketStrikes(null);
       setDoneInfo(null);
       setSelectedExpiry(expiry);
       setSelectedStrike(null);
       setSelectedStrikeSnapshot(null);
-      setExpanded(false);
     },
-    [controlsLocked, sellCall, setExpanded],
+    [controlsLocked, sellCall],
   );
 
   const handleMarketChange = useCallback((marketId: MarketId) => {
@@ -195,56 +217,26 @@ export default function TargetComposer({
     setSelectedStrike(null);
     setSelectedStrikeSnapshot(null);
     setFrozenOrder(null);
+    setFrozenMarketStrikes(null);
     setDoneInfo(null);
     setPreparedSubaccountId(null);
-    setExpanded(false);
-  }, [controlsLocked, selectedMarketId, sellCall, setExpanded]);
+  }, [controlsLocked, selectedMarketId, sellCall]);
 
   const handleStrikeSelect = useCallback(
-    (strike: number, trigger: HTMLButtonElement) => {
-      if (controlsLocked) {
-        if (strike === selectedStrike && displayOrder !== null) {
-          setReturnFocus(trigger);
-          setExpanded(true);
-        }
-        return;
-      }
+    (strike: number) => {
+      if (controlsLocked) return;
       const strikeSnapshot =
         strikes.find((option) => option.strike === strike) ??
-        (selectedStrikeSnapshot?.strike === strike
-          ? selectedStrikeSnapshot
-          : null);
+        (activeSnapshot?.strike === strike ? activeSnapshot : null);
       if (strikeSnapshot === null) return;
-      setReturnFocus(trigger);
       sellCall.reset();
       setFrozenOrder(null);
+      setFrozenMarketStrikes(null);
       setDoneInfo(null);
       setSelectedStrike(strike);
       setSelectedStrikeSnapshot(strikeSnapshot);
-      setExpanded(true);
     },
-    [
-      controlsLocked,
-      displayOrder,
-      selectedStrike,
-      selectedStrikeSnapshot,
-      sellCall,
-      setExpanded,
-      strikes,
-    ],
-  );
-
-  const handleCloseTicket = useCallback(() => {
-    if (closePrevented) return;
-    setExpanded(false);
-  }, [closePrevented, setExpanded]);
-
-  const handleSheetOpenChange = useCallback(
-    (open: boolean) => {
-      if (!open && closePrevented) return;
-      setExpanded(open);
-    },
-    [closePrevented, setExpanded],
+    [activeSnapshot, controlsLocked, sellCall, strikes],
   );
 
   const handleRequestQuote = useCallback(async () => {
@@ -257,6 +249,10 @@ export default function TargetComposer({
       toast.error(`Enter the ${market.collateral.symbol} amount you want to cover`);
       return;
     }
+    if (isUnavailable || !market.enabled || market.contracts === null) {
+      toast.error(unavailableReason ?? `${market.displayName} is not available for quoting`);
+      return;
+    }
     if (amountExceedsLimit(amount, market.maxSize)) {
       toast.error(
         `Maximum order size for ${market.displayName} is ${market.maxSize} ${market.collateral.symbol}`,
@@ -265,6 +261,10 @@ export default function TargetComposer({
     }
     if (amountNumber > balance) {
       toast.error(`Not enough ${market.collateral.symbol} for this covered call`);
+      return;
+    }
+    if (oiFee.perSideFeeUsd === null) {
+      toast.error("The live protocol fee could not be read. Try again before requesting a quote.");
       return;
     }
 
@@ -278,6 +278,7 @@ export default function TargetComposer({
       indicativeTotalPremium: order.strike.premium * amountNumber,
     };
     setFrozenOrder(submitted);
+    setFrozenMarketStrikes(marketStrikes.map((strike) => ({ ...strike })));
     setDoneInfo(null);
 
     try {
@@ -312,6 +313,7 @@ export default function TargetComposer({
     } catch (error) {
       setSetupPhase("idle");
       setFrozenOrder(null);
+      setFrozenMarketStrikes(null);
       toast.error(error instanceof Error ? error.message : String(error));
     }
   }, [
@@ -325,6 +327,9 @@ export default function TargetComposer({
     ensureSubaccount,
     frozenOrder,
     isConnected,
+    isUnavailable,
+    marketStrikes,
+    oiFee.perSideFeeUsd,
     openConnectModal,
     refetchCollateral,
     sellCall,
@@ -332,8 +337,11 @@ export default function TargetComposer({
     market.collateral.symbol,
     market.displayName,
     market.maxSize,
+    market.contracts,
+    market.enabled,
     multiplier,
     selectedMarketId,
+    unavailableReason,
   ]);
 
   const handleAcceptQuote = useCallback(async () => {
@@ -362,7 +370,7 @@ export default function TargetComposer({
         txUrl: explorerTxUrl(result.txHash, result.chainId),
       });
       toast.success(
-        `Covered call created. You received $${result.totalPremium.toLocaleString("en-US", { maximumFractionDigits: 2 })}`,
+        `Covered call created. Gross premium: $${result.totalPremium.toLocaleString("en-US", { maximumFractionDigits: 2 })}`,
       );
     } catch (error) {
       toast.error(error instanceof Error ? error.message : String(error));
@@ -379,76 +387,105 @@ export default function TargetComposer({
 
   const handleCreateAnother = useCallback(() => {
     sellCall.reset();
+    setAmount(selectedMarketId === "BTC" ? DEFAULT_AMOUNT : "1");
     setSelectedStrike(null);
     setSelectedStrikeSnapshot(null);
     setFrozenOrder(null);
+    setFrozenMarketStrikes(null);
     setPreparedSubaccountId(null);
     setDoneInfo(null);
     setSetupPhase("idle");
-    setExpanded(false);
-  }, [sellCall, setExpanded]);
-
-  const ticket = displayOrder ? (
-    <OrderTicket
-      key={displayOrder.strike.instrumentName}
-      snapshot={displayOrder}
-      amount={amount}
-      balance={balance}
-      maxAmount={market.maxSize}
-      isConnected={isConnected}
-      amountLocked={controlsLocked}
-      setupPhase={setupPhase}
-      sellPhase={sellCall.phase}
-      auction={sellCall.auction}
-      quote={sellCall.quote}
-      error={sellCall.error}
-      doneInfo={doneInfo}
-      onAmountChange={(value) => {
-        if (!controlsLocked) setAmount(sanitizeDecimal(value));
-      }}
-      onClose={handleCloseTicket}
-      onRequestQuote={() => void handleRequestQuote()}
-      onAcceptQuote={() => void handleAcceptQuote()}
-      onCreateAnother={handleCreateAnother}
-    />
-  ) : null;
+  }, [selectedMarketId, sellCall, setAmount]);
 
   return (
-    <div
-      className={cn(
-        "w-full min-w-0",
-        ticketOpen && isDesktop && "grid gap-8 lg:grid-cols-[minmax(0,0.9fr)_minmax(460px,1.1fr)] lg:items-start",
-      )}
-    >
-      <ContractBrowser
-        title={variant === "landing" ? "Target Composer" : "Hedge Composer"}
-        expiries={expiries}
-        activeExpiry={activeExpiry}
-        strikes={browserStrikes}
-        selectedStrike={selectedStrike}
-        spotPrice={spotPrice}
-        isLoading={isLoading}
+    <div className="relative min-w-0 border-b-[0.5px] border-zinc-200 pb-20 min-[960px]:pb-0">
+      <MarketSelector
         markets={markets}
         selectedMarketId={selectedMarketId}
-        onMarketChange={handleMarketChange}
-        marketUnavailable={isUnavailable}
-        unavailableReason={unavailableReason}
         disabled={controlsLocked}
-        onExpiryChange={handleExpiryChange}
-        onStrikeSelect={handleStrikeSelect}
+        onMarketChange={handleMarketChange}
       />
 
-      {ticketOpen && isDesktop && ticket}
-      {!isDesktop && (
-        <MobileOrderSheet
-          open={ticketOpen && ticket !== null}
-          onOpenChange={handleSheetOpenChange}
-          preventClose={closePrevented}
-          returnFocus={returnFocus}
+      <div className="grid min-w-0 min-[960px]:grid-cols-[minmax(0,1fr)_360px]">
+        <TradeConfigurator
+          expiries={expiries}
+          activeExpiry={activeExpiry}
+          strikes={configuratorStrikes}
+          selectedStrike={configuratorStrike}
+          spotPrice={configuratorSpot}
+          history={selectedMarketId === "BTC" ? history.data ?? [] : []}
+          historyState={
+            selectedMarketId !== "BTC"
+              ? "unavailable"
+              : (history.data?.length ?? 0) >= 2
+                ? "ready"
+                : history.isLoading
+                  ? "loading"
+                  : "unavailable"
+          }
+          isLoading={isLoading}
+          markets={markets}
+          selectedMarketId={selectedMarketId}
+          marketUnavailable={isUnavailable}
+          unavailableReason={unavailableReason}
+          disabled={controlsLocked}
+          coveredAmount={amountNumber}
+          onExpiryChange={handleExpiryChange}
+          onStrikeSelect={handleStrikeSelect}
+        />
+
+        {displayOrder ? (
+          <OrderTicket
+            key={displayOrder.strike.instrumentName}
+            snapshot={displayOrder}
+            amount={amount}
+            balance={balance}
+            maxAmount={market.maxSize}
+            hasSubaccount={subaccountId !== null}
+            depositedBalance={subBalances.collateral}
+            isConnected={isConnected}
+            setupPhase={setupPhase}
+            sellPhase={sellCall.phase}
+            auction={sellCall.auction}
+            quote={sellCall.quote}
+            error={sellCall.error}
+            doneInfo={doneInfo}
+            feeReadState={feeReadState}
+            controlsDisabled={controlsLocked}
+            onAmountChange={(value) => {
+              if (!controlsLocked) setAmount(sanitizeDecimal(value));
+            }}
+            onRequestQuote={() => void handleRequestQuote()}
+            onAcceptQuote={() => void handleAcceptQuote()}
+            onCreateAnother={handleCreateAnother}
+          />
+        ) : (
+          <aside className="flex min-h-64 items-center border-t-[0.5px] border-zinc-200 py-8 text-sm text-zinc-500 min-[960px]:border-l-[0.5px] min-[960px]:border-t-0 min-[960px]:pl-10">
+            Waiting for {market.displayName} market data…
+          </aside>
+        )}
+      </div>
+
+      {displayOrder && (
+        <a
+          href="#order-review"
+          className="fixed inset-x-0 bottom-0 z-30 flex min-h-[72px] items-center justify-between gap-4 border-t-[0.5px] border-zinc-200 bg-white/95 px-5 pb-[env(safe-area-inset-bottom)] backdrop-blur-[8px] min-[960px]:hidden"
         >
-          {ticket}
-        </MobileOrderSheet>
+          <span className="min-w-0">
+            <span className="block font-mono text-[11px] text-zinc-500">{formatMobileStrike(displayOrder.strike.strike)} cap · {displayOrder.amount > 0 ? `${displayOrder.amount.toLocaleString("en-US", { maximumFractionDigits: 6 })} ${market.collateral.symbol}` : "choose amount"}</span>
+            <span className="mt-1 block text-sm font-semibold text-zinc-950">Review trade</span>
+          </span>
+          <span className="shrink-0 rounded-[5px] bg-zinc-950 px-4 py-2.5 font-mono text-[11px] uppercase text-white">Review</span>
+        </a>
       )}
     </div>
   );
+}
+
+function formatMobileStrike(strike: number): string {
+  return strike.toLocaleString("en-US", {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: 0,
+  });
 }

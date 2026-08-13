@@ -39,7 +39,9 @@ export interface StrikeOption extends BoardStrike {
   apr: number;
   /** IV used for pricing */
   vol: number;
-  /** true when feed reads failed and defaults were used */
+  /** Forward price used for Black-76 pricing and fee estimation, USD */
+  forwardPrice: number;
+  /** true when any pricing input used an off-chain or documented default */
   usedFallback: boolean;
 }
 
@@ -57,9 +59,16 @@ export function useAvailableStrikes(
 ) {
   const { chainId } = useNetwork();
   const market = getMarket(chainId, marketId);
-  const { spotPrice, multiplier, isLoading: spotLoading, isUnavailable } = useSpotPrice(marketId);
+  const {
+    spotPrice,
+    multiplier,
+    indicative: spotUsedFallback,
+    isLoading: spotLoading,
+    isUnavailable,
+  } = useSpotPrice(marketId);
   const [serverMarket, setServerMarket] = useState<PublicMarketStatus | null>(null);
-  const [statusError, setStatusError] = useState(false);
+  const [statusErrorMarketId, setStatusErrorMarketId] = useState<MarketId | null>(null);
+
   useEffect(() => {
     if (market.marketHours !== "24/5" || !market.enabled) {
       return;
@@ -70,10 +79,10 @@ export function useAvailableStrikes(
         const statuses = await getRfqMarkets(chainId);
         if (!cancelled) {
           setServerMarket(statuses.find((status) => status.id === marketId) ?? null);
-          setStatusError(false);
+          setStatusErrorMarketId(null);
         }
       } catch {
-        if (!cancelled) setStatusError(true);
+        if (!cancelled) setStatusErrorMarketId(marketId);
       }
     };
     void load();
@@ -83,10 +92,12 @@ export function useAvailableStrikes(
       window.clearInterval(interval);
     };
   }, [chainId, market.enabled, market.marketHours, marketId]);
+  const activeServerMarket = serverMarket?.id === marketId ? serverMarket : null;
+  const statusError = statusErrorMarketId === marketId;
   const unavailableReason = !market.enabled
     ? "Market deployment is staged but not enabled"
-    : market.marketHours === "24/5" && serverMarket?.status !== "open"
-      ? serverMarket?.disableReason ?? (statusError ? "Market readiness service is unavailable" : "Checking market readiness")
+    : market.marketHours === "24/5" && activeServerMarket?.status !== "open"
+      ? activeServerMarket?.disableReason ?? (statusError ? "Market readiness service is unavailable" : "Checking market readiness")
       : null;
   const marketUnavailable = isUnavailable || unavailableReason !== null;
 
@@ -94,13 +105,13 @@ export function useAvailableStrikes(
     () =>
       (market.marketHours === "24/7"
         ? weeklyExpiries(4)
-        : serverMarket?.supportedExpiries?.length
-          ? serverMarket.supportedExpiries
+        : activeServerMarket?.supportedExpiries?.length
+          ? activeServerMarket.supportedExpiries
           : rwaWeeklyExpiries(4)).map((epoch) => ({
         epoch,
         label: formatExpiryLabel(epoch),
       })),
-    [market.marketHours, serverMarket]
+    [activeServerMarket, market.marketHours]
   );
 
   const effectiveExpiry = useMemo(() => {
@@ -172,7 +183,7 @@ export function useAvailableStrikes(
       forwardRes?.status === "success"
         ? unitToNumber((forwardRes.result as readonly [bigint, bigint])[0])
         : spotPrice;
-    const scale = multiplier === null ? 1 : Number(multiplier) / 1e18;
+    const scale = multiplier == null ? 1 : Number(multiplier) / 1e18;
     const forward = rawForward / scale;
     const rate =
       rateRes?.status === "success"
@@ -202,16 +213,22 @@ export function useAvailableStrikes(
         premium,
         apr: calculateAPR(premium, s.isCall ? spotPrice : s.strike, dte),
         vol,
-        usedFallback: !volOk || forwardRes?.status !== "success",
+        forwardPrice: forward,
+        usedFallback:
+          !volOk ||
+          forwardRes?.status !== "success" ||
+          rateRes?.status !== "success" ||
+          spotUsedFallback,
       };
     });
-  }, [boardStrikes, effectiveExpiry, feedReads.data, multiplier, spotPrice]);
+  }, [boardStrikes, effectiveExpiry, feedReads.data, multiplier, spotPrice, spotUsedFallback]);
 
   return {
     expiries,
     selectedExpiry: effectiveExpiry,
     strikes,
     spotPrice,
+    forwardPrice: strikes[0]?.forwardPrice ?? spotPrice,
     market,
     multiplier,
     isUnavailable: marketUnavailable,

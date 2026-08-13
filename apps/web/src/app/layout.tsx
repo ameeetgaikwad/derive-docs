@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono, DM_Sans, Schibsted_Grotesk } from "next/font/google";
-import { ClientShell } from "@/components/layout/ClientShell";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -26,9 +25,12 @@ const schibstedGrotesk = Schibsted_Grotesk({
 });
 
 export const metadata: Metadata = {
-  title: "Hedge — BTC Covered Calls",
+  title: {
+    default: "Hedge — Covered calls for Bitcoin holders",
+    template: "%s — Hedge",
+  },
   description:
-    "Browse a BTC strike and expiry, choose your BTCB amount, then review and sign a covered-call RFQ quote on BNB Chain.",
+    "Choose a BTC price target, compare covered-call terms, and accept a wallet-signed market-maker quote on BNB Chain.",
 };
 
 export default function RootLayout({
@@ -41,7 +43,7 @@ export default function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} ${dmSans.variable} ${schibstedGrotesk.variable} antialiased`}
       >
-        <ClientShell>{children}</ClientShell>
+        {children}
       </body>
     </html>
   );
