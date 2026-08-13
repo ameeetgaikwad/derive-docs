@@ -37,7 +37,12 @@ export interface AuctionEngineOptions {
   forwardFeeds?: Record<string, Address>;
   markets?: MarketDefinition[];
   /** Production feed and multiplier readiness gate, called before an RFQ is persisted. */
-  marketReadiness?: (market: MarketDefinition, expiry: bigint, strike: bigint) => Promise<void>;
+  marketReadiness?: (
+    market: MarketDefinition,
+    expiry: bigint,
+    strike: bigint,
+    rawAmount: bigint,
+  ) => Promise<void>;
   auctionWindowMs: number;
   /** ms the taker has to accept after the auction closes with a winner (default 120s) */
   acceptDeadlineMs?: number;
@@ -121,7 +126,7 @@ export class AuctionEngine extends EventEmitter<AuctionEvents> {
     const market = this.opts.markets?.find((candidate) => candidate.id === instrument.currency);
     if (market) {
       assertMarketTradeable(market, amount, instrument.expiry, this.now());
-      await this.opts.marketReadiness?.(market, instrument.expiry, instrument.strike);
+      await this.opts.marketReadiness?.(market, instrument.expiry, instrument.strike, amount);
     }
 
     const createdAt = this.now();

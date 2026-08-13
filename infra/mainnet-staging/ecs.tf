@@ -170,6 +170,12 @@ resource "aws_ecs_task_definition" "oracle_feeds" {
         { name = "ORACLE_STATE_PATH", value = "/var/lib/hedge/active-expiries.json" },
         { name = "ORACLE_TWAP_STATE_PATH", value = "/var/lib/hedge/settlement-twap.json" },
         { name = "ORACLE_DISCOVERY_FROM_BLOCK", value = var.oracle_discovery_from_block },
+        { name = "EXPIRY_COUNT", value = "3" },
+        { name = "HERMES_URL", value = "https://pyth.dourolabs.app/hermes" },
+        { name = "PYTH_SOURCE_MAX_AGE_SEC", value = "45" },
+        { name = "RWA_IV_XAU", value = var.oracle_rwa_iv.XAU },
+        { name = "RWA_IV_SPY", value = var.oracle_rwa_iv.SPY },
+        { name = "RWA_IV_NVDA", value = var.oracle_rwa_iv.NVDA },
         { name = "STABLE_PRICE_SOURCE", value = "chainlink" },
         { name = "STABLE_CHAINLINK_AGGREGATOR", value = "0xB97Ad0E74fa7d920791E90258A6E2085088b4320" },
         { name = "STABLE_FEED_INTERVAL_SEC", value = "300" },
@@ -180,6 +186,7 @@ resource "aws_ecs_task_definition" "oracle_feeds" {
         { name = "CHAIN_ID", valueFrom = aws_ssm_parameter.chain_id.arn },
         { name = "RPC_URL", valueFrom = aws_ssm_parameter.rpc_url.arn },
         { name = "FEED_SIGNER_KEY", valueFrom = local.feed_signer_key_parameter_arn },
+        { name = "PYTH_API_KEY", valueFrom = local.pyth_api_key_parameter_arn },
       ]
 
       logConfiguration = {
@@ -235,7 +242,7 @@ resource "aws_ecs_task_definition" "maker_bot" {
         { name = "AWS_REGION", value = var.aws_region },
         { name = "SATS_DEPLOYMENTS_DIR", value = "/app/protocol/deployments/staging" },
         { name = "HEDGE_MARKETS_DIR", value = "/app/protocol/deployments/staging/markets" },
-        { name = "RFQ_ENGINE_WS", value = "${local.rfq_engine_ws_scheme}://${aws_lb.rfq_engine.dns_name}/maker" },
+        { name = "RFQ_ENGINE_WS", value = local.rfq_engine_ws_url },
         { name = "MAKER_SUBACCOUNT_ID", value = var.maker_subaccount_id },
         { name = "MAKER_BID_RATIO", value = "0.95" },
         { name = "MAKER_ASK_RATIO", value = "1.05" },

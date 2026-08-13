@@ -10,6 +10,7 @@ maker_allowlist = [
 
 # Add a validated us-east-1 certificate before exposing the browser endpoint.
 certificate_arn = null
+rfq_public_hostname = "rfq-staging-mainnet.satsterminal.com"
 
 # First apply at zero. Set both to one only after publishing the image,
 # verifying staging signer identities/funding, and stopping the local chain-56 oracle.
