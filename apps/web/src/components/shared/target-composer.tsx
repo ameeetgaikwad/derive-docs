@@ -479,7 +479,6 @@ export default function CoveredCallTrade({
         >
           <span className="min-w-0">
             <span className="block font-mono text-[11px] text-zinc-500">{formatMobileStrike(displayOrder.strike.strike)} cap · {displayOrder.amount > 0 ? `${displayOrder.amount.toLocaleString("en-US", { maximumFractionDigits: 6 })} ${market.collateral.symbol}` : "choose amount"}</span>
-            <span className="mt-1 block text-sm font-semibold text-zinc-950">Review trade</span>
           </span>
           <span className="shrink-0 rounded-[5px] bg-zinc-950 px-4 py-2.5 font-mono text-[11px] uppercase text-white">Review</span>
         </a>

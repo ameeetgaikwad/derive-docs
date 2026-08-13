@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import {
@@ -183,11 +183,12 @@ describe("covered-call terms surface", () => {
   it("shows amount-scaled premiums and returns side by side instead of hiding contracts behind a slider", () => {
     renderConfigurator();
 
-    expect(screen.getByText("Term return")).toBeTruthy();
-    expect(screen.getByText("Annualized")).toBeTruthy();
+    expect(screen.getByText("Return")).toBeTruthy();
+    expect(screen.getByText("APR")).toBeTruthy();
+    expect(screen.getByText("Est. premium")).toBeTruthy();
     expect(screen.getByText("$500.00")).toBeTruthy();
     expect(screen.getByText("$250.00")).toBeTruthy();
-    expect(screen.getByText(/shown for 0.5 BTCB/i)).toBeTruthy();
+    expect(screen.queryByText(/choose a row|suggested marks|indicative premiums/i)).toBeNull();
     expect(screen.queryByRole("slider", { name: "Sell target" })).toBeNull();
   });
 
@@ -196,7 +197,6 @@ describe("covered-call terms surface", () => {
 
     expect(screen.getByText("$250.00")).toBeTruthy();
     expect(screen.getByText("$125.00")).toBeTruthy();
-    expect(screen.getByText(/shown for 0.25 BTCB/i)).toBeTruthy();
   });
 
   it("omits strikes without a meaningful modeled premium", () => {
@@ -298,21 +298,34 @@ describe("covered-call quote rail", () => {
     expect(onAcceptQuote).toHaveBeenCalledOnce();
   });
 
-  it("states first-trade account and collateral preparation inline", () => {
-    renderTicket({ hasSubaccount: false, depositedBalance: 0 });
+  it("keeps first-trade setup behind one actionable quote button", async () => {
+    const user = userEvent.setup();
+    const onRequestQuote = vi.fn();
+    renderTicket({ hasSubaccount: false, depositedBalance: 0, onRequestQuote });
 
-    expect(screen.getByText(/create the covered-call account/i)).toBeTruthy();
-    expect(screen.getByText(/deposit 0.5 BTCB/i)).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Prepare & request quote" })).toBeTruthy();
+    expect(screen.queryByText(/first-trade preparation/i)).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Prepare & request quote" }));
+    expect(onRequestQuote).toHaveBeenCalledOnce();
   });
 
-  it("updates the expiry explanation when the scenario moves above the cap", () => {
+  it("keeps settlement mechanics inside the collapsed expiry payoff", async () => {
+    const user = userEvent.setup();
     renderTicket();
+    const summary = screen.getByText("Payoff at expiry").closest("summary");
+    const details = summary?.closest("details");
+    const contractDetails = screen.getByText("Contract details").closest("details");
+    expect(summary).not.toBeNull();
+    expect(details?.open).toBe(false);
+    expect(contractDetails?.open).toBe(true);
+
+    await user.click(summary!);
+    expect(details?.open).toBe(true);
     fireEvent.change(
-      screen.getByRole("slider", { name: "Simulated BTC price at expiry" }),
+      within(details!).getByRole("slider", { name: "Simulated BTC price at expiry" }),
       { target: { value: "90000" } },
     );
-    expect(screen.getByText(/subaccount is debited/i)).toBeTruthy();
+    expect(within(details!).getByText("$7,500.00")).toBeTruthy();
+    expect(within(details!).getByText(/USDT shortfalls borrow against BTCB · no early exit/i)).toBeTruthy();
   });
 
   it("returns to indicative economics after a quote expires", () => {
