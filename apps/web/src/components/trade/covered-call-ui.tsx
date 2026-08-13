@@ -7,8 +7,11 @@ import {
 } from "lucide-react";
 import {
   useEffect,
+  useId,
   useMemo,
   useState,
+  type KeyboardEvent,
+  type PointerEvent,
   type ReactNode,
 } from "react";
 import { CurrencyField } from "@/components/shared/currency-field";
@@ -71,6 +74,28 @@ function formatTermPercent(value: number): string {
   if (!Number.isFinite(value)) return "0%";
   if (Math.abs(value) > 0 && Math.abs(value) < 0.1) return `${value.toFixed(2)}%`;
   return formatPercent(value);
+}
+
+function formatChartPrice(value: number): string {
+  return value.toLocaleString("en-US", {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+}
+
+function formatHistoryDate(epochSeconds: number): string {
+  return new Date(epochSeconds * 1_000).toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    timeZone: "UTC",
+  });
+}
+
+function formatHistoryPointLabel(point: { time: number; isCurrent: boolean }): string {
+  return point.isCurrent ? "Now" : formatHistoryDate(point.time);
 }
 
 function shortExpiry(epoch: number): string {
@@ -450,8 +475,18 @@ export function BitcoinTargetChart({
   assetName?: string;
   assetSymbol?: string;
 }) {
+  const descriptionId = useId();
+  const [activeIndex, setActiveIndex] = useState<number | null>(null);
+  const [isFocused, setIsFocused] = useState(false);
   const validPoints = useMemo(
-    () => points.filter((point) => Number.isFinite(point.value) && point.value > 0),
+    () =>
+      points.filter(
+        (point) =>
+          Number.isFinite(point.time) &&
+          point.time > 0 &&
+          Number.isFinite(point.value) &&
+          point.value > 0,
+      ),
     [points],
   );
   const geometry = useMemo(
@@ -462,6 +497,44 @@ export function BitcoinTargetChart({
     [validPoints, spotPrice, targetPrice],
   );
   const accessibleLabel = `${assetName} 30-day price history. Current spot ${formatUsd(spotPrice)}. Selected covered-call strike ${formatUsd(targetPrice)}.`;
+
+  const selectNearestPoint = (event: PointerEvent<HTMLDivElement>) => {
+    if (geometry === null) return;
+    const bounds = event.currentTarget.getBoundingClientRect();
+    if (bounds.width <= 0) return;
+
+    const chartX = Math.max(
+      0,
+      Math.min(720, ((event.clientX - bounds.left) / bounds.width) * 720),
+    );
+    let nearestIndex = 0;
+    let nearestDistance = Number.POSITIVE_INFINITY;
+    geometry.points.forEach((point, index) => {
+      const distance = Math.abs(point.x - chartX);
+      if (distance < nearestDistance) {
+        nearestIndex = index;
+        nearestDistance = distance;
+      }
+    });
+    setActiveIndex(nearestIndex);
+  };
+
+  const handleChartKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (geometry === null) return;
+    const lastIndex = geometry.points.length - 1;
+    const currentIndex = activeIndex ?? lastIndex;
+    let nextIndex: number | null = null;
+
+    if (event.key === "ArrowLeft") nextIndex = Math.max(0, currentIndex - 1);
+    if (event.key === "ArrowRight") nextIndex = Math.min(lastIndex, currentIndex + 1);
+    if (event.key === "Home") nextIndex = 0;
+    if (event.key === "End") nextIndex = lastIndex;
+
+    if (nextIndex !== null) {
+      event.preventDefault();
+      setActiveIndex(nextIndex);
+    }
+  };
 
   if (geometry === null || state === "loading" || state === "unavailable") {
     return (
@@ -482,8 +555,45 @@ export function BitcoinTargetChart({
     );
   }
 
+  const lastIndex = geometry.points.length - 1;
+  const safeActiveIndex =
+    activeIndex !== null && activeIndex <= lastIndex ? activeIndex : null;
+  const sliderIndex = safeActiveIndex ?? lastIndex;
+  const sliderPoint = geometry.points[sliderIndex];
+  const activePoint =
+    safeActiveIndex === null ? null : geometry.points[safeActiveIndex];
+
   return (
-    <div role="img" className="relative mt-6 h-[220px] w-full" aria-label={accessibleLabel}>
+    <div
+      role="slider"
+      tabIndex={0}
+      aria-label={`${assetName} 30-day price history`}
+      aria-describedby={descriptionId}
+      aria-orientation="horizontal"
+      aria-valuemin={0}
+      aria-valuemax={lastIndex}
+      aria-valuenow={sliderIndex}
+      aria-valuetext={`${formatHistoryPointLabel(sliderPoint)}, ${formatChartPrice(sliderPoint.value)}`}
+      className="relative mt-6 h-[220px] w-full cursor-crosshair touch-pan-y focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-orange-500 focus-visible:ring-offset-2"
+      onPointerEnter={selectNearestPoint}
+      onPointerMove={selectNearestPoint}
+      onPointerDown={selectNearestPoint}
+      onPointerLeave={() => {
+        if (!isFocused) setActiveIndex(null);
+      }}
+      onFocus={() => {
+        setIsFocused(true);
+        setActiveIndex(lastIndex);
+      }}
+      onBlur={() => {
+        setIsFocused(false);
+        setActiveIndex(null);
+      }}
+      onKeyDown={handleChartKeyDown}
+    >
+      <span id={descriptionId} className="sr-only">
+        {accessibleLabel} Use the left and right arrow keys to inspect daily prices.
+      </span>
       <svg
         viewBox="0 0 720 220"
         aria-hidden="true"
@@ -527,7 +637,57 @@ export function BitcoinTargetChart({
           fill="#f97316"
           transform={`rotate(45 708 ${geometry.targetY})`}
         />
+        {activePoint && (
+          <>
+            <line
+              x1={activePoint.x}
+              x2={activePoint.x}
+              y1="18"
+              y2="192"
+              stroke="#a1a1aa"
+              strokeDasharray="3 4"
+              strokeWidth="1"
+              vectorEffect="non-scaling-stroke"
+            />
+            <circle
+              cx={activePoint.x}
+              cy={activePoint.y}
+              r="5"
+              fill="white"
+              stroke="#18181b"
+              strokeWidth="2"
+              vectorEffect="non-scaling-stroke"
+            />
+          </>
+        )}
       </svg>
+      {activePoint && (
+        <div
+          aria-hidden="true"
+          className={cn(
+            "pointer-events-none absolute z-10 min-w-max bg-zinc-950 px-3 py-2 text-white shadow-sm",
+            activePoint.x < 100
+              ? "translate-x-0"
+              : activePoint.x > 620
+                ? "-translate-x-full"
+                : "-translate-x-1/2",
+            activePoint.y < 64
+              ? "translate-y-3"
+              : "-translate-y-[calc(100%+12px)]",
+          )}
+          style={{
+            left: `${(activePoint.x / 720) * 100}%`,
+            top: `${(activePoint.y / 220) * 100}%`,
+          }}
+        >
+          <p className="font-mono text-[10px] uppercase tracking-[0.05em] text-zinc-400">
+            {formatHistoryPointLabel(activePoint)}
+          </p>
+          <p className="mt-0.5 font-mono text-[13px] font-medium">
+            {formatChartPrice(activePoint.value)}
+          </p>
+        </div>
+      )}
       <div
         className="pointer-events-none absolute right-0 -translate-y-[calc(100%+7px)] bg-white pl-2 font-mono text-[11px] text-orange-700"
         style={{ top: `${(geometry.targetY / 220) * 100}%` }}
@@ -556,9 +716,12 @@ function chartGeometry(
   const validHistory = history.filter(
     (point) => Number.isFinite(point.value) && point.value > 0,
   );
-  const values = validHistory.map((point, index) =>
-    index === validHistory.length - 1 ? spotPrice : point.value,
-  );
+  const plottedHistory = validHistory.map((point, index) => ({
+    time: point.time,
+    isCurrent: index === validHistory.length - 1,
+    value: index === validHistory.length - 1 ? spotPrice : point.value,
+  }));
+  const values = plottedHistory.map((point) => point.value);
   const plotTop = 18;
   const plotBottom = 192;
   const min = Math.min(...values, spotPrice) * 0.985;
@@ -566,9 +729,10 @@ function chartGeometry(
   const span = Math.max(1, max - min);
   const y = (value: number) =>
     plotTop + ((max - value) / span) * (plotBottom - plotTop);
-  const coordinates = values.map((value, index) => ({
-    x: values.length === 1 ? 708 : (index / (values.length - 1)) * 708,
-    y: y(value),
+  const coordinates = plottedHistory.map((point, index) => ({
+    ...point,
+    x: plottedHistory.length === 1 ? 708 : (index / (plottedHistory.length - 1)) * 708,
+    y: y(point.value),
   }));
   const linePath = coordinates
     .map((point, index) => `${index === 0 ? "M" : "L"}${point.x.toFixed(2)},${point.y.toFixed(2)}`)
@@ -579,6 +743,7 @@ function chartGeometry(
   return {
     linePath,
     areaPath: `${linePath} L${last.x.toFixed(2)},${plotBottom} L${first.x.toFixed(2)},${plotBottom} Z`,
+    points: coordinates,
     spotY: y(spotPrice),
     targetY: y(targetPrice),
   };

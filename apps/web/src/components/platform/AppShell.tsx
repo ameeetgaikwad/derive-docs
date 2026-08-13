@@ -3,7 +3,6 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { ConnectButton } from "@rainbow-me/rainbowkit";
-import { useQuery } from "@tanstack/react-query";
 import { ExternalLink, FlaskConical, User, WalletIcon } from "lucide-react";
 import { useAccount, useSwitchChain } from "wagmi";
 import { NavbarLogo } from "@/components/root/navbar-logo";
@@ -11,12 +10,11 @@ import { Text } from "@/components/ui/text";
 import { useBtcbBalance, useMintBtcb } from "@/hooks/protocol/useBtcb";
 import { useNetwork } from "@/hooks/protocol/useNetwork";
 import { TBNB_FAUCET_URL } from "@/lib/protocol/chain";
-import { rfqEngineHealthy } from "@/lib/protocol/rfq-engine";
 import { cn } from "@/lib/utils";
 import type { AppChainId } from "@/stores/network";
 
 const navItems = [
-  { href: "/app", label: "Trade", exact: true },
+  { href: "/app", label: "Options", exact: true },
   { href: "/app/positions", label: "Positions", exact: false },
 ] as const;
 
@@ -36,13 +34,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const mintBtcb = useMintBtcb();
   const { chainId, isTestnet, setChainId } = useNetwork();
   const { switchChainAsync } = useSwitchChain();
-  const health = useQuery({
-    queryKey: ["rfq-engine-health", chainId],
-    queryFn: () => rfqEngineHealthy(chainId),
-    refetchInterval: 15_000,
-    staleTime: 10_000,
-  });
-
   const setNetwork = (nextChainId: AppChainId) => {
     setChainId(nextChainId);
     switchChainAsync({ chainId: nextChainId }).catch(() => {});
@@ -76,11 +67,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </div>
 
           <div className="flex shrink-0 items-center gap-2 sm:gap-3">
-            <QuoteStatus
-              loading={health.isLoading}
-              online={health.data === true}
-              className="hidden lg:flex"
-            />
             <div className="flex items-center gap-3 border-r-[0.5px] border-zinc-200 pr-3">
               {networks.map((network) => (
                 <button
@@ -141,7 +127,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </div>
         </div>
 
-        <div className="mx-auto flex min-h-11 w-full max-w-[1512px] items-center justify-between gap-3 border-t-[0.5px] border-zinc-100 px-5 sm:hidden">
+        <div className="mx-auto flex min-h-11 w-full max-w-[1512px] items-center gap-3 border-t-[0.5px] border-zinc-100 px-5 sm:hidden">
           <nav className="flex items-center gap-5" aria-label="Application navigation">
             {navItems.map(({ href, label, exact }) => {
               const active = isActive(pathname, href, exact);
@@ -189,7 +175,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               </details>
             )}
           </nav>
-          <QuoteStatus loading={health.isLoading} online={health.data === true} />
         </div>
 
       </header>
@@ -198,28 +183,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         {children}
       </main>
     </div>
-  );
-}
-
-function QuoteStatus({
-  loading,
-  online,
-  className,
-}: {
-  loading: boolean;
-  online: boolean;
-  className?: string;
-}) {
-  return (
-    <span className={cn("items-center gap-2 font-mono text-[10px] text-zinc-500", className ?? "flex")}>
-      <span
-        className={cn(
-          "size-1.5 rounded-full",
-          loading ? "animate-pulse bg-zinc-400" : online ? "bg-green-500" : "bg-amber-500",
-        )}
-      />
-      {loading ? "Checking RFQ engine" : online ? "RFQ engine reachable" : "RFQ engine unavailable"}
-    </span>
   );
 }
 
