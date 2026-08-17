@@ -1,4 +1,4 @@
-# Production readiness checklist
+# Production readiness checklist 
 
 Status: **PRE-LAUNCH**. The isolated chain-56 staging contracts are deployed and
 may be used for explicitly labelled, capped public testing. Production deposits
