@@ -74,8 +74,8 @@ Advanced package invocation:
 Required for --broadcast (shell or protocol/.env):
   TESTNET_RPC_URL or RPC_URL
   TESTNET_DEPLOYER_KEY or PRIVATE_KEY
-  XAU_PYTH_PRICE_ID, SPY_PYTH_PRICE_ID, NVDA_PYTH_PRICE_ID,
-  SPCX_PYTH_PRICE_ID (only for selected undeployed markets)
+  <MARKET>_PYTH_PRICE_ID for each selected undeployed Pyth market.
+  Chainlink markets use the reviewed manifest aggregator and require no Pyth ID.
 
 Safety:
   - hard-fails unless eth_chainId is 97
@@ -95,18 +95,22 @@ function dryRun(manifest: ManifestFile, markets: RwaMarketId[]): void {
   console.log(`[rwa-deploy] mocks=${existsSync(RWA_MOCKS_PATH) ? "reuse + verify" : "deploy"}`);
   for (const marketId of markets) {
     const market = manifest.markets.find((candidate) => candidate.id === marketId)!;
-    let priceId = "missing";
-    try {
-      priceId = priceIdForMarket(manifest, marketId);
-    } catch {
-      // The plan should remain printable before operators populate feed ids.
+    let source = `chainlink=${market.chainlinkAggregator ?? "missing"}`;
+    if (market.oracleProvider === "pyth") {
+      let priceId: string = "missing";
+      try {
+        priceId = priceIdForMarket(manifest, marketId) ?? "missing";
+      } catch {
+        // The plan should remain printable before operators populate feed ids.
+      }
+      source = `pyth=${priceId}`;
     }
     const action = market.contracts
       ? "already staged; verify and skip"
       : readSidecar(marketId)
         ? "merge existing sidecar, verify, keep disabled"
         : "deploy market, verify, keep disabled";
-    console.log(`[rwa-deploy] ${marketId}: ${action}; pyth=${priceId}`);
+    console.log(`[rwa-deploy] ${marketId}: ${action}; ${source}`);
   }
   console.log("[rwa-deploy] run pnpm deploy:rwa:testnet to broadcast the reviewed market set");
 }
@@ -177,7 +181,11 @@ async function deploy(): Promise<void> {
   const priceIds = new Map<RwaMarketId, string>();
   for (const marketId of options.markets) {
     const market = manifest.markets.find((candidate) => candidate.id === marketId)!;
-    if (!market.contracts) priceIds.set(marketId, priceIdForMarket(manifest, marketId));
+    if (!market.contracts && market.oracleProvider === "pyth") {
+      const priceId = priceIdForMarket(manifest, marketId);
+      if (!priceId) throw new Error(`${marketId} is missing its Pyth price id`);
+      priceIds.set(marketId, priceId);
+    }
   }
 
   const client = makeTestnetClient();
@@ -224,13 +232,15 @@ async function deploy(): Promise<void> {
       let sidecar = readSidecar(marketId);
       if (!sidecar) {
         const priceId = priceIds.get(marketId);
-        if (!priceId) throw new Error(`${marketId} is missing its Pyth price id`);
+        if (market.oracleProvider === "pyth" && !priceId) {
+          throw new Error(`${marketId} is missing its Pyth price id`);
+        }
         await runForge(processes, `add-market-${marketId.toLowerCase()}`, "script/AddMarket.s.sol", {
           PRIVATE_KEY: requireEnv("PRIVATE_KEY"),
           MARKET_ID: marketId,
           FEED_SIGNER: getDeployedAddress(deployments, "feedSigner"),
           [TOKEN_ENV_BY_MARKET[marketId]]: token,
-          [`${marketId}_PYTH_PRICE_ID`]: priceId,
+          ...(priceId ? { [`${marketId}_PYTH_PRICE_ID`]: priceId } : {}),
         });
         sidecar = readSidecar(marketId);
         if (!sidecar) throw new Error(`${marketId} deployment completed without writing its sidecar`);
@@ -243,6 +253,7 @@ async function deploy(): Promise<void> {
       }
       if (market.oracleProvider === "pyth") {
         const configuredId = priceIdForMarket(manifest, marketId);
+        if (!configuredId) throw new Error(`${marketId} is missing its Pyth price id`);
         if (sidecar.pythPriceId?.toLowerCase() !== configuredId.toLowerCase()) {
           throw new Error(`${marketId} sidecar Pyth id does not match the reviewed configuration`);
         }

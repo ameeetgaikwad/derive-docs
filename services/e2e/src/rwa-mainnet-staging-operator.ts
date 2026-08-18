@@ -241,6 +241,14 @@ export interface ChainlinkSourceHealth {
   age: bigint;
 }
 
+/** Identifies a valid Chainlink source whose last complete round is too old for normal activation. */
+export class StaleChainlinkSourceError extends Error {
+  constructor(marketId: string, age: bigint) {
+    super(`${marketId} Chainlink source is stale (${age}s)`);
+    this.name = "StaleChainlinkSourceError";
+  }
+}
+
 export async function verifyChainlinkSource(
   client: PublicClient,
   market: MarketDefinition,
@@ -270,7 +278,7 @@ export async function verifyChainlinkSource(
   }
   const age = block.timestamp - updatedAt;
   if (age > CHAINLINK_MAX_STALENESS_SECONDS) {
-    throw new Error(`${market.id} Chainlink source is stale (${age}s)`);
+    throw new StaleChainlinkSourceError(market.id, age);
   }
   return { aggregator, description, decimals, answer, updatedAt, age };
 }

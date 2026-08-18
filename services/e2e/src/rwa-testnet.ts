@@ -359,8 +359,10 @@ export function priceIdForMarket(
   manifest: ManifestFile,
   marketId: RwaMarketId,
   env: NodeJS.ProcessEnv = process.env,
-): Hex {
-  const configured = env[`${marketId}_PYTH_PRICE_ID`] ?? marketFromManifest(manifest, marketId).pythPriceId;
+): Hex | null {
+  const market = marketFromManifest(manifest, marketId);
+  if (market.oracleProvider !== "pyth") return null;
+  const configured = env[`${marketId}_PYTH_PRICE_ID`] ?? market.pythPriceId;
   return bytes32(configured, `${marketId}_PYTH_PRICE_ID`);
 }
 
