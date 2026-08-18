@@ -1,0 +1,90 @@
+{
+  "mode": "SHADOW",
+  "policyVersion": "shadow-policy-v0.1.0",
+  "modelVersion": "black76-v0.1.0",
+  "product": {
+    "allowedUnderlying": "BTC",
+    "allowedSettlementCurrencies": ["USDT"],
+    "allowedOptionKinds": ["CALL"],
+    "allowedOptionAssetAddresses": [
+      "0x0000000000000000000000000000000000000001"
+    ],
+    "minimumQuantityUnderlying": 0.01,
+    "maximumQuantityUnderlying": 1,
+    "minimumMoneynessStrikeOverForward": 0.5,
+    "maximumMoneynessStrikeOverForward": 1.5,
+    "minimumTimeToExpiryMs": 86400000,
+    "maximumTimeToExpiryMs": 7776000000
+  },
+  "timing": {
+    "minimumQuoteHeadroomMs": 500,
+    "maximumAuctionWindowMs": 120000,
+    "maximumAcceptanceWindowMs": 600000,
+    "reservationFinalityBufferMs": 120000,
+    "maximumClockSkewMs": 1000
+  },
+  "marketData": {
+    "maximumOptionSnapshotAgeMs": 2000,
+    "maximumHedgeSnapshotAgeMs": 1000,
+    "minimumConfidence": 0.99,
+    "minimumVolatilityDecimal": 0.05,
+    "maximumVolatilityDecimal": 2.5,
+    "minimumAnnualRateDecimal": -0.2,
+    "maximumAnnualRateDecimal": 1,
+    "maximumForwardSpotDeviationBps": 2000,
+    "maximumOptionSpotHedgeOracleDeviationBps": 100,
+    "maximumMarkOracleDeviationBps": 30,
+    "maximumHedgeBookSpreadBps": 30
+  },
+  "hedge": {
+    "network": "TESTNET",
+    "accountAddress": "0x0000000000000000000000000000000000000002",
+    "crossVenueDeltaBeta": 1,
+    "maximumAdverseSlippageBps": 20,
+    "initialMarginFraction": 0.2,
+    "collateralStressMoveFraction": 0.15,
+    "maximumCollateralUsageFraction": 0.5,
+    "noTradeBandUnderlying": 0.005,
+    "maximumResidualDeltaToQuoteUnderlying": 0.01,
+    "lotSizeUnderlying": 0.001,
+    "priceTickUsd": 1,
+    "minimumOrderNotionalUsd": 10,
+    "orderExpiryMs": 5000
+  },
+  "costs": {
+    "conservativeForwardShockBps": 10,
+    "conservativeVolatilityHaircutDecimal": 0.01,
+    "expectedRehedgeTurnover": 1.5,
+    "expectedRehedgeSlippageBps": 5,
+    "expectedHoldingHours": 24,
+    "fundingStressBpsPerHour": 0.05,
+    "basisSettlementLatencyBps": 10,
+    "adverseSelectionBpsOfFairValue": 50,
+    "modelRiskBpsOfFairValue": 50,
+    "capitalChargeBpsOfMargin": 20,
+    "maximumConcentrationChargeBpsOfFairValue": 100,
+    "requiredProfitBpsOfFairValue": 100,
+    "minimumRequiredProfitUsd": 5
+  },
+  "quote": {
+    "premiumTickUsdPerUnderlying": 0.01,
+    "minimumTotalPremiumUsd": 10,
+    "quoteShadeBpsFromReservationCeiling": 10
+  },
+  "reservationStress": {
+    "spotMoveFraction": 0.15,
+    "volatilityMoveDecimal": 0.2
+  },
+  "risk": {
+    "maxAbsNetOptionDeltaUnderlying": 5,
+    "maxGrossGammaUsdForOnePercentSquared": 10000,
+    "maxGrossVegaUsdPerVolPoint": 5000,
+    "maxGrossVegaUsdPerVolPointPerExpiry": 2000,
+    "maxGrossOptionNotionalUsd": 500000,
+    "maxProtocolCashOutflowUsd": 100000,
+    "maxHedgeNotionalUsd": 300000,
+    "maxHedgeInitialMarginUsd": 150000,
+    "maxLiveReservations": 20,
+    "maxDailyLossUsd": 10000
+  }
+}

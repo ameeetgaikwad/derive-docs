@@ -233,6 +233,21 @@ importers:
         specifier: ^2.1.0
         version: 2.1.9(@types/node@22.20.0)(jsdom@30.0.1(@noble/hashes@1.8.0))(lightningcss@1.32.0)
 
+  services/rfq-market-maker:
+    devDependencies:
+      '@types/node':
+        specifier: ^22.10.0
+        version: 22.20.0
+      tsx:
+        specifier: ^4.19.0
+        version: 4.23.0
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.0
+        version: 2.1.9(@types/node@22.20.0)(jsdom@30.0.1(@noble/hashes@1.8.0))(lightningcss@1.32.0)
+
   services/shared:
     dependencies:
       '@aws-sdk/client-kms':
