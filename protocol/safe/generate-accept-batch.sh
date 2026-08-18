@@ -63,12 +63,13 @@ ZERO="0x0000000000000000000000000000000000000000"
 ADDRS=$(jq -c --argjson keys "$CORE_KEYS" --arg zero "$ZERO" \
   '[.[$keys[]] | select(. != null and . != $zero)]' "$DEPLOYMENTS")
 
-# AddMarket sidecars: deployments/<chainId>-<NAME>.json (6-7 owned contracts each;
-# settlementFeed is optional/possibly zero)
+# AddMarket sidecars: signed feeds/assets plus the selected external spot and
+# settlement adapters; provider-specific keys are optional/possibly zero.
 for sidecar in "$PROTO_DIR/deployments/$CHAIN_ID"-*.json; do
   [ -f "$sidecar" ] || continue
   MORE=$(jq -c --arg zero "$ZERO" '[.spotFeed, .forwardFeed, .volFeed, .rateFeed,
-    .settlementFeed, .optionAsset, .baseAsset] | map(select(. != null and . != $zero))' "$sidecar")
+    .settlementFeed, .pythSpotFeed, .chainlinkSpotFeed, .optionAsset, .baseAsset]
+    | map(select(. != null and . != $zero))' "$sidecar")
   ADDRS=$(jq -cn --argjson a "$ADDRS" --argjson b "$MORE" '$a + $b')
   echo "included sidecar market: $sidecar" >&2
 done

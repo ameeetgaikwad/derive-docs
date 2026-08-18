@@ -4,6 +4,7 @@ pragma solidity ^0.8.20;
 import "forge-std/Test.sol";
 
 import {DeployMainnetStaging} from "../script/DeployMainnetStaging.s.sol";
+import {MarketDeployerBase} from "../script/MarketDeployerBase.sol";
 import {IPyth} from "../src/interfaces/IPyth.sol";
 
 contract StagingTokenMock {
@@ -276,6 +277,20 @@ contract DeployMainnetStagingTest is Test {
       deployment.deploymentOutputPath(),
       string.concat(vm.projectRoot(), "/deployments/staging/56.json")
     );
+  }
+
+  function testReadsChainlinkNvdaProviderFromMainnetManifest() public {
+    vm.chainId(56);
+    vm.setEnv(
+      "NVDA_PYTH_PRICE_ID",
+      "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    );
+    MarketDeployerBase.MarketConfig memory config = deployment.getMarketConfigById("NVDA");
+
+    assertEq(uint(config.oracleProvider), uint(MarketDeployerBase.OracleProvider.Chainlink));
+    assertEq(config.chainlinkAggregator, 0xea5c2Cbb5cD57daC24E26180b19a929F3E9699B8);
+    assertEq(config.pythPriceId, bytes32(0));
+    assertFalse(config.benchmarkSettlement);
   }
 
   function testUsesContainedStagingRiskConfiguration() public {

@@ -19,8 +19,8 @@ import {MarketDeployerBase} from "./MarketDeployerBase.sol";
  *         a staging sidecar. The operator must merge that sidecar into the staging
  *         manifest with enabled=false before a separate activation step.
  *
- * Deployment order is intentionally fixed: XAU (market 2), SPY (3), NVDA (4).
- * This makes retries safe and prevents an accidental duplicate market registration.
+ * XAU occupies the first RWA slot. SPY and NVDA may then be added in either order,
+ * allowing one provider to remain unavailable without blocking the other market.
  */
 contract AddMainnetStagingRwaMarket is MarketDeployerBase {
     uint256 internal constant BSC_MAINNET_CHAIN_ID = 56;
@@ -41,6 +41,7 @@ contract AddMainnetStagingRwaMarket is MarketDeployerBase {
     error FeedSignerMismatch();
     error BorrowingEnabled();
     error InvalidMultiplier();
+    error NoRemainingRwaMarketSlot(uint256 lastMarketId);
 
     function run() external {
         if (block.chainid != BSC_MAINNET_CHAIN_ID) {
@@ -55,7 +56,7 @@ contract AddMainnetStagingRwaMarket is MarketDeployerBase {
         if (deployerKey == 0) revert InvalidDeployerKey();
         address deployer = vm.addr(deployerKey);
         string memory marketId = vm.envOr("MARKET_ID", string(""));
-        (uint256 expectedMarketId, uint256 uiPositionCap) = _stagingMarketConfig(marketId);
+        uint256 uiPositionCap = _stagingMarketConfig(marketId);
         MarketConfig memory cfg = getMarketConfigById(marketId);
         cfg = _applyStagingManifest(cfg);
 
@@ -71,10 +72,7 @@ contract AddMainnetStagingRwaMarket is MarketDeployerBase {
         }
         if (vm.envOr("FEED_SIGNER", feedSigner) != feedSigner) revert FeedSignerMismatch();
         if (srm.borrowingEnabled()) revert BorrowingEnabled();
-        uint256 expectedPrevious = expectedMarketId - 1;
-        if (srm.lastMarketId() != expectedPrevious) {
-            revert WrongMarketSequence(expectedPrevious, srm.lastMarketId());
-        }
+        uint256 expectedMarketId = _nextStagingMarketId(marketId, srm.lastMarketId());
 
         address underlying = _reviewedUnderlying(cfg);
         cfg.optionCap = _rawPositionCap(underlying, cfg.scaledUi, uiPositionCap);
@@ -100,13 +98,27 @@ contract AddMainnetStagingRwaMarket is MarketDeployerBase {
     function _stagingMarketConfig(string memory marketId)
         internal
         pure
-        returns (uint256 expectedMarketId, uint256 uiPositionCap)
+        returns (uint256 uiPositionCap)
     {
         bytes32 id = keccak256(bytes(marketId));
-        if (id == keccak256("XAU")) return (2, XAU_UI_POSITION_CAP);
-        if (id == keccak256("SPY")) return (3, SPY_UI_POSITION_CAP);
-        if (id == keccak256("NVDA")) return (4, NVDA_UI_POSITION_CAP);
+        if (id == keccak256("XAU")) return XAU_UI_POSITION_CAP;
+        if (id == keccak256("SPY")) return SPY_UI_POSITION_CAP;
+        if (id == keccak256("NVDA")) return NVDA_UI_POSITION_CAP;
         revert InvalidMarket(marketId);
+    }
+
+    function _nextStagingMarketId(string memory marketId, uint256 lastMarketId)
+        internal
+        pure
+        returns (uint256)
+    {
+        if (lastMarketId >= 4) revert NoRemainingRwaMarketSlot(lastMarketId);
+        if (keccak256(bytes(marketId)) == keccak256("XAU")) {
+            if (lastMarketId != 1) revert WrongMarketSequence(1, lastMarketId);
+        } else if (lastMarketId < 2) {
+            revert WrongMarketSequence(2, lastMarketId);
+        }
+        return lastMarketId + 1;
     }
 
     function _reviewedUnderlying(MarketConfig memory cfg) internal view returns (address token) {
@@ -149,12 +161,31 @@ contract AddMainnetStagingRwaMarket is MarketDeployerBase {
                 "staging collateral symbol mismatch"
             );
             cfg.underlyingDefault = vm.parseJsonAddress(json, string.concat(base, ".collateral.address"));
-            cfg.pythPriceId = vm.parseJsonBytes32(json, string.concat(base, ".pythPriceId"));
+            string memory provider = vm.parseJsonString(json, string.concat(base, ".oracleProvider"));
+            bytes32 providerId = keccak256(bytes(provider));
+            if (providerId == keccak256("pyth")) {
+                cfg.oracleProvider = OracleProvider.Pyth;
+                cfg.benchmarkSettlement = true;
+                cfg.pythPriceId = vm.parseJsonBytes32(json, string.concat(base, ".pythPriceId"));
+            } else if (providerId == keccak256("chainlink")) {
+                cfg.oracleProvider = OracleProvider.Chainlink;
+                cfg.benchmarkSettlement = false;
+                cfg.pythPriceId = bytes32(0);
+                cfg.chainlinkAggregator = vm.parseJsonAddress(
+                    json, string.concat(base, ".chainlinkAggregator")
+                );
+            } else {
+                revert("staging oracle provider invalid");
+            }
             break;
         }
         require(found, "market missing from staging manifest");
         require(cfg.underlyingDefault != address(0), "staging collateral address missing");
-        require(cfg.pythPriceId != bytes32(0), "staging Pyth price id missing");
+        if (cfg.oracleProvider == OracleProvider.Pyth) {
+            require(cfg.pythPriceId != bytes32(0), "staging Pyth price id missing");
+        } else {
+            require(cfg.chainlinkAggregator != address(0), "staging Chainlink aggregator missing");
+        }
         return cfg;
     }
 
@@ -185,11 +216,14 @@ contract AddMainnetStagingRwaMarket is MarketDeployerBase {
         vm.serializeAddress(key, "settlementFeed", address(m.settlementFeed));
         vm.serializeAddress(key, "liveSettlementFeed", m.liveSettlementFeed);
         vm.serializeAddress(key, "pythSpotFeed", address(m.pythSpotFeed));
+        vm.serializeAddress(key, "chainlinkSpotFeed", address(m.chainlinkSpotFeed));
         vm.serializeAddress(key, "scaledSpotFeed", address(m.scaledSpotFeed));
+        vm.serializeAddress(key, "scaledSettlementFeed", address(m.scaledSettlementFeed));
         vm.serializeAddress(key, "multiplierRegistry", address(m.multiplierRegistry));
         vm.serializeAddress(key, "benchmarkSettlementFeed", address(m.benchmarkSettlementFeed));
         vm.serializeAddress(key, "liveSpotFeed", m.liveSpotFeed);
         vm.serializeAddress(key, "optionAsset", address(m.option));
+        vm.serializeString(key, "oracleProvider", _oracleProviderName(cfg.oracleProvider));
         vm.serializeBytes32(key, "pythPriceId", cfg.pythPriceId);
         vm.serializeAddress(key, "chainlinkAggregator", cfg.chainlinkAggregator);
         vm.serializeUint(key, "underlyingDecimals", cfg.underlyingDecimals);

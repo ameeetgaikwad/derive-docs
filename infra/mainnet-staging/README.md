@@ -67,8 +67,9 @@ and separate ALBs isolate them.
 ## RWA rollout
 
 Gold, S&P 500, and NVIDIA are deployed and activated one at a time. SpaceX is
-intentionally excluded. Deployment is permanently ordered `XAU -> SPY -> NVDA`
-so a retry cannot create a duplicate SRM market.
+intentionally excluded. XAU occupies the first RWA slot; SPY and NVDA can then
+be deployed in either order, so an unavailable provider does not block the
+other equity market. The manifest and sidecar guards prevent accidental retries.
 
 ```bash
 # Dry-run locally first.
@@ -77,7 +78,7 @@ pnpm deploy:rwa:mainnet-staging --market XAU
 # Operator-only broadcast after reviewing the simulation and balances.
 pnpm deploy:rwa:mainnet-staging --market XAU --broadcast --confirm
 
-# Verify fresh Hermes data, then seed the disabled market's Pyth adapter.
+# Verify the selected external source. Pyth may be pushed; Chainlink is read-only.
 pnpm bootstrap:rwa:mainnet-staging --market XAU
 pnpm bootstrap:rwa:mainnet-staging --market XAU --broadcast --confirm
 
@@ -86,14 +87,22 @@ pnpm activate:rwa:mainnet-staging --market XAU
 pnpm activate:rwa:mainnet-staging --market XAU --confirm
 ```
 
-The local operator environment must provide `PYTH_API_KEY`. These commands pin
-`HERMES_URL=https://pyth.dourolabs.app/hermes`, matching the upgraded chain-56
-Pyth contract; legacy Hermes VAAs are rejected. Put the token in the ignored
-`services/oracle-feeds/.env.staging.mainnet` file or export it in the shell.
-SPY and NVDA additionally require U.S.-equities access on that API key and the
-exact feed ID to be available from upgraded Hermes. An HTTP 401/403 is a hard
-deployment stop, not a stale-market condition; do not fall back to legacy
-Hermes or deploy the market until its dry run succeeds.
+The market manifest selects the provider with `oracleProvider`. For `pyth`, set
+`pythPriceId` and leave `chainlinkAggregator` null; the operator must provide
+`PYTH_API_KEY` and use `HERMES_URL=https://pyth.dourolabs.app/hermes`. For
+`chainlink`, set `pythPriceId` to null and set the reviewed aggregator address;
+deployment and activation do not read Hermes or require a Pyth key. In both
+cases, keep `enabled=false` and `contracts=null`, run the deploy command without
+`--broadcast`, review the provider/source line, then broadcast. Never switch an
+already-deployed market in place: deploy a fresh market stack and verify its
+sidecar first.
+
+NVDA and SPY are configured for the BNB Chain standard feeds at
+`0xea5c2Cbb5cD57daC24E26180b19a929F3E9699B8` (`NVDA / USD`) and
+`0xb24D1DeE5F9a3f761D286B56d2bC44CE1D02DF7e` (`SPY / USD`). The Chainlink
+preflight verifies contract code, exact description, decimals, a complete
+positive round, and freshness before any broadcast. Do not copy an address from
+another chain or asset.
 
 The bootstrap step exists because the singleton oracle intentionally publishes
 only enabled markets, while activation requires a fresh on-chain source. It
@@ -101,9 +110,12 @@ does not publish signed forward/vol/rate feeds and never enables the market.
 
 Commit the new staging sidecar and manifest, publish all service/web images, and
 roll oracle, RFQ, maker, then web. Verify `/markets`, complete a tiny RFQ, and
-only then repeat for SPY and NVDA. Equity activation can use `--deferred` when
-Pyth is outside its publishing window; the market remains runtime-closed until
-fresh Pyth and signed feeds arrive.
+only then repeat for the next selected market. Equity activation can use
+`--deferred` when the selected source is outside its publishing window; the
+market remains runtime-closed until the external and signed feeds are fresh. A
+standard Chainlink feed is not a promise of continuous 24/5 equity updates: the
+adapter rejects data older than 24 hours, so weekends, holidays, and source
+pauses deliberately fail closed.
 
 The staging caps are deliberately small:
 
@@ -115,11 +127,13 @@ For scaled bStocks, the protocol cap is set in canonical raw units from the
 deployment-time multiplier. The RFQ engine separately enforces the displayed
 per-order cap against the live, checkpointed multiplier.
 
-RWA expiries settle from a Pyth benchmark proof for the first valid update in
-the five-minute window at/after expiry. This path is not automatic yet: an
-operator must obtain the reviewed benchmark update, set `ORACLE_MARKET`, and run
-the oracle `settle` command. Do not enable a market without an expiry-day owner
-for this procedure.
+Pyth RWA expiries settle from a benchmark proof in the five-minute window
+at/after expiry. Chainlink RWA expiries use the first complete aggregator round
+at/after expiry, allowing up to 24 hours for the standard feed's next heartbeat;
+settlement remains pending until that round exists. Scaled markets apply the
+multiplier checkpoint effective at expiry. Settlement is not automatic yet:
+set `ORACLE_MARKET` and run the oracle `settle` command. Do not enable a market
+without an expiry-day owner.
 
 Raw keys are accepted only for this isolated pre-production staging stack.
 Production must use controlled signing infrastructure for executor, oracle,

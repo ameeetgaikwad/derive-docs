@@ -105,7 +105,29 @@ const pythPriceAbi = [{
   }],
 }] as const;
 
-/** Latest underlying Pyth publish timestamp in unix seconds. */
+const chainlinkSpotAdapterAbi = [{
+  type: "function",
+  name: "aggregator",
+  stateMutability: "view",
+  inputs: [],
+  outputs: [{ type: "address" }],
+}] as const;
+
+const chainlinkAggregatorAbi = [{
+  type: "function",
+  name: "latestRoundData",
+  stateMutability: "view",
+  inputs: [],
+  outputs: [
+    { name: "roundId", type: "uint80" },
+    { name: "answer", type: "int256" },
+    { name: "startedAt", type: "uint256" },
+    { name: "updatedAt", type: "uint256" },
+    { name: "answeredInRound", type: "uint80" },
+  ],
+}] as const;
+
+/** Latest publish timestamp from the market's selected external oracle. */
 export async function marketFeedUpdatedAt(
   client: PublicClient,
   market: MarketDefinition,
@@ -116,8 +138,21 @@ export async function marketFeedUpdatedAt(
         address: market.contracts.spotFeed,
         abi: scaledSpotFeedAbi,
         functionName: "uiSpotFeed",
-      })
+    })
     : market.contracts.spotFeed;
+  if (market.oracleProvider === "chainlink") {
+    const aggregator = await client.readContract({
+      address: adapter,
+      abi: chainlinkSpotAdapterAbi,
+      functionName: "aggregator",
+    });
+    const [, , , updatedAt] = await client.readContract({
+      address: aggregator,
+      abi: chainlinkAggregatorAbi,
+      functionName: "latestRoundData",
+    });
+    return Number(updatedAt);
+  }
   const [pyth, priceId] = await Promise.all([
     client.readContract({ address: adapter, abi: pythSpotAdapterAbi, functionName: "pyth" }),
     client.readContract({ address: adapter, abi: pythSpotAdapterAbi, functionName: "priceId" }),

@@ -99,6 +99,28 @@ const pythPriceAbi = [{
   }],
 }] as const;
 
+const chainlinkSpotAbi = [{
+  type: "function",
+  name: "aggregator",
+  stateMutability: "view",
+  inputs: [],
+  outputs: [{ type: "address" }],
+}] as const;
+
+const chainlinkAggregatorAbi = [{
+  type: "function",
+  name: "latestRoundData",
+  stateMutability: "view",
+  inputs: [],
+  outputs: [
+    { name: "roundId", type: "uint80" },
+    { name: "answer", type: "int256" },
+    { name: "startedAt", type: "uint256" },
+    { name: "updatedAt", type: "uint256" },
+    { name: "answeredInRound", type: "uint80" },
+  ],
+}] as const;
+
 const SCALED_UI_CORE = "0xa60bf13d" as Hex;
 const SCALED_UI_PENDING = "0x4bd27648" as Hex;
 
@@ -227,7 +249,10 @@ export async function verifyMarket(
   deployments: DeploymentsFile,
   market: MarketDefinition,
 ): Promise<void> {
-  if (!market.contracts || !market.collateral.address || !market.pythPriceId) {
+  const hasOracleSource = market.oracleProvider === "pyth"
+    ? market.pythPriceId !== null
+    : market.chainlinkAggregator !== null;
+  if (!market.contracts || !market.collateral.address || !hasOracleSource) {
     throw new Error(`${market.id} is not fully staged in the manifest`);
   }
   await assertToken(client, market, market.collateral.address);
@@ -243,6 +268,9 @@ export async function verifyMarket(
   ];
   if (contracts.multiplierRegistry) {
     contractAddresses.push(["multiplier registry", contracts.multiplierRegistry]);
+  }
+  if (contracts.settlementFixingFeed) {
+    contractAddresses.push(["settlement fixing feed", contracts.settlementFixingFeed]);
   }
   await Promise.all(contractAddresses.map(([label, target]) => assertContract(client, target, `${market.id} ${label}`)));
 
@@ -328,6 +356,7 @@ export async function readPythBinding(
   client: PublicClient,
   market: MarketDefinition,
 ): Promise<PythBinding> {
+  if (market.oracleProvider !== "pyth") throw new Error(`${market.id} does not use Pyth`);
   if (!market.contracts || !market.pythPriceId) throw new Error(`${market.id} is not fully staged`);
   const adapter = market.collateral.scaledUi
     ? await client.readContract({
@@ -344,6 +373,70 @@ export async function readPythBinding(
     throw new Error(`${market.id} Pyth price id does not match the manifest`);
   }
   return { adapter, pyth, priceId };
+}
+
+export interface ChainlinkBinding {
+  adapter: Address;
+  aggregator: Address;
+}
+
+export interface ChainlinkHealth extends ChainlinkBinding {
+  roundId: bigint;
+  answer: bigint;
+  updatedAt: bigint;
+  answeredInRound: bigint;
+}
+
+export async function readChainlinkBinding(
+  client: PublicClient,
+  market: MarketDefinition,
+): Promise<ChainlinkBinding> {
+  if (market.oracleProvider !== "chainlink") throw new Error(`${market.id} does not use Chainlink`);
+  if (!market.contracts || !market.chainlinkAggregator) {
+    throw new Error(`${market.id} is not fully staged`);
+  }
+  const adapter = market.collateral.scaledUi
+    ? await client.readContract({
+        address: market.contracts.spotFeed,
+        abi: scaledSpotAbi,
+        functionName: "uiSpotFeed",
+      })
+    : market.contracts.spotFeed;
+  const aggregator = await client.readContract({
+    address: adapter,
+    abi: chainlinkSpotAbi,
+    functionName: "aggregator",
+  });
+  if (!sameAddress(aggregator, market.chainlinkAggregator)) {
+    throw new Error(`${market.id} Chainlink aggregator does not match the manifest`);
+  }
+  return { adapter, aggregator };
+}
+
+export async function readChainlinkHealth(
+  client: PublicClient,
+  market: MarketDefinition,
+): Promise<ChainlinkHealth> {
+  const binding = await readChainlinkBinding(client, market);
+  const [roundId, answer, , updatedAt, answeredInRound] = await client.readContract({
+    address: binding.aggregator,
+    abi: chainlinkAggregatorAbi,
+    functionName: "latestRoundData",
+  });
+  return { ...binding, roundId, answer, updatedAt, answeredInRound };
+}
+
+export type OracleBinding =
+  | ({ provider: "pyth" } & PythBinding)
+  | ({ provider: "chainlink" } & ChainlinkBinding);
+
+export async function readOracleBinding(
+  client: PublicClient,
+  market: MarketDefinition,
+): Promise<OracleBinding> {
+  return market.oracleProvider === "chainlink"
+    ? { provider: "chainlink", ...await readChainlinkBinding(client, market) }
+    : { provider: "pyth", ...await readPythBinding(client, market) };
 }
 
 export async function readPythHealth(

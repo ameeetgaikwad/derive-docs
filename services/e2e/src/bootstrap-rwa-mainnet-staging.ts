@@ -23,6 +23,7 @@ import {
   requireStagingDeployments,
   requireStagingRwaMarket,
   verifyStagingMarket,
+  verifyChainlinkSource,
 } from "./rwa-mainnet-staging-operator.js";
 
 interface Options {
@@ -52,15 +53,15 @@ function parseOptions(argv: string[]): Options | { help: true } {
 }
 
 function usage(): void {
-  console.log(`Push one fresh Pyth source into a deployed, disabled chain-56 staging market.
+  console.log(`Verify or refresh the external source for a deployed, disabled chain-56 staging market.
 
 Usage:
   pnpm bootstrap:rwa:mainnet-staging --market XAU
   pnpm bootstrap:rwa:mainnet-staging --market XAU --broadcast --confirm
 
-This verifies the staged contracts and exact Pyth binding, rejects stale Hermes
-data, checks pusher gas, submits one update, and verifies adapter freshness. It
-does not enable the market or publish signed forward/vol/rate feeds.`);
+Pyth mode verifies Hermes data and optionally submits one update. Chainlink mode
+verifies the configured on-chain feed and sends no oracle transaction. Neither
+mode enables the market or publishes signed forward/vol/rate feeds.`);
 }
 
 function maximumAge(): bigint {
@@ -78,7 +79,10 @@ async function bootstrap(): Promise<void> {
 
   const manifest = readStagingManifest();
   const market = marketFromManifest(manifest, options.market);
-  if (!market.contracts || !market.collateral.address || !market.pythPriceId) {
+  const hasOracleSource = market.oracleProvider === "pyth"
+    ? market.pythPriceId !== null
+    : market.chainlinkAggregator !== null;
+  if (!market.contracts || !market.collateral.address || !hasOracleSource) {
     throw new Error(`${market.id} is not staged; run the staging deploy command first`);
   }
   if (market.enabled) {
@@ -89,6 +93,14 @@ async function bootstrap(): Promise<void> {
   const client = makeStagingClient();
   await assertStagingChain(client);
   await verifyStagingMarket(client, deployments, market);
+  if (market.oracleProvider === "chainlink") {
+    const health = await verifyChainlinkSource(client, market);
+    console.log(
+      `[rwa-staging-bootstrap] ${market.id} Chainlink source=${health.aggregator} ` +
+        `answer=${health.answer} age=${health.age}s adapter verified; market remains disabled`,
+    );
+    return;
+  }
   const binding = await readPythBinding(client, market);
   const pyth = getDeployedAddress(deployments, "pyth");
   const batch: PythBatchAddresses = {

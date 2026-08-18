@@ -7,6 +7,8 @@ export const MARKET_IDS = ["BTC", "XAU", "SPY", "NVDA", "SPCX"] as const;
 export type MarketId = (typeof MARKET_IDS)[number];
 export type MarketKind = "crypto" | "equity" | "metal";
 export type MarketHours = "24/7" | "24/5";
+export const ORACLE_PROVIDERS = ["pyth", "chainlink"] as const;
+export type OracleProvider = (typeof ORACLE_PROVIDERS)[number];
 
 export interface MarketContracts {
   marketId: number;
@@ -20,6 +22,8 @@ export interface MarketContracts {
   volFeed: Address;
   rateFeed: Address;
   settlementFeed: Address;
+  /** Provider-specific feed that permissionlessly fixes expiry settlement. */
+  settlementFixingFeed?: Address;
   multiplierRegistry?: Address;
 }
 
@@ -35,7 +39,9 @@ export interface MarketDefinition {
     scaledUi: boolean;
   };
   contracts: MarketContracts | null;
+  oracleProvider: OracleProvider;
   pythPriceId: Hex | null;
+  chainlinkAggregator: Address | null;
   marketHours: MarketHours;
   strikeIncrement: number;
   riskVolFloor: number;
@@ -122,6 +128,20 @@ export function validateMarketManifest(input: unknown, expectedChainId?: number)
     if (market.pythPriceId !== null && !BYTES32_RE.test(market.pythPriceId)) {
       throw new Error(`${market.id}.pythPriceId must be bytes32`);
     }
+    if (market.pythPriceId !== null && /^0x0{64}$/i.test(market.pythPriceId)) {
+      throw new Error(`${market.id}.pythPriceId is zero`);
+    }
+    const oracleProvider = market.oracleProvider ?? "pyth";
+    if (!ORACLE_PROVIDERS.includes(oracleProvider)) {
+      throw new Error(`${market.id}.oracleProvider must be pyth or chainlink`);
+    }
+    const chainlinkAggregator = market.chainlinkAggregator ?? null;
+    if (chainlinkAggregator !== null) {
+      assertAddress(chainlinkAggregator, `${market.id}.chainlinkAggregator`);
+      if (/^0x0{40}$/i.test(chainlinkAggregator)) {
+        throw new Error(`${market.id}.chainlinkAggregator is zero`);
+      }
+    }
     if (market.enabled) {
       if (!market.contracts) throw new Error(`${market.id} is enabled without contracts`);
       if (!market.collateral.address) throw new Error(`${market.id} is enabled without collateral address`);
@@ -133,12 +153,20 @@ export function validateMarketManifest(input: unknown, expectedChainId?: number)
           if (/^0x0{40}$/i.test(value)) throw new Error(`${market.id}.contracts.${key} is zero`);
         }
       }
-      if (!market.pythPriceId) throw new Error(`${market.id} is enabled without a Pyth price id`);
+      if (oracleProvider === "pyth" && !market.pythPriceId) {
+        throw new Error(`${market.id} is enabled without a Pyth price id`);
+      }
+      if (oracleProvider === "chainlink" && !chainlinkAggregator) {
+        throw new Error(`${market.id} is enabled without a Chainlink aggregator`);
+      }
+      if (oracleProvider === "chainlink" && !market.contracts.settlementFixingFeed) {
+        throw new Error(`${market.id} is enabled without a Chainlink settlement fixing feed`);
+      }
       if (market.collateral.scaledUi && !market.contracts.multiplierRegistry) {
         throw new Error(`${market.id} is scaled but has no multiplier registry`);
       }
     }
-    return market;
+    return { ...market, oracleProvider, chainlinkAggregator };
   });
   return { chainId, markets };
 }

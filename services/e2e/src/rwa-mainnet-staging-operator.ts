@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { getDeployedAddress, makePublicClient, type DeploymentsFile } from "@hedge/shared";
 import { privateKeyToAccount } from "viem/accounts";
 import type { Address, PublicClient } from "viem";
+import type { MarketDefinition } from "@hedge/shared";
 import {
   parseAddMarketSidecar,
   parseManifestFile,
@@ -12,7 +13,14 @@ import {
   type ManifestFile,
   type RwaMarketId,
 } from "./rwa-testnet.js";
-import { privateKeyEnv, readPythBinding, readPythHealth, verifyMarket } from "./rwa-testnet-operator.js";
+import {
+  privateKeyEnv,
+  readChainlinkHealth,
+  readOracleBinding,
+  readPythBinding,
+  readPythHealth,
+  verifyMarket,
+} from "./rwa-testnet-operator.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 export const ROOT = resolve(HERE, "..", "..", "..");
@@ -24,6 +32,7 @@ export const STAGING_REPORT_PATH = join(STAGING_DEPLOYMENTS_DIR, "56-rwa-report.
 export const STAGING_CHAIN_ID = 56;
 export const SUPPORTED_STAGING_RWA_MARKETS = ["XAU", "SPY", "NVDA"] as const;
 export const STAGING_HERMES_URL = "https://pyth.dourolabs.app/hermes";
+export const CHAINLINK_MAX_STALENESS_SECONDS = 24n * 60n * 60n;
 
 const ownerAbi = [{
   type: "function",
@@ -170,18 +179,21 @@ export async function verifyStagingSequence(
   deployments: DeploymentsFile,
   marketId: RwaMarketId,
 ): Promise<void> {
-  const expectedPrevious: Record<string, bigint> = { XAU: 1n, SPY: 2n, NVDA: 3n };
   const standardManager = getDeployedAddress(deployments, "standardManager");
   const [lastMarketId, borrowingEnabled] = await Promise.all([
     client.readContract({ address: standardManager, abi: standardManagerStateAbi, functionName: "lastMarketId" }),
     client.readContract({ address: standardManager, abi: standardManagerStateAbi, functionName: "borrowingEnabled" }),
   ]);
   if (borrowingEnabled) throw new Error("staging SRM borrowing is enabled; refusing RWA deployment");
-  if (lastMarketId !== expectedPrevious[marketId]) {
-    throw new Error(
-      `${marketId} must be deployed after market ${expectedPrevious[marketId]}; ` +
-        `staging SRM lastMarketId is ${lastMarketId}`,
-    );
+  if (lastMarketId >= 4n) {
+    throw new Error(`no remaining RWA market slot; staging SRM lastMarketId is ${lastMarketId}`);
+  }
+  if (marketId === "XAU") {
+    if (lastMarketId !== 1n) {
+      throw new Error(`XAU must be the first RWA market; staging SRM lastMarketId is ${lastMarketId}`);
+    }
+  } else if (lastMarketId < 2n) {
+    throw new Error(`${marketId} requires XAU to be deployed first`);
   }
 }
 
@@ -191,13 +203,76 @@ export async function verifyStagingMarket(
   market: Parameters<typeof verifyMarket>[2],
 ): Promise<void> {
   await verifyMarket(client, deployments, market);
-  const binding = await readPythBinding(client, market);
-  const expectedPyth = getDeployedAddress(deployments, "pyth");
-  if (!sameAddress(binding.pyth, expectedPyth)) {
-    throw new Error(
-      `${market.id} adapter points to Pyth ${binding.pyth}; expected staging Pyth ${expectedPyth}`,
-    );
+  const binding = await readOracleBinding(client, market);
+  if (binding.provider === "pyth") {
+    const expectedPyth = getDeployedAddress(deployments, "pyth");
+    if (!sameAddress(binding.pyth, expectedPyth)) {
+      throw new Error(
+        `${market.id} adapter points to Pyth ${binding.pyth}; expected staging Pyth ${expectedPyth}`,
+      );
+    }
   }
 }
 
-export { readPythBinding, readPythHealth };
+const chainlinkSourceAbi = [
+  { type: "function", name: "description", stateMutability: "view", inputs: [], outputs: [{ type: "string" }] },
+  { type: "function", name: "decimals", stateMutability: "view", inputs: [], outputs: [{ type: "uint8" }] },
+  {
+    type: "function",
+    name: "latestRoundData",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [
+      { name: "roundId", type: "uint80" },
+      { name: "answer", type: "int256" },
+      { name: "startedAt", type: "uint256" },
+      { name: "updatedAt", type: "uint256" },
+      { name: "answeredInRound", type: "uint80" },
+    ],
+  },
+] as const;
+
+export interface ChainlinkSourceHealth {
+  aggregator: Address;
+  description: string;
+  decimals: number;
+  answer: bigint;
+  updatedAt: bigint;
+  age: bigint;
+}
+
+export async function verifyChainlinkSource(
+  client: PublicClient,
+  market: MarketDefinition,
+): Promise<ChainlinkSourceHealth> {
+  if (market.oracleProvider !== "chainlink" || !market.chainlinkAggregator) {
+    throw new Error(`${market.id} does not have a Chainlink source configured`);
+  }
+  const aggregator = market.chainlinkAggregator;
+  const code = await client.getCode({ address: aggregator });
+  if (!code || code === "0x") throw new Error(`${market.id} Chainlink aggregator has no contract code`);
+  const [description, decimals, round, block] = await Promise.all([
+    client.readContract({ address: aggregator, abi: chainlinkSourceAbi, functionName: "description" }),
+    client.readContract({ address: aggregator, abi: chainlinkSourceAbi, functionName: "decimals" }),
+    client.readContract({ address: aggregator, abi: chainlinkSourceAbi, functionName: "latestRoundData" }),
+    client.getBlock(),
+  ]);
+  const expectedDescription = `${market.id} / USD`;
+  if (description !== expectedDescription) {
+    throw new Error(
+      `${market.id} Chainlink description ${description} does not match ${expectedDescription}`,
+    );
+  }
+  if (decimals > 36) throw new Error(`${market.id} Chainlink decimals ${decimals} are unsupported`);
+  const [roundId, answer, , updatedAt, answeredInRound] = round;
+  if (roundId === 0n || answer <= 0n || updatedAt === 0n || updatedAt > block.timestamp || answeredInRound < roundId) {
+    throw new Error(`${market.id} Chainlink latest round is invalid`);
+  }
+  const age = block.timestamp - updatedAt;
+  if (age > CHAINLINK_MAX_STALENESS_SECONDS) {
+    throw new Error(`${market.id} Chainlink source is stale (${age}s)`);
+  }
+  return { aggregator, description, decimals, answer, updatedAt, age };
+}
+
+export { readChainlinkHealth, readOracleBinding, readPythBinding, readPythHealth };

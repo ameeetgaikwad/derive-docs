@@ -25,9 +25,11 @@ import {ISpotFeed} from "v2-core/src/interfaces/ISpotFeed.sol";
 import {MockERC20} from "./mocks/MockERC20.sol";
 import {MockScaledToken} from "./mocks/MockScaledToken.sol";
 import {AnchoredSettlementFeed} from "../src/AnchoredSettlementFeed.sol";
+import {ChainlinkSpotFeed} from "../src/ChainlinkSpotFeed.sol";
 import {PythSpotFeed} from "../src/PythSpotFeed.sol";
 import {PythBenchmarkSettlementFeed} from "../src/PythBenchmarkSettlementFeed.sol";
 import {MultiplierCheckpointRegistry} from "../src/MultiplierCheckpointRegistry.sol";
+import {ScaledSettlementFeed} from "../src/ScaledSettlementFeed.sol";
 import {ScaledSpotFeed} from "../src/ScaledSpotFeed.sol";
 import {IPyth} from "../src/interfaces/IPyth.sol";
 import {IAggregatorV3} from "../src/interfaces/IAggregatorV3.sol";
@@ -80,6 +82,7 @@ abstract contract MarketDeployerBase is Script {
   uint64 internal constant STABLE_HEARTBEAT = 60 minutes;
   uint64 internal constant RATE_HEARTBEAT = 60 minutes; // signed rate feed (not in Config; matches stable)
   uint64 internal constant FWD_MAX_EXPIRY = 400 days;
+  uint64 internal constant CHAINLINK_SETTLEMENT_MAX_ROUND_DELAY = 24 hours;
 
   // fees — OIFeeRateBPS is (despite the name) a plain 18-decimal multiplier applied to
   // abs(delta) * forwardPrice (see BasePortfolioViewer.getAssetOIFee). The vendored
@@ -97,6 +100,11 @@ abstract contract MarketDeployerBase is Script {
   // Per-market config
   // ---------------------------------------------------------------------------
 
+  enum OracleProvider {
+    Pyth,
+    Chainlink
+  }
+
   struct MarketConfig {
     /// SRM market name, e.g. "BTC"
     string name;
@@ -111,6 +119,8 @@ abstract contract MarketDeployerBase is Script {
     uint8 underlyingDecimals;
     /// BEP-8056 collateral whose UI amount is raw amount * uiMultiplier / 1e18
     bool scaledUi;
+    /// Primary external oracle selected by the market manifest
+    OracleProvider oracleProvider;
     /// settle from a Pyth benchmark proof instead of Chainlink history
     bool benchmarkSettlement;
     /// Pyth price feed id (Hermes / on-chain Pyth), for PythSpotFeed deployments
@@ -181,6 +191,21 @@ abstract contract MarketDeployerBase is Script {
       try vm.parseJsonBytes32(json, string.concat(base, ".pythPriceId")) returns (bytes32 priceId) {
         if (priceId != bytes32(0)) cfg.pythPriceId = priceId;
       } catch {}
+      try vm.parseJsonAddress(json, string.concat(base, ".chainlinkAggregator")) returns (address aggregator) {
+        if (aggregator != address(0)) cfg.chainlinkAggregator = aggregator;
+      } catch {}
+      try vm.parseJsonString(json, string.concat(base, ".oracleProvider")) returns (string memory provider) {
+        bytes32 providerId = keccak256(bytes(provider));
+        if (providerId == keccak256("pyth")) {
+          cfg.oracleProvider = OracleProvider.Pyth;
+        } else if (providerId == keccak256("chainlink")) {
+          cfg.oracleProvider = OracleProvider.Chainlink;
+          cfg.benchmarkSettlement = false;
+          cfg.pythPriceId = bytes32(0);
+        } else {
+          revert("manifest oracle provider invalid");
+        }
+      } catch {}
       break;
     }
     require(found, "market missing from chain manifest");
@@ -220,6 +245,7 @@ abstract contract MarketDeployerBase is Script {
         underlyingDefault: isBscMainnet ? BSC_MAINNET_BTCB : address(0),
         underlyingDecimals: 18,
         scaledUi: false,
+        oracleProvider: OracleProvider.Pyth,
         benchmarkSettlement: false,
         // Crypto.BTC/USD (hermes.pyth.network) — Pyth price ids are chain-agnostic
         pythPriceId: 0xe62df6c8b4a85fe1a67db44dc12de5db330f7ac66b72dc658afedf0f4a415b43,
@@ -245,6 +271,7 @@ abstract contract MarketDeployerBase is Script {
         underlyingDefault: address(0),
         underlyingDecimals: 18,
         scaledUi: false,
+        oracleProvider: OracleProvider.Pyth,
         benchmarkSettlement: false,
         // Crypto.ETH/USD (hermes.pyth.network) — Pyth price ids are chain-agnostic
         pythPriceId: 0xff61491a931112ddf1bd8147cd1b641375f79f5825126d665480874634fd0ace,
@@ -309,6 +336,7 @@ abstract contract MarketDeployerBase is Script {
       underlyingDefault: defaultToken,
       underlyingDecimals: decimals,
       scaledUi: scaledUi,
+      oracleProvider: OracleProvider.Pyth,
       benchmarkSettlement: true,
       pythPriceId: priceId,
       chainlinkAggregator: address(0),
@@ -319,6 +347,10 @@ abstract contract MarketDeployerBase is Script {
       baseMarginFactor: baseMarginFactor,
       baseIMScale: baseIMScale
     });
+  }
+
+  function _oracleProviderName(OracleProvider provider) internal pure returns (string memory) {
+    return provider == OracleProvider.Chainlink ? "chainlink" : "pyth";
   }
 
   // ---------------------------------------------------------------------------
@@ -338,7 +370,9 @@ abstract contract MarketDeployerBase is Script {
     /// address(0) when Pyth/Chainlink are unavailable (plain anvil), in which case the
     /// SRM keeps the signed LyraSpotFeed (which stays deployed as fallback regardless)
     PythSpotFeed pythSpotFeed;
+    ChainlinkSpotFeed chainlinkSpotFeed;
     ScaledSpotFeed scaledSpotFeed;
+    ScaledSettlementFeed scaledSettlementFeed;
     MultiplierCheckpointRegistry multiplierRegistry;
     PythBenchmarkSettlementFeed benchmarkSettlementFeed;
     address liveSpotFeed;
@@ -418,51 +452,84 @@ abstract contract MarketDeployerBase is Script {
     m.forwardFeed.setSettlementHeartbeat(SETTLEMENT_HEARTBEAT);
     m.forwardFeed.setMaxExpiry(FWD_MAX_EXPIRY);
 
-    // Settlement anchoring: options settle against Chainlink round data (Pyth-cross-checked)
-    // via AnchoredSettlementFeed — NOT the signed forward feed — whenever the market's
-    // Chainlink aggregator actually exists on this chain. On plain anvil (no aggregator
-    // code) settlement falls back to the signed LyraForwardFeed so local e2e keeps working.
+    // The signed feeds remain deployed as the operational write path and local fallback.
+    // The manifest-selected external provider supplies live spot and expiry settlement.
     address settlementFeed = address(m.forwardFeed);
     ISpotFeed srmSpotFeed = m.spotFeed;
+    ISpotFeed externalSpotFeed;
     address pyth = _pythAddress();
+    bool chainlinkReady = cfg.chainlinkAggregator != address(0)
+      && cfg.chainlinkAggregator.code.length > 0;
 
-    if (block.chainid != 31337 && cfg.benchmarkSettlement) {
+    if (
+      cfg.oracleProvider == OracleProvider.Pyth
+        && block.chainid != 31337
+        && cfg.benchmarkSettlement
+    ) {
       require(pyth != address(0) && pyth.code.length > 0, "RWA market requires Pyth");
       require(cfg.pythPriceId != bytes32(0), "RWA market requires Pyth price id");
     }
+    if (cfg.oracleProvider == OracleProvider.Chainlink) {
+      require(chainlinkReady, "Chainlink provider requires aggregator");
+      m.chainlinkSpotFeed = new ChainlinkSpotFeed(IAggregatorV3(cfg.chainlinkAggregator));
+      externalSpotFeed = ISpotFeed(address(m.chainlinkSpotFeed));
+    }
 
-    if (pyth != address(0) && pyth.code.length > 0 && cfg.pythPriceId != bytes32(0)) {
+    if (
+      cfg.oracleProvider == OracleProvider.Pyth
+        && pyth != address(0)
+        && pyth.code.length > 0
+        && cfg.pythPriceId != bytes32(0)
+    ) {
       m.pythSpotFeed = new PythSpotFeed(
         IPyth(pyth), cfg.pythPriceId, IAggregatorV3(cfg.chainlinkAggregator)
       );
-      srmSpotFeed = m.pythSpotFeed;
+      externalSpotFeed = ISpotFeed(address(m.pythSpotFeed));
+    }
 
+    if (address(externalSpotFeed) != address(0)) {
+      srmSpotFeed = externalSpotFeed;
       if (cfg.scaledUi) {
-        m.multiplierRegistry = new MultiplierCheckpointRegistry(
-          IScaledUiToken(underlying)
-        );
-        m.scaledSpotFeed = new ScaledSpotFeed(m.pythSpotFeed, m.multiplierRegistry);
+        m.multiplierRegistry = new MultiplierCheckpointRegistry(IScaledUiToken(underlying));
+        m.scaledSpotFeed = new ScaledSpotFeed(externalSpotFeed, m.multiplierRegistry);
         srmSpotFeed = m.scaledSpotFeed;
-      }
-
-      if (cfg.benchmarkSettlement) {
-        m.benchmarkSettlementFeed = new PythBenchmarkSettlementFeed(
-          IPyth(pyth), cfg.pythPriceId, m.multiplierRegistry, 5 minutes
-        );
-        settlementFeed = address(m.benchmarkSettlementFeed);
       }
     }
 
-    if (cfg.chainlinkAggregator != address(0) && cfg.chainlinkAggregator.code.length > 0) {
-      m.settlementFeed = new AnchoredSettlementFeed(
-        IAggregatorV3(cfg.chainlinkAggregator), IPyth(pyth), cfg.pythPriceId
+    if (
+      cfg.oracleProvider == OracleProvider.Pyth
+        && cfg.benchmarkSettlement
+        && address(m.pythSpotFeed) != address(0)
+    ) {
+      m.benchmarkSettlementFeed = new PythBenchmarkSettlementFeed(
+        IPyth(pyth), cfg.pythPriceId, m.multiplierRegistry, 5 minutes
       );
-      settlementFeed = address(m.settlementFeed);
+      settlementFeed = address(m.benchmarkSettlementFeed);
+    }
 
-      // Live oracle stack: the SRM's spot feed is the Pyth adapter (Chainlink circuit
-      // breaker) whenever the on-chain Pyth contract exists — the hardened end-state
-      // the testnet reached via a post-deploy setOraclesForMarket swap (TESTNET.md
-      // "Oracle stack"). The signed LyraSpotFeed stays deployed/configured as fallback.
+    if (
+      chainlinkReady
+        && (cfg.oracleProvider == OracleProvider.Chainlink || !cfg.benchmarkSettlement)
+    ) {
+      IPyth settlementPyth = cfg.oracleProvider == OracleProvider.Chainlink
+        ? IPyth(address(0))
+        : IPyth(pyth);
+      bytes32 settlementPriceId = cfg.oracleProvider == OracleProvider.Chainlink
+        ? bytes32(0)
+        : cfg.pythPriceId;
+      m.settlementFeed = new AnchoredSettlementFeed(
+        IAggregatorV3(cfg.chainlinkAggregator), settlementPyth, settlementPriceId
+      );
+      if (cfg.oracleProvider == OracleProvider.Chainlink) {
+        m.settlementFeed.setMaxRoundDelay(CHAINLINK_SETTLEMENT_MAX_ROUND_DELAY);
+      }
+      settlementFeed = address(m.settlementFeed);
+      if (cfg.oracleProvider == OracleProvider.Chainlink && cfg.scaledUi) {
+        m.scaledSettlementFeed = new ScaledSettlementFeed(
+          m.settlementFeed, m.multiplierRegistry
+        );
+        settlementFeed = address(m.scaledSettlementFeed);
+      }
     }
     m.liveSpotFeed = address(srmSpotFeed);
     m.liveSettlementFeed = settlementFeed;
