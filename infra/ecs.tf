@@ -80,6 +80,7 @@ resource "aws_ecs_task_definition" "rfq_engine" {
       environment = [
         { name = "AWS_REGION", value = var.aws_region },
         { name = "PORT", value = "3030" },
+        { name = "SUBACCOUNT_DIRECTORY_TABLE", value = aws_dynamodb_table.subaccount_directory.name },
         # KMS-backed signing — the executor key alias. No private key anywhere.
         { name = "EXECUTOR_KMS_KEY_ID", value = var.executor_kms_alias },
         { name = "EXECUTOR_KMS_REGION", value = var.aws_region },
@@ -131,6 +132,7 @@ resource "aws_ecs_service" "rfq_engine" {
   depends_on = [
     aws_lb_listener.http,
     aws_iam_role_policy_attachment.execution_managed,
+    aws_iam_role_policy_attachment.task_subaccount_directory,
   ]
 }
 

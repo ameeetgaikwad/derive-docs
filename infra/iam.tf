@@ -87,6 +87,35 @@ resource "aws_iam_role_policy_attachment" "task_ssm_read" {
   policy_arn = aws_iam_policy.task_ssm_read.arn
 }
 
+data "aws_iam_policy_document" "task_subaccount_directory" {
+  statement {
+    sid    = "ReadWriteSubaccountDirectory"
+    effect = "Allow"
+    actions = [
+      "dynamodb:BatchWriteItem",
+      "dynamodb:DeleteItem",
+      "dynamodb:GetItem",
+      "dynamodb:PutItem",
+      "dynamodb:Query",
+    ]
+    resources = [
+      aws_dynamodb_table.subaccount_directory.arn,
+      "${aws_dynamodb_table.subaccount_directory.arn}/index/*",
+    ]
+  }
+}
+
+resource "aws_iam_policy" "task_subaccount_directory" {
+  name        = "${local.name_prefix}-subaccount-directory"
+  description = "Read and update the focused Matching subaccount directory"
+  policy      = data.aws_iam_policy_document.task_subaccount_directory.json
+}
+
+resource "aws_iam_role_policy_attachment" "task_subaccount_directory" {
+  role       = aws_iam_role.ecs_task.name
+  policy_arn = aws_iam_policy.task_subaccount_directory.arn
+}
+
 # -----------------------------------------------------------------------------
 # 2. ECS execution role — ECR pull + CloudWatch logs, plus SSM decrypt so the
 #    agent can inject SecureString params into the container as env at launch.

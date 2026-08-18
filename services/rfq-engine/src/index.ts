@@ -8,6 +8,14 @@ import { Executor } from "./executor.js";
 import { RfqEngineServer } from "./server.js";
 import { InMemoryRfqStore, JsonlRfqStore } from "./store.js";
 import { assertMarketFeedsReady, marketFeedUpdatedAt, marketStatus } from "./markets.js";
+import { DynamoDbSubaccountDirectoryStore } from "./dynamodb-subaccount-directory.js";
+import {
+  StoredSubaccountDirectoryReader,
+  SubaccountDirectoryIndexer,
+  type DirectoryNetwork,
+} from "./subaccount-directory.js";
+import { SubaccountDirectoryWorker } from "./subaccount-directory-worker.js";
+import { ViemDirectoryChainReader } from "./viem-subaccount-directory.js";
 
 export * from "./types.js";
 export * from "./store.js";
@@ -18,6 +26,10 @@ export * from "./executor.js";
 export * from "./server.js";
 export * from "./config.js";
 export * from "./markets.js";
+export * from "./subaccount-directory.js";
+export * from "./subaccount-directory-worker.js";
+export * from "./viem-subaccount-directory.js";
+export * from "./dynamodb-subaccount-directory.js";
 
 async function main(): Promise<void> {
   const config = loadConfig();
@@ -53,6 +65,37 @@ async function main(): Promise<void> {
   }
 
   const store = config.storePath ? new JsonlRfqStore(config.storePath) : new InMemoryRfqStore();
+
+  let directoryWorker: SubaccountDirectoryWorker | null = null;
+  let subaccountDirectory: StoredSubaccountDirectoryReader | undefined;
+  if (config.subaccountDirectory) {
+    const network: DirectoryNetwork = {
+      chainId: config.chainId,
+      matching: config.matching,
+      deploymentBlock: config.subaccountDirectory.deploymentBlock,
+    };
+    const directoryStore = new DynamoDbSubaccountDirectoryStore(
+      config.subaccountDirectory.tableName,
+    );
+    const directoryIndexer = new SubaccountDirectoryIndexer({
+      network,
+      chain: new ViemDirectoryChainReader(publicClient, config.matching),
+      store: directoryStore,
+      confirmationBlocks: config.subaccountDirectory.confirmationBlocks,
+      chunkSize: config.subaccountDirectory.chunkSize,
+    });
+    subaccountDirectory = new StoredSubaccountDirectoryReader(network, directoryStore);
+    directoryWorker = new SubaccountDirectoryWorker(
+      directoryIndexer,
+      config.subaccountDirectory.pollMs,
+      (error) => {
+        // Keep RFQ execution available: the browser treats directory failures as
+        // unavailable and falls back to a wallet-filtered RPC scan.
+        // eslint-disable-next-line no-console
+        console.error("subaccount directory sync failed:", error);
+      },
+    );
+  }
 
   const engine = new AuctionEngine({
     store,
@@ -91,6 +134,7 @@ async function main(): Promise<void> {
     trustProxy: config.trustProxy,
     heartbeatMs: config.heartbeatMs,
     markets: config.markets,
+    subaccountDirectory,
     marketStatusProvider: async (market) => {
       const status = marketStatus(market);
       if (status.status !== "open" || market.marketHours !== "24/5" || !market.contracts) {
@@ -116,6 +160,7 @@ async function main(): Promise<void> {
     },
   });
   const { port } = await server.start();
+  directoryWorker?.start();
 
   // eslint-disable-next-line no-console
   console.log(
@@ -124,12 +169,14 @@ async function main(): Promise<void> {
       `auction window ${config.auctionWindowMs}ms, accept deadline ${config.takerAcceptDeadlineMs}ms, ` +
       `heartbeat ${config.heartbeatMs}ms, ` +
       `makers ${config.makerAllowlist.length > 0 ? `allowlist[${config.makerAllowlist.length}]` : "open"}, ` +
-      `store ${config.storePath ?? "in-memory"})\n` +
-      `  REST: POST /rfq | GET /rfq/:id | POST /rfq/:id/accept | GET /health\n` +
+      `store ${config.storePath ?? "in-memory"}, ` +
+      `directory ${config.subaccountDirectory?.tableName ?? "disabled"})\n` +
+      `  REST: POST /rfq | GET /rfq/:id | POST /rfq/:id/accept | GET /subaccounts | GET /health\n` +
       `  WS:   /maker (auth handshake -> RFQ stream + quotes) | /taker`,
   );
 
   const shutdown = async () => {
+    directoryWorker?.stop();
     await server.stop().catch(() => {});
     process.exit(0);
   };

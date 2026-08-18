@@ -176,7 +176,7 @@ export function usePositionMonitor(
 export function usePositions() {
   const { address } = useAccount();
   const { chainId } = useNetwork();
-  const { subaccountId } = useCoveredCallSubaccount();
+  const { subaccountId, isLoading: isLoadingSubaccounts } = useCoveredCallSubaccount();
   const monitor = useAllPositionMonitor(subaccountId);
   const { tradesFor } = useCoveredCallStore();
 
@@ -204,7 +204,7 @@ export function usePositions() {
     collateralByMarket: monitor.balances.collateralByMarket,
     options,
     trades,
-    isLoading: monitor.isLoading,
+    isLoading: isLoadingSubaccounts || monitor.isLoading,
     refetch: monitor.refetch,
   };
 }

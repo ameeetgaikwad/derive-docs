@@ -48,6 +48,11 @@ script) and verifies on-chain that the executor key is registered via
 | `RFQ_RATE_LIMIT_PER_MIN` | `30` | RFQ creations allowed per IP per minute (REST `POST /rfq` **and** taker-WS `create_rfq`); over-limit ⇒ `429` / WS error. `0` disables |
 | `TRUST_PROXY` | `false` | trust the first `X-Forwarded-For` address for rate limiting; enable only when security groups/firewalls block direct container access |
 | `STORE_PATH` | unset (in-memory) | path to a JSONL file for durable auctions + trade history (see Persistence) |
+| `SUBACCOUNT_DIRECTORY_TABLE` | unset (disabled) | DynamoDB table for the focused Matching subaccount directory |
+| `SUBACCOUNT_DIRECTORY_DEPLOYMENT_BLOCK` | `matchingDeploymentBlock` from deployments JSON | optional Matching event-scan origin override |
+| `SUBACCOUNT_DIRECTORY_CONFIRMATIONS` | `6` (`0` on anvil) | blocks held behind the chain head before indexing |
+| `SUBACCOUNT_DIRECTORY_CHUNK_SIZE` | `2000` | blocks read per indexer pass |
+| `SUBACCOUNT_DIRECTORY_POLL_MS` | `15000` | non-overlapping indexer polling interval; minimum `1000` |
 | `EXECUTOR_PRIVATE_KEY` | anvil key #0 (31337 only) | must be the registered trade executor (`tradeExecutor` in the deployments JSON) |
 | `SATS_DEPLOYMENTS_DIR` | auto-discovered | override deployments dir |
 
@@ -86,6 +91,43 @@ connection dedupe, accept-deadline expiry, heartbeat drops, the fee-aware
 collateral pre-check, rate limiting and JSONL restart recovery.
 
 ## API
+
+### Subaccount directory
+
+`GET /subaccounts?owner=0x...` returns active candidate IDs for the service's
+configured chain and Matching deployment:
+
+```json
+{
+  "data": {
+    "chainId": 56,
+    "matching": "0x...",
+    "indexedThroughBlock": "115317999",
+    "indexedThroughBlockHash": "0x...",
+    "accounts": [{ "accountId": "42" }, { "accountId": "57" }]
+  }
+}
+```
+
+The projection consumes only `DepositedSubAccount` and
+`WithdrewSubAccount`. It resumes from one block/hash checkpoint and rebuilds
+from the Matching deployment block if that checkpoint is no longer canonical.
+The endpoint returns `400` for an invalid owner and `503` while disabled,
+unsynchronized, or unable to read storage; those states are never returned as
+an empty successful list.
+
+This API discovers candidates; it is not an authorization source. The web app
+multicalls `Matching.subAccountToOwner`, `SubAccounts.manager`,
+`SubAccounts.ownerOf`, and `SubAccounts.getAccountBalances` before displaying
+an ID. No positions, balances, or trade history are indexed.
+
+Authoritative event origins are stored beside each deployment:
+
+| Deployment | Matching block |
+| --- | ---: |
+| BSC mainnet (`protocol/deployments/56.json`) | `107532774` |
+| BSC mainnet staging (`protocol/deployments/staging/56.json`) | `115317084` |
+| BSC testnet (`protocol/deployments/97.json`) | `123273721` |
 
 ### Taker — REST
 
@@ -290,3 +332,8 @@ the executor key, waiting for the receipt.
 - `server.ts` — HTTP/WS front-end only: auth/allowlist, heartbeats,
   connection dedupe, rate limiting, fan-out.
 - `executor.ts` — pure `buildRfqExecution` (calldata) + `Executor` (submit).
+- `subaccount-directory.ts` — canonical event projection, checkpoint/reorg
+  handling, and read model interfaces.
+- `dynamodb-subaccount-directory.ts` — durable account/checkpoint adapter.
+- `viem-subaccount-directory.ts` / `subaccount-directory-worker.ts` — Matching
+  log reader and non-overlapping poll loop.

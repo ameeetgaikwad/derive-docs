@@ -766,7 +766,7 @@ export function OrderTicket({
   const insufficient = isConnected && amountNumber > balance;
   const exceedsMaximum = amountExceedsLimit(amount || "0", maxAmount);
   const depositDeficit = Math.max(0, amountNumber - depositedBalance);
-  const requiresSetup = isConnected && (!hasSubaccount || depositDeficit > 0);
+  const requiresSetup = isConnected && depositDeficit > 0;
   const busy =
     setupPhase !== "idle" ||
     ["requesting", "auction", "signing", "executing"].includes(sellPhase);
@@ -804,6 +804,7 @@ export function OrderTicket({
 
   const primary = primaryAction({
     isConnected,
+    hasSubaccount,
     amountNumber,
     insufficient,
     exceedsMaximum,
@@ -977,6 +978,7 @@ export function OrderTicket({
 
 function primaryAction({
   isConnected,
+  hasSubaccount,
   amountNumber,
   insufficient,
   exceedsMaximum,
@@ -988,6 +990,7 @@ function primaryAction({
   collateralSymbol,
 }: {
   isConnected: boolean;
+  hasSubaccount: boolean;
   amountNumber: number;
   insufficient: boolean;
   exceedsMaximum: boolean;
@@ -1000,6 +1003,7 @@ function primaryAction({
 }): { label: string; disabled: boolean } {
   if (done) return { label: "Sell another call", disabled: false };
   if (!isConnected) return { label: "Connect wallet to continue", disabled: false };
+  if (!hasSubaccount) return { label: "Choose a subaccount above", disabled: true };
   if (amountNumber <= 0) return { label: `Enter ${collateralSymbol} amount`, disabled: true };
   if (insufficient) return { label: `Insufficient ${collateralSymbol}`, disabled: true };
   if (exceedsMaximum) return { label: "Amount exceeds maximum", disabled: true };

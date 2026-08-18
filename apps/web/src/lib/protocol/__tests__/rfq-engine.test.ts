@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   assertRfqEngineChain,
   getRfq,
+  getSubaccountDirectory,
   rfqEngineUrl,
 } from "../rfq-engine";
 
@@ -71,5 +72,37 @@ describe("RFQ engine network routing", () => {
     await expect(assertRfqEngineChain(56)).rejects.toThrow(
       /reports chain 97; expected chain 56.*Refusing to move collateral/,
     );
+  });
+
+  it("loads directory candidates with synchronization metadata", async () => {
+    vi.stubEnv("NEXT_PUBLIC_RFQ_ENGINE_URL_56", "https://main-rfq.example");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            data: {
+              chainId: 56,
+              matching: "0x2222222222222222222222222222222222222222",
+              indexedThroughBlock: "115317999",
+              indexedThroughBlockHash: `0x${"ab".repeat(32)}`,
+              accounts: [{ accountId: "42" }, { accountId: "57" }],
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+      ),
+    );
+
+    await expect(
+      getSubaccountDirectory(
+        "0x1111111111111111111111111111111111111111",
+        56,
+      ),
+    ).resolves.toMatchObject({
+      chainId: 56,
+      indexedThroughBlock: 115317999n,
+      accountIds: [42n, 57n],
+    });
   });
 });

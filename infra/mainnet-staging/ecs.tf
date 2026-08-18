@@ -70,6 +70,7 @@ resource "aws_ecs_task_definition" "rfq_engine" {
         { name = "AWS_REGION", value = var.aws_region },
         { name = "HOST", value = "0.0.0.0" },
         { name = "PORT", value = "3030" },
+        { name = "SUBACCOUNT_DIRECTORY_TABLE", value = aws_dynamodb_table.subaccount_directory.name },
         { name = "SATS_DEPLOYMENTS_DIR", value = "/app/protocol/deployments/staging" },
         { name = "HEDGE_MARKETS_DIR", value = "/app/protocol/deployments/staging/markets" },
         { name = "TAKER_OPEN", value = "true" },
@@ -128,6 +129,7 @@ resource "aws_ecs_service" "rfq_engine" {
   depends_on = [
     aws_lb_listener.http,
     aws_efs_mount_target.state,
+    aws_iam_role_policy.subaccount_directory,
   ]
 }
 

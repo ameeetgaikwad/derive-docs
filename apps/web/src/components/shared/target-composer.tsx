@@ -29,6 +29,7 @@ import { amountExceedsLimit, fromUnit, toUnit } from "@/lib/protocol/units";
 import { getSelectableMarkets, uiAmount18ToRaw18, type MarketId } from "@/lib/protocol/markets";
 import { useCoveredCallStore } from "@/stores/covered-call";
 import { useNetwork } from "@/hooks/protocol/useNetwork";
+import { SubaccountSelector } from "@/components/shared/SubaccountSelector";
 
 const DEFAULT_AMOUNT = "0.5";
 const DEFAULT_AMOUNTS: Record<MarketId, string> = {
@@ -105,7 +106,7 @@ export default function CoveredCallTrade({
     unavailableReason,
   } = useAvailableStrikes(selectedExpiry, selectedMarketId);
   const history = useBitcoinPriceHistory();
-  const { subaccountId, ensureSubaccount } = useCoveredCallSubaccount();
+  const { subaccountId } = useCoveredCallSubaccount();
   const depositCollateral = useDepositCollateral(selectedMarketId, multiplier);
   const sellCall = useSellCall();
   const { balanceNumber: walletCollateral, refetch: refetchCollateral } = useCollateralBalance(selectedMarketId, multiplier);
@@ -245,6 +246,10 @@ export default function CoveredCallTrade({
       openConnectModal?.();
       return;
     }
+    if (subaccountId === null) {
+      toast.error("Choose or create a trading subaccount before requesting a quote");
+      return;
+    }
     const order = currentOrder ?? frozenOrder;
     if (!order || amountNumber <= 0) {
       toast.error(`Enter the ${market.collateral.symbol} amount you want to cover`);
@@ -291,8 +296,7 @@ export default function CoveredCallTrade({
       );
       await assertRfqEngineChain(chainId);
 
-      setSetupPhase("subaccount");
-      const subId = await ensureSubaccount();
+      const subId = subaccountId;
       setPreparedSubaccountId(subId);
 
       const deficit = amountNumber - subBalances.collateral;
@@ -330,7 +334,6 @@ export default function CoveredCallTrade({
     chainId,
     currentOrder,
     depositCollateral,
-    ensureSubaccount,
     frozenOrder,
     isConnected,
     isUnavailable,
@@ -347,6 +350,7 @@ export default function CoveredCallTrade({
     market.enabled,
     multiplier,
     selectedMarketId,
+    subaccountId,
     unavailableReason,
   ]);
 
@@ -411,6 +415,8 @@ export default function CoveredCallTrade({
         disabled={controlsLocked}
         onMarketChange={handleMarketChange}
       />
+
+      {isConnected && <SubaccountSelector disabled={controlsLocked} />}
 
       <div className="grid min-w-0 min-[960px]:grid-cols-[minmax(0,1fr)_360px]">
         <TradeConfigurator

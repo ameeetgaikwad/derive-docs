@@ -298,14 +298,15 @@ describe("covered-call quote rail", () => {
     expect(onAcceptQuote).toHaveBeenCalledOnce();
   });
 
-  it("keeps first-trade setup behind one actionable quote button", async () => {
+  it("requires explicit subaccount selection before requesting a quote", async () => {
     const user = userEvent.setup();
     const onRequestQuote = vi.fn();
     renderTicket({ hasSubaccount: false, depositedBalance: 0, onRequestQuote });
 
-    expect(screen.queryByText(/first-trade preparation/i)).toBeNull();
-    await user.click(screen.getByRole("button", { name: "Prepare & request quote" }));
-    expect(onRequestQuote).toHaveBeenCalledOnce();
+    const button = screen.getByRole("button", { name: "Choose a subaccount above" });
+    expect((button as HTMLButtonElement).disabled).toBe(true);
+    await user.click(button);
+    expect(onRequestQuote).not.toHaveBeenCalled();
   });
 
   it("keeps settlement mechanics inside the collapsed expiry payoff", async () => {

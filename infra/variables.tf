@@ -127,6 +127,11 @@ variable "rfq_engine_desired_count" {
   description = "Desired running count for rfq-engine."
   type        = number
   default     = 1
+
+  validation {
+    condition     = contains([0, 1], var.rfq_engine_desired_count)
+    error_message = "rfq_engine_desired_count must be 0 or 1 while RFQ auctions and directory indexing are single-writer services."
+  }
 }
 
 variable "oracle_feeds_cpu" {

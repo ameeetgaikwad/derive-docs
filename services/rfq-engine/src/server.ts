@@ -5,6 +5,7 @@ import { verifyMessage, type Address } from "viem";
 import { AuctionEngine } from "./auction.js";
 import { QuoteValidationError } from "./quotes.js";
 import { marketStatus, type PublicMarketStatus } from "./markets.js";
+import type { SubaccountDirectoryReader } from "./subaccount-directory.js";
 import type { MarketDefinition } from "@hedge/shared";
 import {
   addressEq,
@@ -69,6 +70,8 @@ export interface RfqEngineServerOptions {
   markets?: MarketDefinition[];
   /** Optional live readiness projection used by GET /markets and /health. */
   marketStatusProvider?: (market: MarketDefinition) => Promise<PublicMarketStatus>;
+  /** Event-derived candidate directory; contract reads remain authoritative. */
+  subaccountDirectory?: SubaccountDirectoryReader;
 }
 
 /** Fixed-window-ish per-key rate limiter (sliding 60s window of timestamps). */
@@ -124,6 +127,7 @@ export class RfqEngineServer {
   private heartbeatTimer: NodeJS.Timeout | null = null;
   private readonly markets: MarketDefinition[];
   private readonly marketStatusProvider: (market: MarketDefinition) => Promise<PublicMarketStatus>;
+  private readonly subaccountDirectory: SubaccountDirectoryReader | undefined;
 
   constructor(opts: RfqEngineServerOptions) {
     this.engine = opts.engine;
@@ -140,6 +144,7 @@ export class RfqEngineServer {
     this.heartbeatMs = opts.heartbeatMs ?? DEFAULT_HEARTBEAT_MS;
     this.markets = opts.markets ?? [];
     this.marketStatusProvider = opts.marketStatusProvider ?? (async (market) => marketStatus(market));
+    this.subaccountDirectory = opts.subaccountDirectory;
 
     this.httpServer = createServer((req, res) => {
       this.handleHttp(req, res).catch((err) => {
@@ -282,6 +287,41 @@ export class RfqEngineServer {
       return sendJson(res, 200, {
         markets: await Promise.all(this.markets.map((market) => this.marketStatusProvider(market))),
       });
+    }
+
+    if (req.method === "GET" && path === "/subaccounts") {
+      let owner: Address;
+      try {
+        owner = asAddress(url.searchParams.get("owner") ?? "", "owner");
+      } catch {
+        return sendJson(res, 400, {
+          error: { code: "INVALID_OWNER", message: "owner must be a valid EVM address" },
+        });
+      }
+      if (!this.subaccountDirectory) {
+        return sendJson(res, 503, {
+          error: { code: "DIRECTORY_UNAVAILABLE", message: "subaccount directory is not configured" },
+        });
+      }
+      try {
+        const snapshot = await this.subaccountDirectory.getAccounts(owner);
+        return sendJson(res, 200, {
+          data: {
+            chainId: snapshot.chainId,
+            matching: snapshot.matching,
+            indexedThroughBlock: snapshot.indexedThroughBlock.toString(),
+            indexedThroughBlockHash: snapshot.indexedThroughBlockHash,
+            accounts: snapshot.accountIds.map((accountId) => ({ accountId: accountId.toString() })),
+          },
+        });
+      } catch {
+        return sendJson(res, 503, {
+          error: {
+            code: "DIRECTORY_UNAVAILABLE",
+            message: "subaccount directory is not ready",
+          },
+        });
+      }
     }
 
     if (req.method === "POST" && path === "/rfq") {

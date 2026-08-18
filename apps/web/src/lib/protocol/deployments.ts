@@ -33,6 +33,7 @@ if (RAW[97].chainId !== 97) {
 
 export interface ChainAddresses {
   matching: Address;
+  matchingDeploymentBlock: bigint;
   rfqModule: Address;
   subAccounts: Address;
   standardManager: Address;
@@ -55,9 +56,10 @@ export interface ChainAddresses {
 }
 
 function toAddresses(d: RawDeployment): ChainAddresses {
-  const rec = d as unknown as Record<string, string | undefined>;
+  const rec = d as unknown as Record<string, string | number | undefined>;
   return {
     matching: rec.matching as Address,
+    matchingDeploymentBlock: BigInt(rec.matchingDeploymentBlock as number),
     rfqModule: rec.rfqModule as Address,
     subAccounts: rec.subAccounts as Address,
     standardManager: rec.standardManager as Address,

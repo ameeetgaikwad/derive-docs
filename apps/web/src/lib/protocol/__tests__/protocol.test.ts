@@ -30,6 +30,10 @@ describe("EIP-712 constants vs on-chain-verified deployment values", () => {
     it(`locally computed ACTION_TYPEHASH matches deployments/${chainId}.json`, () => {
       expect(ACTION_TYPEHASH).toBe(getExpectedActionTypehash(chainId));
     });
+
+    it(`exposes the Matching deployment block for chain ${chainId}`, () => {
+      expect(getAddresses(chainId).matchingDeploymentBlock).toBeGreaterThan(0n);
+    });
   }
 });
 

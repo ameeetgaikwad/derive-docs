@@ -6,6 +6,7 @@ import {
   getDeployedAddress,
   readMarketManifest,
   enabledMarkets,
+  type DeploymentsFile,
   type MarketDefinition,
 } from "@hedge/shared";
 
@@ -35,6 +36,8 @@ export interface EngineConfig {
   trustProxy: boolean;
   /** JSONL persistence path; null = in-memory store */
   storePath: string | null;
+  /** Focused wallet-to-subaccount projection; null leaves the directory endpoint unavailable. */
+  subaccountDirectory: SubaccountDirectoryConfig | null;
   /** Matching contract (EIP-712 verifying contract) */
   matching: Address;
   rfqModule: Address;
@@ -61,6 +64,68 @@ export interface EngineConfig {
   executorKmsKeyId: string | null;
 }
 
+export interface SubaccountDirectoryConfig {
+  tableName: string;
+  deploymentBlock: bigint;
+  confirmationBlocks: bigint;
+  chunkSize: bigint;
+  pollMs: number;
+}
+
+function parseBigIntSetting(name: string, value: unknown, minimum: bigint): bigint {
+  if (typeof value !== "string" && typeof value !== "number" && typeof value !== "bigint") {
+    throw new Error(`${name} must be an integer`);
+  }
+  let parsed: bigint;
+  try {
+    parsed = BigInt(value);
+  } catch {
+    throw new Error(`${name} must be an integer`);
+  }
+  if (parsed < minimum) throw new Error(`${name} must be at least ${minimum}`);
+  return parsed;
+}
+
+function parseIntegerSetting(name: string, value: string, minimum: number): number {
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed < minimum) {
+    throw new Error(`${name} must be an integer of at least ${minimum}`);
+  }
+  return parsed;
+}
+
+export function readSubaccountDirectoryConfig(
+  env: NodeJS.ProcessEnv,
+  deployments: DeploymentsFile,
+  chainId: number,
+): SubaccountDirectoryConfig | null {
+  const tableName = env.SUBACCOUNT_DIRECTORY_TABLE?.trim();
+  if (!tableName) return null;
+
+  const deploymentBlock = parseBigIntSetting(
+    "matchingDeploymentBlock (or SUBACCOUNT_DIRECTORY_DEPLOYMENT_BLOCK)",
+    env.SUBACCOUNT_DIRECTORY_DEPLOYMENT_BLOCK ?? deployments.matchingDeploymentBlock,
+    0n,
+  );
+  const confirmationBlocks = parseBigIntSetting(
+    "SUBACCOUNT_DIRECTORY_CONFIRMATIONS",
+    env.SUBACCOUNT_DIRECTORY_CONFIRMATIONS ?? (chainId === 31337 ? "0" : "6"),
+    0n,
+  );
+  const chunkSize = parseBigIntSetting(
+    "SUBACCOUNT_DIRECTORY_CHUNK_SIZE",
+    env.SUBACCOUNT_DIRECTORY_CHUNK_SIZE ?? "2000",
+    1n,
+  );
+  const pollMs = parseIntegerSetting(
+    "SUBACCOUNT_DIRECTORY_POLL_MS",
+    env.SUBACCOUNT_DIRECTORY_POLL_MS ?? "15000",
+    1_000,
+  );
+
+  return { tableName, deploymentBlock, confirmationBlocks, chunkSize, pollMs };
+}
+
 /**
  * Load config from env, with anvil defaults. Contract addresses come from
  * protocol/deployments/<chainId>.json (override dir: SATS_DEPLOYMENTS_DIR).
@@ -78,6 +143,11 @@ export interface EngineConfig {
  *   RFQ_RATE_LIMIT_PER_MIN   default 30 RFQ creations per IP per minute (0 disables)
  *   TRUST_PROXY              default false; true only behind a trusted reverse proxy
  *   STORE_PATH               JSONL persistence file; unset = in-memory
+ *   SUBACCOUNT_DIRECTORY_TABLE DynamoDB table for the event-derived directory; unset disables it
+ *   SUBACCOUNT_DIRECTORY_DEPLOYMENT_BLOCK optional override for deployments.matchingDeploymentBlock
+ *   SUBACCOUNT_DIRECTORY_CONFIRMATIONS default 6 (0 on anvil)
+ *   SUBACCOUNT_DIRECTORY_CHUNK_SIZE default 2000 blocks
+ *   SUBACCOUNT_DIRECTORY_POLL_MS default 15000
  *   EXECUTOR_PRIVATE_KEY     default anvil key #0 (only on 31337)
  *   EXECUTOR_KMS_KEY_ID      AWS KMS key id/ARN/alias — used instead of the
  *                            raw key when set (region: EXECUTOR_KMS_REGION or
@@ -121,6 +191,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): EngineConfig {
     rfqRateLimitPerMin: Number(env.RFQ_RATE_LIMIT_PER_MIN ?? 30),
     trustProxy: env.TRUST_PROXY === "true",
     storePath: env.STORE_PATH ?? null,
+    subaccountDirectory: readSubaccountDirectoryConfig(env, deployments, chainId),
     matching: getDeployedAddress(deployments, "matching"),
     rfqModule: getDeployedAddress(deployments, "rfqModule"),
     subAccounts: getDeployedAddress(deployments, "subAccounts"),

@@ -19,6 +19,7 @@ import { Executor } from "../src/executor.js";
 import { QuoteValidationError } from "../src/quotes.js";
 import { RfqEngineServer, WS_CLOSE_NOT_ALLOWLISTED, WS_CLOSE_SUPERSEDED } from "../src/server.js";
 import { InMemoryRfqStore, JsonlRfqStore } from "../src/store.js";
+import type { SubaccountDirectoryReader } from "../src/subaccount-directory.js";
 import { serializeAction } from "../src/types.js";
 
 // ---------------------------------------------------------------------------
@@ -229,6 +230,7 @@ async function makeHarness(opts?: {
   forwardFeeds?: Record<string, Address>;
   store?: InMemoryRfqStore;
   reader?: FakeChainReader;
+  subaccountDirectory?: SubaccountDirectoryReader;
 }): Promise<Harness> {
   const reader = opts?.reader ?? makeReader();
   const submitter = new FakeSubmitter();
@@ -250,6 +252,7 @@ async function makeHarness(opts?: {
     port: 0,
     makerAllowlist: opts?.makerAllowlist,
     heartbeatMs: opts?.heartbeatMs ?? 0,
+    subaccountDirectory: opts?.subaccountDirectory,
   });
   const { port } = await server.start();
   cleanups.push(() => server.stop());
@@ -287,6 +290,67 @@ describe("service health", () => {
       service: "rfq-engine",
       chainId: CHAIN_ID,
     });
+  });
+});
+
+describe("subaccount directory API", () => {
+  it("returns configured-network sync metadata and decimal account IDs", async () => {
+    const subaccountDirectory: SubaccountDirectoryReader = {
+      async getAccounts(owner) {
+        expect(owner).toBe(maker1.address);
+        return {
+          chainId: CHAIN_ID,
+          matching: MATCHING,
+          indexedThroughBlock: 123n,
+          indexedThroughBlockHash: FAKE_TX,
+          accountIds: [42n, 57n],
+        };
+      },
+    };
+    const h = await makeHarness({ subaccountDirectory });
+
+    const response = await fetch(`${h.base}/subaccounts?owner=${maker1.address}`);
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      data: {
+        chainId: CHAIN_ID,
+        matching: MATCHING,
+        indexedThroughBlock: "123",
+        indexedThroughBlockHash: FAKE_TX,
+        accounts: [{ accountId: "42" }, { accountId: "57" }],
+      },
+    });
+  });
+
+  it("rejects invalid owners and never reports unavailable storage as an empty list", async () => {
+    const unavailable = await makeHarness();
+    const invalidResponse = await fetch(`${unavailable.base}/subaccounts?owner=not-an-address`);
+    expect(invalidResponse.status).toBe(400);
+    await expect(invalidResponse.json()).resolves.toMatchObject({
+      error: { code: "INVALID_OWNER" },
+    });
+
+    const unavailableResponse = await fetch(
+      `${unavailable.base}/subaccounts?owner=${maker1.address}`,
+    );
+    expect(unavailableResponse.status).toBe(503);
+    await expect(unavailableResponse.json()).resolves.toMatchObject({
+      error: { code: "DIRECTORY_UNAVAILABLE" },
+    });
+
+    const failing = await makeHarness({
+      subaccountDirectory: {
+        async getAccounts() {
+          throw new Error("database unavailable");
+        },
+      },
+    });
+    const failingResponse = await fetch(`${failing.base}/subaccounts?owner=${maker1.address}`);
+    expect(failingResponse.status).toBe(503);
+    const body = await failingResponse.json() as { error?: unknown; data?: unknown };
+    expect(body.error).toBeDefined();
+    expect(body.data).toBeUndefined();
   });
 });
 

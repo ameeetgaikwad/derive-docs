@@ -33,6 +33,22 @@ services may listen on `3030` when deployed to different servers; when running
 both locally, give one a different port and set its chain-specific URL
 accordingly.
 
+## Trading subaccounts
+
+The connected wallet receives an enumerable list from the RFQ engine's
+`GET /subaccounts` directory. The browser treats those IDs as candidates and
+live-validates the logical owner, StandardManager, Matching NFT custodian, and
+current balances in one multicall before rendering the selector. The user must
+choose an account explicitly or create another; the directory list and selected
+account ID are not written to local storage.
+
+If the directory request fails, the browser scans wallet-filtered
+`DepositedSubAccount` logs from the deployment's recorded
+`matchingDeploymentBlock`, then applies the same live validation. A failed API
+or RPC request is shown as an error, never as an empty account list. A newly
+confirmed `Matching.createSubAccount` receipt is decoded, validated, inserted,
+and selected immediately while the directory catches up asynchronously.
+
 ## Checks
 
 ```sh

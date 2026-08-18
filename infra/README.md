@@ -5,6 +5,11 @@ running `rfq-engine` (public, behind an ALB) and `oracle-feeds` (daemon), the
 GitHub Actions OIDC deploy role, and the IAM task role that lets containers
 **sign with KMS using no private keys and no access keys**.
 
+Each RFQ runtime also receives a dedicated encrypted, point-in-time-recoverable
+DynamoDB table for the focused wallet-to-subaccount projection. The task role
+can read/write only that table and its owner/active index; this is not a general
+protocol indexer.
+
 The optional chain-56 mainnet-staging stack adds a second RFQ/oracle pair to
 the same cluster. It has independent task definitions, services, ALB, SSM
 parameters, logs, security groups, and encrypted EFS state. Both RFQ containers
@@ -204,6 +209,7 @@ terraform validate
 | `oidc.tf`      | GitHub OIDC provider + deploy role/policy                           |
 | `alb.tf`       | ALB, target group, HTTP/HTTPS listeners                             |
 | `ecs.tf`       | SSM params, log groups, cluster, task defs, services                |
+| `dynamodb.tf`  | Durable Matching subaccount directory table + owner/active index   |
 | `mainnet-staging/` | Separate-state chain-56 ECS, ALB, and EFS runtime stack        |
 | `outputs.tf`   | ECR URLs, cluster/service names, role ARNs, ALB DNS, KMS ARNs       |
 

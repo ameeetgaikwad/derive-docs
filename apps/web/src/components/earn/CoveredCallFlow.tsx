@@ -23,11 +23,11 @@ import { OutcomePreview } from "./OutcomePreview";
 import { EarnSummary } from "./EarnSummary";
 import { cn } from "@/lib/utils";
 import type { AppChainId } from "@/stores/network";
+import { SubaccountSelector } from "@/components/shared/SubaccountSelector";
 
-type FlowStep = "select" | "subaccount" | "deposit" | "selling" | "done";
+type FlowStep = "select" | "deposit" | "selling" | "done";
 
 const STEP_LABEL: Record<Exclude<FlowStep, "select" | "done">, string> = {
-  subaccount: "Creating subaccount",
   deposit: "Depositing BTCB",
   selling: "Selling call",
 };
@@ -97,7 +97,7 @@ export function CoveredCallFlow() {
   const { expiries, strikes, spotPrice, isLoading } =
     useAvailableStrikes(selectedExpiry);
 
-  const { subaccountId, ensureSubaccount } = useCoveredCallSubaccount();
+  const { subaccountId } = useCoveredCallSubaccount();
   const depositBtcb = useDepositBtcb();
   const sellCall = useSellCall();
   const mintBtcb = useMintBtcb();
@@ -158,14 +158,16 @@ export function CoveredCallFlow() {
       openConnectModal?.();
       return;
     }
+    if (subaccountId === null) {
+      toast.error("Choose or create a trading subaccount before selling a call");
+      return;
+    }
     if (!selectedStrikeData || amountNum <= 0 || isPending) return;
 
     try {
-      // 1. Subaccount (one-time tx)
-      setStep("subaccount");
-      const subId = await ensureSubaccount();
+      const subId = subaccountId;
 
-      // 2. Deposit the deficit from the wallet (approve + deposit txs)
+      // 1. Deposit the deficit from the wallet (approve + deposit txs)
       const deficit = amountNum - subBtcb;
       if (deficit > 0) {
         setStep("deposit");
@@ -173,7 +175,7 @@ export function CoveredCallFlow() {
         refetchBtcb();
       }
 
-      // 3. RFQ auction + EIP-712 TakerOrder signature + on-chain execution
+      // 2. RFQ auction + EIP-712 TakerOrder signature + on-chain execution
       setStep("selling");
       const result = await sellCall.sell({
         subaccountId: subId,
@@ -218,7 +220,7 @@ export function CoveredCallFlow() {
     selectedStrikeData,
     amountNum,
     isPending,
-    ensureSubaccount,
+    subaccountId,
     subBtcb,
     depositBtcb,
     refetchBtcb,
@@ -239,10 +241,8 @@ export function CoveredCallFlow() {
     switch (step) {
       case "select":
         return subaccountId === null
-          ? "Set up & Sell Covered Call"
+          ? "Choose a subaccount"
           : "Deposit BTCB & Sell Call";
-      case "subaccount":
-        return "Creating subaccount…";
       case "deposit":
         return "Depositing BTCB…";
       case "selling":
@@ -266,7 +266,7 @@ export function CoveredCallFlow() {
     step === "done" ||
     (isConnected &&
       step === "select" &&
-      (!selectedStrikeData || amountNum <= 0 || amountNum > btcBalance));
+      (subaccountId === null || !selectedStrikeData || amountNum <= 0 || amountNum > btcBalance));
 
   return (
     <div className="min-h-screen bg-background p-6">
@@ -312,6 +312,8 @@ export function CoveredCallFlow() {
               </div>
             )}
           </div>
+
+          {isConnected && <SubaccountSelector disabled={step !== "select"} />}
 
           {/* Done state */}
           {step === "done" && doneInfo ? (

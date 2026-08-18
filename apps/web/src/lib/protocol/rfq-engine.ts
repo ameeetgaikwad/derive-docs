@@ -8,7 +8,7 @@
  * /rfq/:id/accept; the engine submits Matching.verifyAndMatch on-chain.
  */
 
-import type { Hex } from "viem";
+import type { Address, Hex } from "viem";
 import type { SerializedAction } from "./actions";
 import { getActiveChainId, type AppChainId } from "@/stores/network";
 
@@ -148,6 +148,14 @@ export interface PublicMarketStatus {
   supportedExpiries: number[];
 }
 
+export interface SubaccountDirectoryResult {
+  chainId: number;
+  matching: Address;
+  indexedThroughBlock: bigint;
+  indexedThroughBlockHash: Hex;
+  accountIds: bigint[];
+}
+
 async function request<T>(
   baseUrl: string,
   path: string,
@@ -220,6 +228,42 @@ export async function getRfqMarkets(
 ): Promise<PublicMarketStatus[]> {
   const response = await request<{ markets: PublicMarketStatus[] }>(rfqEngineUrl(chainId), "/markets");
   return response.markets;
+}
+
+export async function getSubaccountDirectory(
+  owner: Address,
+  chainId: AppChainId = getActiveChainId(),
+): Promise<SubaccountDirectoryResult> {
+  const response = await request<{
+    data: {
+      chainId: number;
+      matching: Address;
+      indexedThroughBlock: string;
+      indexedThroughBlockHash: Hex;
+      accounts: Array<{ accountId: string }>;
+    };
+  }>(rfqEngineUrl(chainId), `/subaccounts?owner=${encodeURIComponent(owner)}`);
+  const data = response.data;
+  if (!data || data.chainId !== chainId) {
+    throw new Error(`RFQ engine directory reported the wrong chain; expected ${chainId}`);
+  }
+  if (!/^0x[0-9a-fA-F]{40}$/.test(data.matching)) {
+    throw new Error("RFQ engine directory returned an invalid Matching address");
+  }
+  if (!/^0x[0-9a-fA-F]{64}$/.test(data.indexedThroughBlockHash)) {
+    throw new Error("RFQ engine directory returned an invalid checkpoint hash");
+  }
+  try {
+    return {
+      chainId: data.chainId,
+      matching: data.matching,
+      indexedThroughBlock: BigInt(data.indexedThroughBlock),
+      indexedThroughBlockHash: data.indexedThroughBlockHash,
+      accountIds: data.accounts.map((account) => BigInt(account.accountId)),
+    };
+  } catch {
+    throw new Error("RFQ engine directory returned an invalid block or account id");
+  }
 }
 
 export async function acceptRfq(

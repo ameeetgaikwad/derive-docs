@@ -38,9 +38,39 @@ export const matchingAbi = [
     outputs: [{ name: "", type: "address", internalType: "address" }],
     stateMutability: "view",
   },
+  {
+    type: "event",
+    name: "DepositedSubAccount",
+    inputs: [
+      {
+        name: "accountId",
+        type: "uint256",
+        indexed: true,
+        internalType: "uint256",
+      },
+      { name: "owner", type: "address", indexed: true, internalType: "address" },
+    ],
+    anonymous: false,
+  },
 ] as const;
 
 export const subAccountsAbi = [
+  {
+    type: "function",
+    name: "manager",
+    inputs: [{ name: "accountId", type: "uint256", internalType: "uint256" }],
+    outputs: [
+      { name: "", type: "address", internalType: "contract IManager" },
+    ],
+    stateMutability: "view",
+  },
+  {
+    type: "function",
+    name: "ownerOf",
+    inputs: [{ name: "tokenId", type: "uint256", internalType: "uint256" }],
+    outputs: [{ name: "", type: "address", internalType: "address" }],
+    stateMutability: "view",
+  },
   {
     type: "function",
     name: "getAccountBalances",
