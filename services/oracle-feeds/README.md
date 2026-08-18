@@ -100,6 +100,11 @@ Chainlink-on-BSC BTC source with
 source separately with
 `STABLE_PRICE_SOURCE=chainlink STABLE_CHAINLINK_AGGREGATOR=0x...`.
 
+Only enabled markets whose manifest sets `oracleProvider: "pyth"` enter the
+Hermes batch. Chainlink-primary markets never require `PYTH_API_KEY`; their spot
+freshness is read from the on-chain aggregator, while forward/vol/rate remain on
+the signed snapshot schedule.
+
 The package's `dev` script deliberately keeps `--source deribit`: Deribit supplies
 the BTC forward and volatility surface used for option quoting, while Pyth remains
 the StandardManager's live BTC spot source.

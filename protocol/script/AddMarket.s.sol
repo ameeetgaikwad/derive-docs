@@ -33,7 +33,8 @@ import {MarketDeployerBase} from "./MarketDeployerBase.sol";
  *   PRIVATE_KEY      deployer key — must own the SRM/viewer (default: anvil key 0)
  *   FEED_SIGNER      signer registered on the new feeds (default: feedSigner from deployments JSON)
  *   <UNDERLYING>_ADDRESS  real token address for the market (off-anvil only)
- *   <MARKET>_PYTH_PRICE_ID required for RWA markets until pinned in the manifest
+ *   Oracle source comes from the manifest: Pyth uses pythPriceId; Chainlink uses
+ *   chainlinkAggregator and does not require a Pyth price ID.
  */
 contract AddMarket is MarketDeployerBase {
   function run() external {
@@ -85,11 +86,14 @@ contract AddMarket is MarketDeployerBase {
     vm.serializeAddress(k, "settlementFeed", address(m.settlementFeed));
     vm.serializeAddress(k, "liveSettlementFeed", m.liveSettlementFeed);
     vm.serializeAddress(k, "pythSpotFeed", address(m.pythSpotFeed));
+    vm.serializeAddress(k, "chainlinkSpotFeed", address(m.chainlinkSpotFeed));
     vm.serializeAddress(k, "scaledSpotFeed", address(m.scaledSpotFeed));
+    vm.serializeAddress(k, "scaledSettlementFeed", address(m.scaledSettlementFeed));
     vm.serializeAddress(k, "multiplierRegistry", address(m.multiplierRegistry));
     vm.serializeAddress(k, "benchmarkSettlementFeed", address(m.benchmarkSettlementFeed));
     vm.serializeAddress(k, "liveSpotFeed", m.liveSpotFeed);
     vm.serializeAddress(k, "optionAsset", address(m.option));
+    vm.serializeString(k, "oracleProvider", _oracleProviderName(cfg.oracleProvider));
     vm.serializeBytes32(k, "pythPriceId", cfg.pythPriceId);
     vm.serializeAddress(k, "chainlinkAggregator", cfg.chainlinkAggregator);
     vm.serializeUint(k, "underlyingDecimals", cfg.underlyingDecimals);

@@ -64,32 +64,34 @@ hidden and unsupported. Use the guarded `deploy:rwa:mainnet-staging` and
 `activate:rwa:mainnet-staging` commands documented in
 [`infra/mainnet-staging/README.md`](infra/mainnet-staging/README.md).
 
-Every new market is deployed disabled and must be rolled out in order:
-`XAU -> SPY -> NVDA`. Each activation requires verified contracts, collateral
-metadata, Pyth binding, signer gas, and fresh source data (or an explicit
-deferred equity activation that remains fail-closed at runtime). BTC must stay
-open if an RWA feed, token, or multiplier is unavailable.
+Every new market is deployed disabled. XAU takes the first RWA slot; SPY and
+NVDA may then be rolled out in either order. Each activation requires verified
+contracts, collateral metadata, the manifest-selected Pyth or Chainlink binding,
+signer gas, and fresh source data (or an explicit deferred equity activation
+that remains fail-closed at runtime). BTC must stay open if an RWA feed, token,
+or multiplier is unavailable.
 
 Pinned staging collateral and feed inputs must be revalidated immediately
 before each broadcast:
 
-| Market | Collateral | Pyth feed ID | Per-RFQ maximum |
+| Market | Collateral | Provider source | Per-RFQ maximum |
 |---|---|---|---|
-| XAU | `0x21cAef8A43163Eea865baeE23b9C2E327696A3bf` | `0x765d2ba906dbc32ca17cc11f5310a89e9ee1f6420508c63861f2f8ba4ee34bb2` | `0.01 XAUt` |
-| SPY | `0x7138b48df7D98D7e3cc221BfE7192D0a178182D8` | `0x19e09bb805456ada3979a7d1cbb4b6d63babc3a0f8e8a9509f68afa5c4c11cd5` | `0.1` displayed SPYB |
-| NVDA | `0x02Fca66C1D1aFB4E2A7884261eB00F63598a7436` | `0xb1073854ed24cbc755dc527418f52b7d271f6cc967bbf8d8129112b18860a593` | `0.25` displayed NVDAB |
+| XAU | `0x21cAef8A43163Eea865baeE23b9C2E327696A3bf` | Pyth `0x765d2ba906dbc32ca17cc11f5310a89e9ee1f6420508c63861f2f8ba4ee34bb2` | `0.01 XAUt` |
+| SPY | `0x7138b48df7D98D7e3cc221BfE7192D0a178182D8` | Chainlink `0xb24D1DeE5F9a3f761D286B56d2bC44CE1D02DF7e` | `0.1` displayed SPYB |
+| NVDA | `0x02Fca66C1D1aFB4E2A7884261eB00F63598a7436` | Chainlink `0xea5c2Cbb5cD57daC24E26180b19a929F3E9699B8` | `0.25` displayed NVDAB |
 
-SPY/NVDA remain unavailable whenever their Pyth sources are stale; this is a
-deliberate fail-closed boundary, not 24/7 synthetic equity pricing. Scaled
-bStock amounts are canonical raw units on-chain and are converted only at UI,
-price, and cap boundaries using the live checkpointed ERC-8056 multiplier.
-RWA expiry settlement requires a reviewed Pyth benchmark update in the first
-five minutes at/after expiry and is still an operator-owned procedure.
+SPY/NVDA remain unavailable whenever their selected sources are stale; this is
+a deliberate fail-closed boundary, not continuous 24/5 synthetic equity pricing.
+Scaled bStock amounts are canonical raw units on-chain and are converted only at
+UI, price, and cap boundaries using the live checkpointed ERC-8056 multiplier.
+Pyth RWA expiry settlement requires a reviewed benchmark update in the first
+five minutes at/after expiry. Chainlink RWA settlement instead fixes from the
+first complete aggregator round at/after expiry, with a 24-hour maximum delay;
+scaled markets apply the checkpointed multiplier effective at expiry.
 
-[Pyth recommends](https://docs.pyth.network/price-feeds/core/contract-addresses/evm)
-new integrations use its upgraded EVM contract ahead of the August 18, 2026
-Core upgrade. Revalidate every pinned dependency against the official
-issuer/oracle source immediately before broadcasting staging.
+The staging stack pins [Pyth's upgraded EVM contract](https://docs.pyth.network/price-feeds/core/contract-addresses/evm)
+for the August 18, 2026 Core upgrade. Revalidate every pinned dependency against
+the official issuer/oracle source immediately before broadcasting staging.
 
 The isolated runtime templates live in
 [`protocol/deployments/staging`](protocol/deployments/staging): BTC RFQs are

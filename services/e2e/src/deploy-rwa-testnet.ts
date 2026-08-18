@@ -238,9 +238,20 @@ async function deploy(): Promise<void> {
       if (!sameAddress(sidecar.underlying, token)) {
         throw new Error(`${marketId} sidecar underlying does not match the RWA mock artifact`);
       }
-      const configuredId = priceIdForMarket(manifest, marketId);
-      if (sidecar.pythPriceId.toLowerCase() !== configuredId.toLowerCase()) {
-        throw new Error(`${marketId} sidecar Pyth id does not match the reviewed configuration`);
+      if (sidecar.oracleProvider !== market.oracleProvider) {
+        throw new Error(`${marketId} sidecar oracle provider does not match the manifest`);
+      }
+      if (market.oracleProvider === "pyth") {
+        const configuredId = priceIdForMarket(manifest, marketId);
+        if (sidecar.pythPriceId?.toLowerCase() !== configuredId.toLowerCase()) {
+          throw new Error(`${marketId} sidecar Pyth id does not match the reviewed configuration`);
+        }
+      } else if (
+        !market.chainlinkAggregator
+          || !sidecar.chainlinkAggregator
+          || !sameAddress(sidecar.chainlinkAggregator, market.chainlinkAggregator)
+      ) {
+        throw new Error(`${marketId} sidecar Chainlink aggregator does not match the manifest`);
       }
       manifest = mergeSidecarIntoManifest(manifest, marketId, sidecar);
       writeJsonAtomic(TESTNET_MANIFEST_PATH, manifest);

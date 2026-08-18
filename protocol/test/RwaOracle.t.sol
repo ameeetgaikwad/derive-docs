@@ -3,14 +3,29 @@ pragma solidity ^0.8.20;
 
 import "forge-std/Test.sol";
 import {ISpotFeed} from "v2-core/src/interfaces/ISpotFeed.sol";
+import {ISettlementFeed} from "v2-core/src/interfaces/ISettlementFeed.sol";
 import {IPyth} from "../src/interfaces/IPyth.sol";
 import {IAggregatorV3} from "../src/interfaces/IAggregatorV3.sol";
 import {PythSpotFeed} from "../src/PythSpotFeed.sol";
 import {ScaledSpotFeed} from "../src/ScaledSpotFeed.sol";
+import {ScaledSettlementFeed} from "../src/ScaledSettlementFeed.sol";
 import {MultiplierCheckpointRegistry} from "../src/MultiplierCheckpointRegistry.sol";
 import {PythBenchmarkSettlementFeed} from "../src/PythBenchmarkSettlementFeed.sol";
 import {MockPyth} from "./mocks/MockPyth.sol";
 import {MockScaledToken} from "../script/mocks/MockScaledToken.sol";
+
+contract FixedSettlementFeed is ISettlementFeed {
+  mapping(uint64 => uint) internal prices;
+
+  function setSettlementPrice(uint64 expiry, uint price) external {
+    prices[expiry] = price;
+  }
+
+  function getSettlementPrice(uint64 expiry) external view returns (bool settled, uint price) {
+    price = prices[expiry];
+    settled = price != 0;
+  }
+}
 
 contract RwaOracleTest is Test {
   bytes32 internal constant PRICE_ID = keccak256("Equity.US.NVDA/USD");
@@ -51,6 +66,29 @@ contract RwaOracleTest is Test {
     (bool settled, uint price) = feed.getSettlementPrice(expiry);
     assertTrue(settled);
     assertEq(price, 60e18);
+  }
+
+  function testScaledSettlementWrapsChainlinkPriceAtExpiryMultiplier() public {
+    uint64 expiry = uint64(block.timestamp + 7 days);
+    token.scheduleMultiplier(0.25e18, expiry - 1 days);
+    registry.checkpointPending();
+
+    FixedSettlementFeed uiFeed = new FixedSettlementFeed();
+    uiFeed.setSettlementPrice(expiry, 240e18);
+    ScaledSettlementFeed feed = new ScaledSettlementFeed(uiFeed, registry);
+
+    (bool settled, uint price) = feed.getSettlementPrice(expiry);
+    assertTrue(settled);
+    assertEq(price, 60e18);
+  }
+
+  function testScaledSettlementPreservesUnsetState() public {
+    FixedSettlementFeed uiFeed = new FixedSettlementFeed();
+    ScaledSettlementFeed feed = new ScaledSettlementFeed(uiFeed, registry);
+
+    (bool settled, uint price) = feed.getSettlementPrice(uint64(block.timestamp));
+    assertFalse(settled);
+    assertEq(price, 0);
   }
 
   function testCurrentCheckpointIsSafeWithScheduledCorporateAction() public {

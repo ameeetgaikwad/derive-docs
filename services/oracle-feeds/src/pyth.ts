@@ -66,7 +66,7 @@ export interface PythBatchAddresses {
 export function pythMarketsFromManifest(chainId: number): PythBatchAddresses {
   const deployments = requireDeployments(chainId);
   const markets = enabledMarkets(readMarketManifest(chainId))
-    .filter((market) => market.pythPriceId !== null && market.contracts !== null)
+    .filter((market) => market.oracleProvider === "pyth" && market.pythPriceId !== null && market.contracts !== null)
     .map((market) => ({
       marketId: market.id,
       priceId: market.pythPriceId!,

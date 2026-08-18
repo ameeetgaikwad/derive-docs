@@ -7,6 +7,7 @@ import {
   isUsEarlyCloseSession,
   isUsExchangeHoliday,
   marketStatus,
+  marketFeedUpdatedAt,
   rwaExpiries,
 } from "../src/markets.js";
 
@@ -102,5 +103,29 @@ describe("market readiness", () => {
       100n,
       50_000_000_000_000_000n,
     )).resolves.toBeUndefined();
+  });
+
+  it("reads Chainlink freshness without calling a Pyth contract", async () => {
+    const chainlink = {
+      ...staged,
+      enabled: true,
+      oracleProvider: "chainlink",
+      pythPriceId: null,
+      chainlinkAggregator: "0xea5c2Cbb5cD57daC24E26180b19a929F3E9699B8",
+      contracts: btc.contracts,
+    } as MarketDefinition;
+    const calls: string[] = [];
+    const client = {
+      readContract: async ({ functionName }: { functionName: string }) => {
+        calls.push(functionName);
+        if (functionName === "uiSpotFeed") return "0x0000000000000000000000000000000000000011";
+        if (functionName === "aggregator") return chainlink.chainlinkAggregator;
+        if (functionName === "latestRoundData") return [10n, 12_345_678_900n, 0n, 1_781_000_000n, 10n];
+        throw new Error(`unexpected read ${functionName}`);
+      },
+    };
+
+    await expect(marketFeedUpdatedAt(client as never, chainlink)).resolves.toBe(1_781_000_000);
+    expect(calls).toEqual(["uiSpotFeed", "aggregator", "latestRoundData"]);
   });
 });

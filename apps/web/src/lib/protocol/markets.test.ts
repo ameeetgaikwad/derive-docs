@@ -9,11 +9,16 @@ import {
 } from "./markets";
 
 describe("multi-asset amount conversion", () => {
-  it("loads XAU and disabled equity placeholders from the isolated mainnet staging manifest", () => {
+  it("loads enabled NVDA and the disabled SPY placeholder from the mainnet staging manifest", () => {
     const markets = getMarkets(56);
     expect(markets.map((market) => market.id)).toEqual(["BTC", "XAU", "SPY", "NVDA"]);
-    expect(markets.filter((market) => market.enabled).map((market) => market.id)).toEqual(["BTC", "XAU"]);
+    expect(markets.filter((market) => market.enabled).map((market) => market.id)).toEqual([
+      "BTC",
+      "XAU",
+      "NVDA",
+    ]);
     expect(markets[0]?.contracts?.optionAsset).toBe("0x3464351F36fb79Eb06a04785bDaF8DCb8FBC42bc");
+    expect(markets[3]).toMatchObject({ id: "NVDA", enabled: true, maxSize: "0.25" });
   });
 
   it("keeps SpaceX out of the user-facing market selector", () => {

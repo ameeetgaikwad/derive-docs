@@ -194,6 +194,8 @@ contract TransferOwnership is Script {
       _addAs(mJson, "volFeed", string.concat(names[i], ".volFeed"));
       _addAs(mJson, "rateFeed", string.concat(names[i], ".rateFeed"));
       _addOptionalAs(mJson, "settlementFeed", string.concat(names[i], ".settlementFeed"));
+      _addOptionalAs(mJson, "pythSpotFeed", string.concat(names[i], ".pythSpotFeed"));
+      _addOptionalAs(mJson, "chainlinkSpotFeed", string.concat(names[i], ".chainlinkSpotFeed"));
       _addAs(mJson, "optionAsset", string.concat(names[i], ".optionAsset"));
       _addAs(mJson, "baseAsset", string.concat(names[i], ".baseAsset"));
     }

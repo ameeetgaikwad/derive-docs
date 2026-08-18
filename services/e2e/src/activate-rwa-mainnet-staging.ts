@@ -15,6 +15,7 @@ import {
   requireStagingRwaMarket,
   verifyStagingAuthority,
   verifyStagingMarket,
+  verifyChainlinkSource,
 } from "./rwa-mainnet-staging-operator.js";
 
 interface Options {
@@ -55,9 +56,10 @@ Usage:
   pnpm activate:rwa:mainnet-staging --market SPY --deferred --confirm
   pnpm activate:rwa:mainnet-staging --market XAU --disable --confirm
 
-Normal activation requires a fresh Pyth source. Deferred activation is for an
-equity feed outside its publishing window: it verifies the on-chain binding but
-the RFQ engine remains fail-closed until Pyth and signed feeds are fresh.`);
+Normal activation requires a fresh manifest-selected Pyth or Chainlink source.
+Deferred activation is for an equity feed outside its publishing window: it
+verifies the on-chain binding but the RFQ engine remains fail-closed until the
+external oracle and signed feeds are fresh.`);
 }
 
 function maximumPythAge(): bigint {
@@ -90,10 +92,13 @@ async function activate(): Promise<void> {
     return;
   }
 
-  if (!market.contracts || !market.collateral.address || !market.pythPriceId) {
+  const hasOracleSource = market.oracleProvider === "pyth"
+    ? market.pythPriceId !== null
+    : market.chainlinkAggregator !== null;
+  if (!market.contracts || !market.collateral.address || !hasOracleSource) {
     throw new Error(`${options.market} is not deployed; run the staging deploy command first`);
   }
-  if (options.deferred && options.market === "XAU") {
+  if (options.deferred && options.market === "XAU" && market.oracleProvider === "pyth") {
     throw new Error("XAU publishes continuously during its 24/5 window; do not defer its activation");
   }
 
@@ -103,15 +108,27 @@ async function activate(): Promise<void> {
   const authority = await verifyStagingAuthority(client, deployments);
   await verifyStagingMarket(client, deployments, market);
 
-  let pythStatus: string;
-  if (options.deferred) {
+  let oracleStatus: string;
+  if (market.oracleProvider === "chainlink") {
+    if (options.deferred) {
+      try {
+        const health = await verifyChainlinkSource(client, market);
+        oracleStatus = `deferred chainlinkAge=${health.age}s`;
+      } catch (error) {
+        oracleStatus = `deferred chainlinkUnavailable=${(error as Error).message.split("\n")[0]}`;
+      }
+    } else {
+      const health = await verifyChainlinkSource(client, market);
+      oracleStatus = `chainlinkAge=${health.age}s`;
+    }
+  } else if (options.deferred) {
     try {
       const health = await readPythHealth(client, market);
       const block = await client.getBlock();
       const age = block.timestamp > health.publishTime ? block.timestamp - health.publishTime : 0n;
-      pythStatus = `deferred pythAge=${age}s`;
+      oracleStatus = `deferred pythAge=${age}s`;
     } catch (error) {
-      pythStatus = `deferred pythUnavailable=${(error as Error).message.split("\n")[0]}`;
+      oracleStatus = `deferred pythUnavailable=${(error as Error).message.split("\n")[0]}`;
     }
   } else {
     const health = await readPythHealth(client, market);
@@ -123,11 +140,11 @@ async function activate(): Promise<void> {
     if (age > maximumPythAge()) {
       throw new Error(`${options.market} Pyth price is stale (${age}s); wait for or push a fresh update`);
     }
-    pythStatus = `pythAge=${age}s`;
+    oracleStatus = `pythAge=${age}s`;
   }
 
   console.log(
-    `[rwa-staging-activate] readiness passed market=${options.market} ${pythStatus} ` +
+    `[rwa-staging-activate] readiness passed market=${options.market} ${oracleStatus} ` +
       `feedSigner=${authority.feedSigner} balance=${formatEther(authority.feedSignerBalance)} BNB`,
   );
   if (!options.confirm) {

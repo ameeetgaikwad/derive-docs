@@ -5,8 +5,13 @@ controlled public staging with real BNB Chain mainnet assets. It must remain
 clearly labelled as staging and must not be represented as a production launch.
 
 `DeployMainnetStaging.s.sol` wrote the generated deployment to `56.json`. The
-tracked `markets/56.json` contains the verified BTC deployment, is enabled for
-public staging, and keeps the maximum individual RFQ size at `0.01 BTC`.
+tracked `markets/56.json` contains the verified BTC/XAU/NVDA deployments, keeps
+SPY disabled until its sidecar is deployed, and selects each external oracle
+explicitly with `oracleProvider`. NVDA is enabled against the verified BNB Chain
+`NVDA / USD` Chainlink aggregator. SPY is prepared against the verified BNB Chain
+`SPY / USD` Chainlink aggregator but remains unavailable until its guarded
+deployment and activation complete. A market becomes user-facing only after
+images containing this manifest are published and the staging services are rolled.
 
 Copy `rfq.env.example` outside the repository and replace every placeholder.
 Run the RFQ engine with `TAKER_OPEN=true`, a non-empty `MAKER_ALLOWLIST`, a

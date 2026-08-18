@@ -25,6 +25,7 @@ import {
   verifyStagingAuthority,
   verifyStagingMarket,
   verifyStagingSequence,
+  verifyChainlinkSource,
 } from "./rwa-mainnet-staging-operator.js";
 
 interface Options {
@@ -60,9 +61,10 @@ Usage:
   pnpm deploy:rwa:mainnet-staging --market XAU
   pnpm deploy:rwa:mainnet-staging --market XAU --broadcast --confirm
 
-The enforced order is XAU, then SPY, then NVDA. Every broadcast verifies chain,
-ownership, signer gas, token metadata, borrowing=false, and the reviewed Pyth source ID and
-expected SRM market id before sending transactions. The resulting manifest entry
+XAU must be deployed first; SPY and NVDA may then be deployed in either order. Every
+broadcast verifies chain, ownership, signer gas, token metadata, borrowing=false, the
+manifest-selected Pyth or Chainlink source, and the next SRM market id before sending
+transactions. Chainlink mode does not require PYTH_API_KEY. The resulting manifest entry
 remains disabled until the separate activation command is run.`);
 }
 
@@ -122,8 +124,19 @@ async function deploy(): Promise<void> {
 
   let sidecar = readStagingSidecar(options.market);
   if (!sidecar) {
-    const priceId = priceIdForMarket(manifest, options.market);
-    await verifyHermesSource(priceId, options.market);
+    let source: string;
+    if (market.oracleProvider === "pyth") {
+      const priceId = priceIdForMarket(manifest, options.market);
+      await verifyHermesSource(priceId, options.market);
+      source = `pyth=${priceId}`;
+    } else {
+      const health = await verifyChainlinkSource(client, market);
+      source = `chainlink=${health.aggregator} age=${health.age}s`;
+      console.log(
+        `[rwa-staging-deploy] Chainlink ${options.market} source=` +
+          `${health.description} decimals=${health.decimals} age=${health.age}s`,
+      );
+    }
     // Feed access is independent of deployment ordering. Check it first so an
     // operator can validate every future market without broadcasting its
     // predecessors. The sequence guard still runs before any transaction.
@@ -131,9 +144,9 @@ async function deploy(): Promise<void> {
     if (!options.broadcast) {
       console.log("[rwa-staging-deploy] DRY RUN — preflight passed; no transactions or files changed");
       console.log(`[rwa-staging-deploy] chain=56 market=${options.market}`);
-      console.log(`[rwa-staging-deploy] pyth=${priceId}`);
+      console.log(`[rwa-staging-deploy] ${source}`);
       console.log("[rwa-staging-deploy] action=deploy, verify, and leave disabled");
-      console.log("[rwa-staging-deploy] rollout order is XAU -> SPY -> NVDA");
+      console.log("[rwa-staging-deploy] XAU is first; SPY and NVDA can follow in either order");
       return;
     }
     const processes = new ProcManager();
@@ -171,9 +184,20 @@ async function deploy(): Promise<void> {
   if (!market.collateral.address || !sameAddress(sidecar.underlying, market.collateral.address)) {
     throw new Error(`${options.market} sidecar collateral does not match the reviewed staging manifest`);
   }
-  const expectedPriceId = priceIdForMarket(manifest, options.market);
-  if (sidecar.pythPriceId.toLowerCase() !== expectedPriceId.toLowerCase()) {
-    throw new Error(`${options.market} sidecar Pyth id does not match the reviewed staging manifest`);
+  if (sidecar.oracleProvider !== market.oracleProvider) {
+    throw new Error(`${options.market} sidecar oracle provider does not match the staging manifest`);
+  }
+  if (market.oracleProvider === "pyth") {
+    const expectedPriceId = priceIdForMarket(manifest, options.market);
+    if (sidecar.pythPriceId?.toLowerCase() !== expectedPriceId.toLowerCase()) {
+      throw new Error(`${options.market} sidecar Pyth id does not match the reviewed staging manifest`);
+    }
+  } else if (
+    !market.chainlinkAggregator
+      || !sidecar.chainlinkAggregator
+      || !sameAddress(sidecar.chainlinkAggregator, market.chainlinkAggregator)
+  ) {
+    throw new Error(`${options.market} sidecar Chainlink aggregator does not match the staging manifest`);
   }
 
   manifest = mergeSidecarIntoManifest(manifest, options.market, sidecar);

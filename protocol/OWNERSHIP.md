@@ -75,6 +75,7 @@ feed signer = `0xdE50B8E9…782F`.
 | OptionAsset / WrappedERC20Asset | `setWhitelistManager`, `setTotalPositionCap`, `setSettlementFeed` (option) | deployer (owner); whitelisted manager = SRM | Safe |
 | TradeModule / RfqModule | `setFeeRecipient(uint subacc)`, `setPerpAsset` | deployer (owner); feeRecipient = subacc 3 | Safe |
 | PythSpotFeed | `setPythStaleness`, `setChainlinkStaleness`, `setDeviationThreshold`, `setChainlinkAggregator` | deployer (owner) | Safe |
+| ChainlinkSpotFeed | `setStaleness` | deployer (owner) | Safe |
 | PythSpotFeed | Pyth price pushes (`updatePriceFeeds` on the Pyth contract) | **permissionless** (anyone pays the Pyth fee) | unchanged |
 | SubAccounts | fee-recipient subaccount NFT (id 3) — owner may withdraw accrued fee cash | deployer EOA | **Safe** (single-step NFT transfer) |
 | SubAccounts | SM subaccount NFT (id 1) | SecurityModule contract | unchanged (follows SecurityModule owner) |

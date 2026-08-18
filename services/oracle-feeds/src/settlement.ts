@@ -9,6 +9,7 @@ import {
   requireDeployments,
   standardManagerAbi,
   subAccountsAbi,
+  type MarketDefinition,
 } from "@hedge/shared";
 import { anchoredFeedFromDeployments, ensureAnchoredSettlementPrice } from "./anchored.js";
 import type { FeedPoster } from "./poster.js";
@@ -31,6 +32,21 @@ export interface SettlementAddresses {
   benchmarkSettlementFeed?: Address;
 }
 
+export function settlementFeedsForMarket(
+  market: MarketDefinition,
+  legacyCryptoAnchoredFeed?: Address,
+): Pick<SettlementAddresses, "anchoredSettlementFeed" | "benchmarkSettlementFeed"> {
+  if (!market.contracts) return {};
+  if (market.oracleProvider === "chainlink") {
+    const fixingFeed = market.contracts.settlementFixingFeed;
+    if (!fixingFeed) throw new Error(`${market.id} is missing its Chainlink settlement fixing feed`);
+    return { anchoredSettlementFeed: fixingFeed };
+  }
+  return market.kind === "crypto"
+    ? { anchoredSettlementFeed: legacyCryptoAnchoredFeed }
+    : { benchmarkSettlementFeed: market.contracts.settlementFeed };
+}
+
 export function settlementAddressesFromDeployments(
   chainId: number,
   marketId: string = process.env.ORACLE_MARKET ?? "BTC",
@@ -40,6 +56,10 @@ export function settlementAddressesFromDeployments(
   if (!market?.enabled || !market.contracts) {
     throw new Error(`${marketId} market is not enabled on chain ${chainId}`);
   }
+  const feeds = settlementFeedsForMarket(
+    market,
+    market.kind === "crypto" ? anchoredFeedFromDeployments(d) : undefined,
+  );
   return {
     standardManager: getDeployedAddress(d, "standardManager"),
     optionAsset: market.contracts.optionAsset,
@@ -48,8 +68,7 @@ export function settlementAddressesFromDeployments(
     baseAsset: market.contracts.baseAsset,
     assetSymbol: market.id,
     collateralSymbol: market.collateral.symbol,
-    anchoredSettlementFeed: market.kind === "crypto" ? anchoredFeedFromDeployments(d) : undefined,
-    benchmarkSettlementFeed: market.kind !== "crypto" ? market.contracts.settlementFeed : undefined,
+    ...feeds,
   };
 }
 

@@ -11,6 +11,7 @@ contract MockChainlinkAggregator is IAggregatorV3 {
   struct Round {
     int answer;
     uint updatedAt;
+    uint80 answeredInRound;
   }
 
   uint8 public decimals;
@@ -35,13 +36,18 @@ contract MockChainlinkAggregator is IAggregatorV3 {
   /// @notice push a new round in the current phase, returns its proxy roundId
   function addRound(int _answer, uint _updatedAt) public returns (uint80 id) {
     id = _proxyId(phaseId, ++lastAggRoundId[phaseId]);
-    rounds[id] = Round(_answer, _updatedAt);
+    rounds[id] = Round(_answer, _updatedAt, id);
   }
 
   /// @notice overwrite an arbitrary round (e.g. to make one incomplete: answer 0, updatedAt 0)
   function setRound(uint16 _phase, uint64 _aggRoundId, int _answer, uint _updatedAt) external {
-    rounds[_proxyId(_phase, _aggRoundId)] = Round(_answer, _updatedAt);
+    uint80 id = _proxyId(_phase, _aggRoundId);
+    rounds[id] = Round(_answer, _updatedAt, id);
     if (_aggRoundId > lastAggRoundId[_phase]) lastAggRoundId[_phase] = _aggRoundId;
+  }
+
+  function setAnsweredInRound(uint80 _roundId, uint80 _answeredInRound) external {
+    rounds[_roundId].answeredInRound = _answeredInRound;
   }
 
   /// @notice switch to a new phase (subsequent addRound calls start from aggRoundId 1)
@@ -52,12 +58,12 @@ contract MockChainlinkAggregator is IAggregatorV3 {
   function latestRoundData() external view returns (uint80, int, uint, uint, uint80) {
     uint80 id = _proxyId(phaseId, lastAggRoundId[phaseId]);
     Round memory r = rounds[id];
-    return (id, r.answer, r.updatedAt, r.updatedAt, id);
+    return (id, r.answer, r.updatedAt, r.updatedAt, r.answeredInRound);
   }
 
   function getRoundData(uint80 _roundId) external view returns (uint80, int, uint, uint, uint80) {
     Round memory r = rounds[_roundId];
-    return (_roundId, r.answer, r.updatedAt, r.updatedAt, _roundId);
+    return (_roundId, r.answer, r.updatedAt, r.updatedAt, r.answeredInRound);
   }
 
   function _proxyId(uint16 _phase, uint64 _aggRoundId) internal pure returns (uint80) {
