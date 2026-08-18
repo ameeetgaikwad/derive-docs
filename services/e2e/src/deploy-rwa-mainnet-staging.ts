@@ -127,6 +127,7 @@ async function deploy(): Promise<void> {
     let source: string;
     if (market.oracleProvider === "pyth") {
       const priceId = priceIdForMarket(manifest, options.market);
+      if (!priceId) throw new Error(`${options.market} is missing its Pyth price id`);
       await verifyHermesSource(priceId, options.market);
       source = `pyth=${priceId}`;
     } else {
@@ -189,6 +190,7 @@ async function deploy(): Promise<void> {
   }
   if (market.oracleProvider === "pyth") {
     const expectedPriceId = priceIdForMarket(manifest, options.market);
+    if (!expectedPriceId) throw new Error(`${options.market} is missing its Pyth price id`);
     if (sidecar.pythPriceId?.toLowerCase() !== expectedPriceId.toLowerCase()) {
       throw new Error(`${options.market} sidecar Pyth id does not match the reviewed staging manifest`);
     }

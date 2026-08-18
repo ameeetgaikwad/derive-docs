@@ -11,7 +11,11 @@ import {
   subAccountsAbi,
   type MarketDefinition,
 } from "@hedge/shared";
-import { anchoredFeedFromDeployments, ensureAnchoredSettlementPrice } from "./anchored.js";
+import {
+  anchoredFeedFromDeployments,
+  anchoredSettlementFeedAbi,
+  ensureAnchoredSettlementPrice,
+} from "./anchored.js";
 import type { FeedPoster } from "./poster.js";
 import {
   immediateTransactionQueue,
@@ -26,6 +30,8 @@ export interface SettlementAddresses {
   baseAsset: Address;
   assetSymbol: string;
   collateralSymbol: string;
+  /** Live ISettlementFeed used by OptionAsset, including any scaling wrapper. */
+  settlementFeed?: Address;
   /** AnchoredSettlementFeed (btcSettlementFeed) — absent on signed-feed-only deployments */
   anchoredSettlementFeed?: Address;
   /** PythBenchmarkSettlementFeed for RWA markets. */
@@ -35,16 +41,20 @@ export interface SettlementAddresses {
 export function settlementFeedsForMarket(
   market: MarketDefinition,
   legacyCryptoAnchoredFeed?: Address,
-): Pick<SettlementAddresses, "anchoredSettlementFeed" | "benchmarkSettlementFeed"> {
+): Partial<Pick<
+  SettlementAddresses,
+  "settlementFeed" | "anchoredSettlementFeed" | "benchmarkSettlementFeed"
+>> {
   if (!market.contracts) return {};
+  const settlementFeed = market.contracts.settlementFeed;
   if (market.oracleProvider === "chainlink") {
     const fixingFeed = market.contracts.settlementFixingFeed;
     if (!fixingFeed) throw new Error(`${market.id} is missing its Chainlink settlement fixing feed`);
-    return { anchoredSettlementFeed: fixingFeed };
+    return { settlementFeed, anchoredSettlementFeed: fixingFeed };
   }
   return market.kind === "crypto"
-    ? { anchoredSettlementFeed: legacyCryptoAnchoredFeed }
-    : { benchmarkSettlementFeed: market.contracts.settlementFeed };
+    ? { settlementFeed, anchoredSettlementFeed: legacyCryptoAnchoredFeed }
+    : { settlementFeed, benchmarkSettlementFeed: settlementFeed };
 }
 
 export function settlementAddressesFromDeployments(
@@ -68,6 +78,7 @@ export function settlementAddressesFromDeployments(
     baseAsset: market.contracts.baseAsset,
     assetSymbol: market.id,
     collateralSymbol: market.collateral.symbol,
+    settlementFeed: market.contracts.settlementFeed,
     ...feeds,
   };
 }
@@ -169,12 +180,6 @@ export class SettlementRunner {
           ? `anchored settlement price fixed at ${fromUnit(result.price)}  tx=${result.txHash}`
           : `anchored settlement price already fixed at ${fromUnit(result.price)}`,
       );
-      if (params.price !== undefined && params.price !== result.price) {
-        log(
-          `note: --price ${fromUnit(params.price)} differs from the oracle anchor ` +
-            `${fromUnit(result.price)} — the anchor is authoritative`,
-        );
-      }
       fixed = { settled: true, price: result.price };
     } else if (!params.signed && this.addresses.benchmarkSettlementFeed) {
       const feed = this.addresses.benchmarkSettlementFeed;
@@ -250,6 +255,23 @@ export class SettlementRunner {
       if (!fixed.settled) {
         throw new Error(`Forward feed did not register settlement data for expiry ${expiry}`);
       }
+    }
+
+    if (this.addresses.settlementFeed) {
+      const [settled, price] = await this.publicClient.readContract({
+        address: this.addresses.settlementFeed,
+        abi: anchoredSettlementFeedAbi,
+        functionName: "getSettlementPrice",
+        args: [expiry],
+      });
+      if (!settled) throw new Error(`Live settlement feed is not fixed for expiry ${expiry}`);
+      fixed = { settled, price };
+    }
+    if (params.price !== undefined && params.price !== fixed.price) {
+      log(
+        `note: --price ${fromUnit(params.price)} differs from the authoritative settlement ` +
+          `${fromUnit(fixed.price)}`,
+      );
     }
 
     log(`getSettlementPrice(${expiry}) = ${fromUnit(fixed.price)} (settled)`);

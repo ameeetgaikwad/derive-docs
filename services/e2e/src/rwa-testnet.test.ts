@@ -5,6 +5,7 @@ import {
   mergeSidecarIntoManifest,
   parseAddMarketSidecar,
   parseDeployMarkets,
+  priceIdForMarket,
   setManifestMarketEnabled,
   type AddMarketSidecar,
   type ManifestFile,
@@ -153,9 +154,10 @@ describe("RWA testnet deployment helpers", () => {
     assert.deepEqual(calls, ["aggregator"]);
 
     let description = "XAU / USD";
+    let blockTimestamp = 1_781_000_100n;
     const sourceClient = {
       getCode: async () => "0x01",
-      getBlock: async () => ({ timestamp: 1_781_000_100n }),
+      getBlock: async () => ({ timestamp: blockTimestamp }),
       readContract: async ({ functionName }: { functionName: string }) => {
         if (functionName === "description") return description;
         if (functionName === "decimals") return 8;
@@ -171,6 +173,13 @@ describe("RWA testnet deployment helpers", () => {
       verifyChainlinkSource(sourceClient as never, manifest.markets[0]!),
       /description/,
     );
+    description = "XAU / USD";
+    blockTimestamp = 1_781_100_000n;
+    await assert.rejects(
+      verifyChainlinkSource(sourceClient as never, manifest.markets[0]!),
+      (error: unknown) => error instanceof Error && error.name === "StaleChainlinkSourceError",
+    );
+    assert.equal(priceIdForMarket(manifest, "XAU", {}), null);
     assert.throws(() => parseAddMarketSidecar({
       ...xauSidecar(),
       oracleProvider: "chainlink",

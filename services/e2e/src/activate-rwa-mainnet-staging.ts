@@ -16,6 +16,7 @@ import {
   verifyStagingAuthority,
   verifyStagingMarket,
   verifyChainlinkSource,
+  StaleChainlinkSourceError,
 } from "./rwa-mainnet-staging-operator.js";
 
 interface Options {
@@ -58,8 +59,9 @@ Usage:
 
 Normal activation requires a fresh manifest-selected Pyth or Chainlink source.
 Deferred activation is for an equity feed outside its publishing window: it
-verifies the on-chain binding but the RFQ engine remains fail-closed until the
-external oracle and signed feeds are fresh.`);
+allows only a verified Chainlink source with a stale last round. Identity,
+configuration, and invalid-round failures remain hard stops, and the RFQ engine
+stays fail-closed until the external oracle and signed feeds are fresh.`);
 }
 
 function maximumPythAge(): bigint {
@@ -115,7 +117,8 @@ async function activate(): Promise<void> {
         const health = await verifyChainlinkSource(client, market);
         oracleStatus = `deferred chainlinkAge=${health.age}s`;
       } catch (error) {
-        oracleStatus = `deferred chainlinkUnavailable=${(error as Error).message.split("\n")[0]}`;
+        if (!(error instanceof StaleChainlinkSourceError)) throw error;
+        oracleStatus = `deferred chainlinkStale=${error.message.split("\n")[0]}`;
       }
     } else {
       const health = await verifyChainlinkSource(client, market);

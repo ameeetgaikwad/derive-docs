@@ -134,6 +134,8 @@ export function planHyperliquidHedge(input: HedgePlanInput): HedgePlan {
     input.currentPerpPositionUnderlying,
     input.pendingSignedPerpQuantityUnderlying,
     input.portfolioRevision,
+    input.market.meta.observedAtMs,
+    input.market.meta.receivedAtMs,
   ];
   const target = -input.confirmedOptionDeltaUnderlying;
   const effective =

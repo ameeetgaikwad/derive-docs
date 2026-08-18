@@ -115,7 +115,9 @@ only then repeat for the next selected market. Equity activation can use
 market remains runtime-closed until the external and signed feeds are fresh. A
 standard Chainlink feed is not a promise of continuous 24/5 equity updates: the
 adapter rejects data older than 24 hours, so weekends, holidays, and source
-pauses deliberately fail closed.
+pauses deliberately fail closed. Deferred activation tolerates only this stale
+last-round condition; feed address, code, identity, decimals, and round-integrity
+failures remain hard stops.
 
 The staging caps are deliberately small:
 

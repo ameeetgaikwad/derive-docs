@@ -228,6 +228,17 @@ describe("planHyperliquidHedge", () => {
   });
 
   it.each([
+    ["observed", { observedAtMs: Number.NaN }],
+    ["received", { receivedAtMs: Number.NaN }],
+  ])("blocks a non-finite %s timestamp", (_label, meta) => {
+    const plan = planHyperliquidHedge(
+      makeHedgeInput({ market: makeHedgeMarket({ meta }) }),
+    );
+
+    requireBlocked(plan, "INVALID_INPUT");
+  });
+
+  it.each([
     ["coin", makeHedgeMarket({ coin: "ETH" })],
     ["network", makeHedgeMarket({ network: "MAINNET" })],
     [
