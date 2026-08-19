@@ -143,6 +143,18 @@ variable "image_tag" {
   default     = "latest"
 }
 
+variable "oracle_feeds_image_tag" {
+  description = "Optional oracle-only image tag for reviewed incident rollouts; null inherits image_tag without changing RFQ or maker images."
+  type        = string
+  default     = null
+  nullable    = true
+
+  validation {
+    condition     = var.oracle_feeds_image_tag == null || can(regex("^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$", var.oracle_feeds_image_tag))
+    error_message = "oracle_feeds_image_tag must be null or a valid Docker tag."
+  }
+}
+
 variable "rfq_engine_cpu" {
   type    = string
   default = "512"
@@ -151,6 +163,27 @@ variable "rfq_engine_cpu" {
 variable "rfq_engine_memory" {
   type    = string
   default = "1024"
+}
+
+variable "withdrawals_enabled" {
+  description = "Enable executor-backed withdrawal submission in mainnet-staging. Keep false until the dedicated singleton rollout checklist is complete."
+  type        = bool
+  default     = false
+}
+
+variable "funds_store_path" {
+  description = "Dedicated withdrawal operation journal on the RFQ engine EFS mount. Never share it with STORE_PATH."
+  type        = string
+  default     = "/var/lib/hedge/funds.jsonl"
+
+  validation {
+    condition = (
+      startswith(var.funds_store_path, "/var/lib/hedge/")
+      && endswith(var.funds_store_path, ".jsonl")
+      && var.funds_store_path != "/var/lib/hedge/rfq.jsonl"
+    )
+    error_message = "funds_store_path must be a distinct .jsonl file under /var/lib/hedge/."
+  }
 }
 
 variable "oracle_feeds_cpu" {
@@ -174,6 +207,25 @@ variable "oracle_discovery_from_block" {
   }
 }
 
+variable "oracle_rwa_discovery_from_block" {
+  description = "OptionAsset deployment blocks for enabled staging RWA markets; bounds first-run BalanceAdjusted replay on RPCs without historical state."
+  type        = map(string)
+  default = {
+    XAU  = "115693756"
+    NVDA = "116583626"
+    SPY  = "116826473"
+  }
+
+  validation {
+    condition = length(var.oracle_rwa_discovery_from_block) == 3 && alltrue([
+      for market in ["XAU", "NVDA", "SPY"] : contains(keys(var.oracle_rwa_discovery_from_block), market)
+      ]) && alltrue([
+      for block in values(var.oracle_rwa_discovery_from_block) : can(regex("^[1-9][0-9]*$", block))
+    ])
+    error_message = "oracle_rwa_discovery_from_block must contain positive integer XAU, NVDA, and SPY deployment blocks."
+  }
+}
+
 variable "maker_bot_cpu" {
   type    = string
   default = "256"
@@ -185,7 +237,7 @@ variable "maker_bot_memory" {
 }
 
 variable "rfq_engine_desired_count" {
-  description = "Start at zero; set to one after publishing and verifying the image."
+  description = "Start at zero and keep at one maximum; the executor and EFS journals require a singleton RFQ engine."
   type        = number
   default     = 0
 

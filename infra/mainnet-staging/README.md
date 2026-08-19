@@ -49,26 +49,72 @@ and separate ALBs isolate them.
    ```
 
 5. Publish the reviewed RFQ, oracle, and maker images. The images must contain
-   `protocol/deployments/staging/56.json` and its staging market manifest.
-6. Set only `rfq_engine_desired_count` to one and apply. Check its CloudWatch
-startup preflight and `curl http://<alb-dns>/health`. The directory starts
-at Matching block `115317084`, recorded as `matchingDeploymentBlock` in
-`protocol/deployments/staging/56.json`; wait for
-`GET /subaccounts?owner=<wallet>` to return checkpoint metadata before
-treating the account list as synchronized. Its RPC log scan uses 1,000-block
-chunks, verified against the configured staging provider.
+   `protocol/deployments/staging/56.json` and its staging market manifest. For
+   an oracle-only incident rollout, set `oracle_feeds_image_tag` to the reviewed
+   immutable tag; do not change shared `image_tag` and accidentally roll RFQ or
+   maker with a tag that does not exist in their repositories.
+6. Keep `withdrawals_enabled=false`, set only `rfq_engine_desired_count` to one,
+   and apply. Check its CloudWatch startup preflight and
+   `curl http://<alb-dns>/health`. The directory starts at Matching block
+   `115317084`, recorded as `matchingDeploymentBlock` in
+   `protocol/deployments/staging/56.json`; wait for
+   `GET /subaccounts?owner=<wallet>` to return checkpoint metadata before
+   treating the account list as synchronized. Its RPC log scan uses 1,000-block
+   chunks, verified against the configured staging provider. Confirm the task
+   receives `WITHDRAWALS_ENABLED=false` and uses separate EFS journals at
+   `/var/lib/hedge/rfq.jsonl` and `FUNDS_STORE_PATH`.
 7. Stop every local chain-56 oracle, set `oracle_feeds_desired_count` to one,
-   and apply again. The task pins `ORACLE_DISCOVERY_FROM_BLOCK=115316790`, the
-   staging `SubAccounts` deployment block, because ordinary BNB RPC endpoints
-   may not support historical-state discovery. Only one process may use the
-   feed-signer nonce stream.
+   and apply again. The task pins `ORACLE_DISCOVERY_FROM_BLOCK=115316790` for
+   BTC plus the validated OptionAsset deployment blocks `115693756` for XAU
+   `116583626` for NVDA, and `116826473` for SPY because ordinary BNB RPC
+   endpoints may not support historical-state discovery. It scans RWA markets sequentially in
+   5,000-block chunks, retries transient log-query failures, and checkpoints
+   each chunk. The ECS service is stop-before-start (`minimum healthy = 0`,
+   `maximum = 100`); only one process may use the feed-signer nonce stream.
 8. Set `maker_bot_desired_count` to one and apply. Keep exactly one staging
    maker task for this key and verify its CloudWatch authentication log.
 9. Attach ACM/DNS, set `certificate_arn` and `rfq_public_hostname`, and apply.
    The staging maker then uses `wss://<rfq_public_hostname>/maker`; it must not
    use TLS against the raw ALB hostname because the certificate does not cover it.
 10. Configure the deployed frontend's
-   `NEXT_PUBLIC_RFQ_ENGINE_URL_56=https://<staging-host>`.
+    `NEXT_PUBLIC_RFQ_ENGINE_URL_56=https://<staging-host>`.
+
+## Withdrawal singleton gate
+
+Executor-backed withdrawal submission is fail-closed in this root:
+`withdrawals_enabled` defaults to `false`. `FUNDS_STORE_PATH` defaults to the
+dedicated EFS journal `/var/lib/hedge/funds.jsonl`; do not point it at the RFQ
+`STORE_PATH`. The ECS service is also stop-before-start (`minimum healthy = 0`,
+`maximum = 100`) so a replacement cannot overlap two tasks that share an
+executor transaction nonce stream and append-only journals. Expect brief RFQ
+downtime during each RFQ engine replacement.
+
+Enable withdrawals only after all of these checks:
+
+1. Deploy the reviewed image with `withdrawals_enabled=false`. Verify ordinary
+   RFQs, `/health`, the subaccount directory, and the disabled withdrawal API.
+2. Exercise preview, owner-signature validation, exact executor-context
+   simulation, idempotent resubmission, receipt reconciliation, and restart
+   recovery on Anvil or testnet using the same image.
+3. On chain 56, independently verify the configured Matching,
+   WithdrawalModule, CashAsset, collateral wrappers, allowed-module flag, and
+   registered executor. Rehearse one smallest-allowed withdrawal from an
+   explicitly selected staging account and review the resulting margin state.
+4. Confirm there is exactly one RFQ ECS task, no other service or local process
+   uses the staging executor key, both EFS journals are writable, and the funds
+   journal has no unresolved `submitting` or `unknown` operation.
+5. Set `withdrawals_enabled=true` while keeping
+   `rfq_engine_desired_count=1`. Review a saved Terraform plan: it must change
+   only the intended task definition/service rollout and must retain the
+   stop-before-start deployment percentages. Apply that reviewed saved plan,
+   then submit one bounded staging withdrawal and reconcile its receipt, nonce,
+   recipient, amount, and post-withdrawal margin.
+
+To disable submission, set `withdrawals_enabled=false` and roll the singleton
+service again. Do not delete or replace `FUNDS_STORE_PATH` during rollback;
+first reconcile any submitted or unknown operation against the module nonce and
+chain logs. This gate applies only to this isolated pre-production staging root
+and does not enable withdrawals in a production stack.
 
 ## RWA rollout
 
@@ -113,6 +159,18 @@ another chain or asset.
 The bootstrap step exists because the singleton oracle intentionally publishes
 only enabled markets, while activation requires a fresh on-chain source. It
 does not publish signed forward/vol/rate feeds and never enables the market.
+
+The oracle EFS access point holds separate state for every enabled market:
+
+- `/var/lib/hedge/active-expiries.json`, `.XAU.json`, `.NVDA.json`, and `.SPY.json`;
+- `/var/lib/hedge/settlement-twap.json`, `.XAU.json`, `.NVDA.json`, and `.SPY.json`.
+
+Do not delete or merge these files during a rollout. Startup logs must show each
+market loading its own path and saved cursor; a rebuild from BTC block
+`115316790` for XAU, NVDA, or SPY means the deployed task definition or image
+is wrong. A replacement must stop the old task before the new task reaches
+`RUNNING`, then remain healthy through at least two signed-feed intervals before
+RFQs are treated as ready.
 
 Commit the new staging sidecar and manifest, publish all service/web images, and
 roll oracle, RFQ, maker, then web. Verify `/markets`, complete a tiny RFQ, and

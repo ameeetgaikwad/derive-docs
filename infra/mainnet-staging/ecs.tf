@@ -81,6 +81,8 @@ resource "aws_ecs_task_definition" "rfq_engine" {
         { name = "AUCTION_WINDOW_MS", value = "3000" },
         { name = "TAKER_ACCEPT_DEADLINE_MS", value = "120000" },
         { name = "STORE_PATH", value = "/var/lib/hedge/rfq.jsonl" },
+        { name = "WITHDRAWALS_ENABLED", value = tostring(var.withdrawals_enabled) },
+        { name = "FUNDS_STORE_PATH", value = var.funds_store_path },
       ]
 
       secrets = [
@@ -109,6 +111,13 @@ resource "aws_ecs_service" "rfq_engine" {
   launch_type                       = "FARGATE"
   platform_version                  = "1.4.0"
   health_check_grace_period_seconds = 60
+
+  # The RFQ and withdrawal paths share one executor nonce stream and append-only
+  # EFS journals. Stop the old task before starting its replacement so a rolling
+  # deployment never creates two writers. This intentionally permits brief
+  # staging downtime during replacement.
+  deployment_minimum_healthy_percent = 0
+  deployment_maximum_percent         = 100
 
   deployment_circuit_breaker {
     enable   = true
@@ -158,7 +167,7 @@ resource "aws_ecs_task_definition" "oracle_feeds" {
   container_definitions = jsonencode([
     {
       name      = "oracle-feeds"
-      image     = "${local.ecr_registry}/hedge/oracle-feeds:${var.image_tag}"
+      image     = "${local.ecr_registry}/hedge/oracle-feeds:${coalesce(var.oracle_feeds_image_tag, var.image_tag)}"
       essential = true
       command   = ["daemon", "--source", "deribit", "--interval", "30", "--feed-interval", "120"]
 
@@ -173,6 +182,12 @@ resource "aws_ecs_task_definition" "oracle_feeds" {
         { name = "ORACLE_STATE_PATH", value = "/var/lib/hedge/active-expiries.json" },
         { name = "ORACLE_TWAP_STATE_PATH", value = "/var/lib/hedge/settlement-twap.json" },
         { name = "ORACLE_DISCOVERY_FROM_BLOCK", value = var.oracle_discovery_from_block },
+        { name = "ORACLE_DISCOVERY_FROM_BLOCK_XAU", value = var.oracle_rwa_discovery_from_block.XAU },
+        { name = "ORACLE_DISCOVERY_FROM_BLOCK_NVDA", value = var.oracle_rwa_discovery_from_block.NVDA },
+        { name = "ORACLE_DISCOVERY_FROM_BLOCK_SPY", value = var.oracle_rwa_discovery_from_block.SPY },
+        { name = "ORACLE_DISCOVERY_BLOCK_CHUNK", value = "5000" },
+        { name = "ORACLE_DISCOVERY_LOG_RETRIES", value = "6" },
+        { name = "ORACLE_DISCOVERY_RETRY_DELAY_MS", value = "500" },
         { name = "EXPIRY_COUNT", value = "3" },
         { name = "HERMES_URL", value = "https://pyth.dourolabs.app/hermes" },
         { name = "PYTH_SOURCE_MAX_AGE_SEC", value = "45" },
@@ -211,6 +226,12 @@ resource "aws_ecs_service" "oracle_feeds" {
   desired_count    = var.oracle_feeds_desired_count
   launch_type      = "FARGATE"
   platform_version = "1.4.0"
+
+  # Every oracle market shares one feed-signer nonce stream. Stop the old task
+  # before starting its replacement so even a forced deployment remains a
+  # singleton. This intentionally permits brief staging feed downtime.
+  deployment_minimum_healthy_percent = 0
+  deployment_maximum_percent         = 100
 
   deployment_circuit_breaker {
     enable   = true

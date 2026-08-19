@@ -3,6 +3,16 @@ rpc_url = "https://replace-with-private-bnb-mainnet-rpc"
 # CD publishes immutable SHA tags for audit/rollback and updates this moving tag.
 image_tag = "latest"
 
+# Leave null for normal CD; pin only the oracle during a reviewed incident.
+oracle_feeds_image_tag = null
+
+# Validated OptionAsset deployment blocks bound first-run RWA event replay.
+oracle_rwa_discovery_from_block = {
+  XAU  = "115693756"
+  NVDA = "116583626"
+  SPY  = "116826473"
+}
+
 # Public takers are enabled; only these maker EOAs may quote.
 maker_allowlist = [
   "0xE37515eF43C884e04147F4714A7fC1C70059C392",
@@ -12,7 +22,12 @@ maker_allowlist = [
 certificate_arn = null
 rfq_public_hostname = "rfq-staging-mainnet.satsterminal.com"
 
-# First apply at zero. Set both to one only after publishing the image,
+# Executor-backed withdrawals stay disabled through the initial RFQ rollout.
+# Enable only after completing README.md's withdrawal singleton checklist.
+withdrawals_enabled = false
+funds_store_path     = "/var/lib/hedge/funds.jsonl"
+
+# First apply at zero. Set each service to one only after publishing the image,
 # verifying staging signer identities/funding, and stopping the local chain-56 oracle.
 rfq_engine_desired_count   = 0
 oracle_feeds_desired_count = 0
