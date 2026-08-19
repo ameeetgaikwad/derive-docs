@@ -2,6 +2,7 @@
 
 import { beforeEach, describe, expect, it } from "vitest";
 import {
+  readRememberedSubaccountId,
   subaccountSelectionStorageKey,
   subaccountScopeKey,
   useAccountStore,
@@ -66,6 +67,15 @@ describe("scoped subaccount state", () => {
 
     expect(useAccountStore.getState().selectedAccountId).toBe(42n);
     expect(window.localStorage.getItem(subaccountSelectionStorageKey(scope))).toBe("42");
+  });
+
+  it("rejects a cached value outside the uint256 account-id range", () => {
+    window.localStorage.setItem(
+      subaccountSelectionStorageKey(scope),
+      (1n << 256n).toString(),
+    );
+
+    expect(readRememberedSubaccountId(scope)).toBeNull();
   });
 
   it("isolates remembered selections by wallet, chain, and Matching deployment", () => {
@@ -135,6 +145,7 @@ describe("scoped subaccount state", () => {
 
     state.selectAccount(scope, 57n);
     expect(useAccountStore.getState().selectedAccountId).toBe(42n);
+    expect(window.localStorage.getItem(subaccountSelectionStorageKey(scope))).toBe("42");
 
     state.setSelectionLocked(false);
     state.selectAccount(scope, 57n);

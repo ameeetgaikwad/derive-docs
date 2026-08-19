@@ -33,6 +33,7 @@ export function subaccountScopeKey(
 }
 
 const SUBACCOUNT_SELECTION_STORAGE_PREFIX = "hedge.subaccount-selection";
+const MAX_ACCOUNT_ID = (1n << 256n) - 1n;
 
 export function subaccountSelectionStorageKey(scopeKey: string): string {
   return `${SUBACCOUNT_SELECTION_STORAGE_PREFIX}:${scopeKey}`;
@@ -43,7 +44,9 @@ export function readRememberedSubaccountId(scopeKey: string): bigint | null {
   if (typeof window === "undefined") return null;
   try {
     const raw = window.localStorage.getItem(subaccountSelectionStorageKey(scopeKey));
-    return raw !== null && /^\d+$/.test(raw) ? BigInt(raw) : null;
+    if (raw === null || raw.length > 78 || !/^\d+$/.test(raw)) return null;
+    const accountId = BigInt(raw);
+    return accountId <= MAX_ACCOUNT_ID ? accountId : null;
   } catch {
     return null;
   }

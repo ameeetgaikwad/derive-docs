@@ -14,6 +14,7 @@ import {
 import { useCoveredCallSubaccount } from "./useCoveredCallSubaccount";
 
 const OWNER = "0x1111111111111111111111111111111111111111" as const;
+const OTHER_OWNER = "0x9999999999999999999999999999999999999999" as const;
 const MATCHING = "0x2222222222222222222222222222222222222222" as const;
 const SUB_ACCOUNTS = "0x3333333333333333333333333333333333333333" as const;
 const MANAGER = "0x4444444444444444444444444444444444444444" as const;
@@ -149,6 +150,33 @@ describe("useCoveredCallSubaccount", () => {
     await waitFor(() => expect(result.current.accounts).toHaveLength(2));
     expect(result.current.accounts.map((account) => account.accountId)).toEqual([6n, 7n]);
     expect(result.current.subaccountId).toBe(6n);
+  });
+
+  it("rejects a cached candidate that fails current on-chain validation", async () => {
+    const scope = subaccountScopeKey(OWNER, 97, MATCHING);
+    window.localStorage.setItem(subaccountSelectionStorageKey(scope), "6");
+    mocks.multicall.mockImplementation(
+      async ({ contracts }: {
+        contracts: Array<{ functionName: string; args?: readonly unknown[] }>;
+      }) => contracts.map((contract) => ({
+        status: "success",
+        result:
+          contract.functionName === "subAccountToOwner"
+            ? contract.args?.[0] === 6n ? OTHER_OWNER : OWNER
+            : contract.functionName === "manager"
+              ? MANAGER
+              : contract.functionName === "ownerOf"
+                ? MATCHING
+                : [{ asset: CASH, subId: 0n, balance: 5n * 10n ** 18n }],
+      })),
+    );
+
+    const { result } = renderHook(() => useCoveredCallSubaccount(), { wrapper });
+
+    await waitFor(() => expect(result.current.accounts).toHaveLength(1));
+    expect(result.current.accounts[0]?.accountId).toBe(7n);
+    expect(result.current.subaccountId).toBe(7n);
+    expect(window.localStorage.getItem(subaccountSelectionStorageKey(scope))).toBe("7");
   });
 
   it("chunks the wallet-filtered RPC fallback only after a directory failure", async () => {
