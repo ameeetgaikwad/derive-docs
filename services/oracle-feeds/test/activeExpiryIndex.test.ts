@@ -10,6 +10,8 @@ import {
   ActiveExpiryIndex,
   applyBalanceAdjustment,
   decodeAssetAndSubId,
+  discoveryFromBlockForMarket,
+  statePathForMarket,
   type IndexedOptionPosition,
 } from "../src/activeExpiryIndex.js";
 
@@ -25,6 +27,43 @@ afterEach(async () => {
 });
 
 describe("active expiry index", () => {
+  it("derives distinct durable state paths and discovery blocks for every enabled market", () => {
+    const activeBase = "/var/lib/hedge/active-expiries.json";
+    const twapBase = "/var/lib/hedge/settlement-twap.json";
+    const paths = [
+      statePathForMarket(activeBase, "BTC", "BTC"),
+      statePathForMarket(activeBase, "XAU", "BTC"),
+      statePathForMarket(activeBase, "NVDA", "BTC"),
+      statePathForMarket(activeBase, "SPY", "BTC"),
+      statePathForMarket(twapBase, "BTC", "BTC"),
+      statePathForMarket(twapBase, "XAU", "BTC"),
+      statePathForMarket(twapBase, "NVDA", "BTC"),
+      statePathForMarket(twapBase, "SPY", "BTC"),
+    ];
+    expect(paths).toEqual([
+      "/var/lib/hedge/active-expiries.json",
+      "/var/lib/hedge/active-expiries.XAU.json",
+      "/var/lib/hedge/active-expiries.NVDA.json",
+      "/var/lib/hedge/active-expiries.SPY.json",
+      "/var/lib/hedge/settlement-twap.json",
+      "/var/lib/hedge/settlement-twap.XAU.json",
+      "/var/lib/hedge/settlement-twap.NVDA.json",
+      "/var/lib/hedge/settlement-twap.SPY.json",
+    ]);
+    expect(new Set(paths).size).toBe(8);
+
+    const env = {
+      ORACLE_DISCOVERY_FROM_BLOCK: "115316790",
+      ORACLE_DISCOVERY_FROM_BLOCK_XAU: "115693756",
+      ORACLE_DISCOVERY_FROM_BLOCK_NVDA: "116583626",
+      ORACLE_DISCOVERY_FROM_BLOCK_SPY: "116826473",
+    };
+    expect(discoveryFromBlockForMarket(env, "BTC", "BTC")).toBe(115316790n);
+    expect(discoveryFromBlockForMarket(env, "XAU", "BTC")).toBe(115693756n);
+    expect(discoveryFromBlockForMarket(env, "NVDA", "BTC")).toBe(116583626n);
+    expect(discoveryFromBlockForMarket(env, "SPY", "BTC")).toBe(116826473n);
+  });
+
   it("decodes the SubAccounts address/subId packing and ignores other assets", () => {
     const packed = packAssetAndSubId(OPTION_ASSET, SUB_ID);
     expect(decodeAssetAndSubId(packed)).toEqual({ asset: getAddress(OPTION_ASSET), subId: SUB_ID });
@@ -92,6 +131,37 @@ describe("active expiry index", () => {
     await restarted.sync();
     expect(restarted.positions()).toEqual([]);
     expect(restarted.expiredSeries(EXPIRY)).toEqual([]);
+    expect(chain.getLogsCalls.at(-1)).toEqual({ fromBlock: 22n, toBlock: 22n });
+  });
+
+  it("retries a transient log-query failure at the same cursor before checkpointing", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "oracle-expiry-retry-"));
+    temporaryDirectories.push(directory);
+    const chain = new FakeChain();
+    chain.head = 12n;
+    chain.getLogsFailuresRemaining = 1;
+    const messages: string[] = [];
+    const index = new ActiveExpiryIndex({
+      publicClient: chain.client,
+      chainId: 97,
+      addresses: { subAccounts: SUB_ACCOUNTS, optionAsset: OPTION_ASSET },
+      statePath: join(directory, "state.json"),
+      fromBlock: 10n,
+      confirmations: 0n,
+      chunkSize: 3n,
+      logQueryRetries: 2,
+      retryDelayMs: 0,
+      log: (message) => messages.push(message),
+    });
+
+    await index.sync();
+
+    expect(chain.getLogsCalls).toEqual([
+      { fromBlock: 10n, toBlock: 12n },
+      { fromBlock: 10n, toBlock: 12n },
+    ]);
+    expect(index.checkpoint().lastScannedBlock).toBe(12n);
+    expect(messages.join(" ")).toMatch(/retry 1\/2.*10-12/);
   });
 
   it("rebuilds an unreadable checkpoint from the configured deployment block", async () => {
@@ -139,6 +209,8 @@ function balanceLog(blockNumber: bigint, accountId: bigint, subId: bigint, postB
 class FakeChain {
   head = 0n;
   logs: ReturnType<typeof balanceLog>[] = [];
+  getLogsFailuresRemaining = 0;
+  getLogsCalls: Array<{ fromBlock: bigint; toBlock: bigint }> = [];
 
   readonly client = {
     getBlockNumber: async () => this.head,
@@ -147,7 +219,13 @@ class FakeChain {
     }),
     getBytecode: async ({ blockNumber }: { blockNumber: bigint }) =>
       blockNumber >= 10n ? ("0x01" as Hex) : undefined,
-    getLogs: async ({ fromBlock, toBlock }: { fromBlock: bigint; toBlock: bigint }) =>
-      this.logs.filter((log) => log.blockNumber >= fromBlock && log.blockNumber <= toBlock),
+    getLogs: async ({ fromBlock, toBlock }: { fromBlock: bigint; toBlock: bigint }) => {
+      this.getLogsCalls.push({ fromBlock, toBlock });
+      if (this.getLogsFailuresRemaining > 0) {
+        this.getLogsFailuresRemaining -= 1;
+        throw new Error("request timed out");
+      }
+      return this.logs.filter((log) => log.blockNumber >= fromBlock && log.blockNumber <= toBlock);
+    },
   } as unknown as PublicClient;
 }

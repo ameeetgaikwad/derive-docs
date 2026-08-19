@@ -1,5 +1,5 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
+import { basename, dirname, extname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
@@ -19,7 +19,36 @@ import {
 
 const UINT96_MASK = (1n << 96n) - 1n;
 const DEFAULT_CHUNK_SIZE = 2_000n;
+const DEFAULT_LOG_QUERY_RETRIES = 4;
+const DEFAULT_RETRY_DELAY_MS = 500;
 const STATE_VERSION = 1;
+
+export function statePathForMarket(
+  basePath: string,
+  marketId: string,
+  primaryMarketId: string,
+): string {
+  if (marketId === primaryMarketId) return basePath;
+  if (!/^[A-Za-z0-9_-]+$/.test(marketId)) {
+    throw new Error(`market id cannot be used in a state filename: ${marketId}`);
+  }
+  const extension = extname(basePath);
+  const stem = basename(basePath, extension);
+  return join(dirname(basePath), `${stem}.${marketId}${extension}`);
+}
+
+export function discoveryFromBlockForMarket(
+  env: Record<string, string | undefined>,
+  marketId: string,
+  primaryMarketId: string,
+): bigint | undefined {
+  const marketKey = `ORACLE_DISCOVERY_FROM_BLOCK_${marketId.toUpperCase().replace(/[^A-Z0-9]/g, "_")}`;
+  const key = marketId === primaryMarketId ? "ORACLE_DISCOVERY_FROM_BLOCK" : marketKey;
+  const raw = env[key]?.trim();
+  if (!raw) return undefined;
+  if (!/^\d+$/.test(raw)) throw new Error(`${key} must be a non-negative integer`);
+  return BigInt(raw);
+}
 
 export const balanceAdjustedEvent = parseAbiItem(
   "event BalanceAdjusted(uint256 indexed accountId, address indexed manager, bytes32 indexed assetAndSubId, int256 amount, int256 preBalance, int256 postBalance, uint256 tradeId)",
@@ -89,6 +118,8 @@ export interface ActiveExpiryIndexOptions {
   fromBlock?: bigint;
   confirmations?: bigint;
   chunkSize?: bigint;
+  logQueryRetries?: number;
+  retryDelayMs?: number;
   log?: (message: string) => void;
 }
 
@@ -103,11 +134,14 @@ export interface ActiveExpiryIndexOptions {
 export class ActiveExpiryIndex {
   private readonly publicClient: PublicClient;
   private readonly chainId: number;
+  private readonly marketId: string;
   private readonly addresses: ActiveExpiryAddresses;
   private readonly statePath: string;
   private readonly configuredFromBlock: bigint | undefined;
   private readonly confirmations: bigint;
   private readonly chunkSize: bigint;
+  private readonly logQueryRetries: number;
+  private readonly retryDelayMs: number;
   private readonly log: (message: string) => void;
   private state: IndexState | null = null;
   private syncTail: Promise<void> = Promise.resolve();
@@ -116,6 +150,7 @@ export class ActiveExpiryIndex {
     this.publicClient = options.publicClient;
     this.chainId = options.chainId;
     const marketId = options.marketId ?? process.env.ORACLE_MARKET ?? "BTC";
+    this.marketId = marketId;
     this.addresses = options.addresses ?? activeExpiryAddressesFromDeployments(options.chainId, marketId);
     this.statePath =
       options.statePath ??
@@ -128,10 +163,18 @@ export class ActiveExpiryIndex {
     this.configuredFromBlock = options.fromBlock;
     this.confirmations = options.confirmations ?? (options.chainId === 31337 ? 0n : 6n);
     this.chunkSize = options.chunkSize ?? DEFAULT_CHUNK_SIZE;
+    this.logQueryRetries = options.logQueryRetries ?? DEFAULT_LOG_QUERY_RETRIES;
+    this.retryDelayMs = options.retryDelayMs ?? DEFAULT_RETRY_DELAY_MS;
     this.log = options.log ?? ((message) => console.log(`[oracle-feeds] ${message}`));
 
     if (this.confirmations < 0n) throw new Error("oracle discovery confirmations cannot be negative");
     if (this.chunkSize <= 0n) throw new Error("oracle discovery chunk size must be positive");
+    if (!Number.isSafeInteger(this.logQueryRetries) || this.logQueryRetries < 0) {
+      throw new Error("oracle log query retries must be a non-negative integer");
+    }
+    if (!Number.isSafeInteger(this.retryDelayMs) || this.retryDelayMs < 0) {
+      throw new Error("oracle log query retry delay must be a non-negative integer");
+    }
   }
 
   /** Replay new finalized balance events and atomically checkpoint the result. */
@@ -159,13 +202,7 @@ export class ActiveExpiryIndex {
 
     while (cursor <= safeHead) {
       const toBlock = min(cursor + this.chunkSize - 1n, safeHead);
-      const logs = await this.publicClient.getLogs({
-        address: this.addresses.subAccounts,
-        event: balanceAdjustedEvent,
-        fromBlock: cursor,
-        toBlock,
-        strict: true,
-      });
+      const logs = await this.queryLogs(cursor, toBlock);
 
       const positions = positionsToMap(state.positions);
       for (const event of logs) {
@@ -187,7 +224,7 @@ export class ActiveExpiryIndex {
       chunks += 1;
       if (logs.length > 0 || toBlock === safeHead || chunks % 25 === 0) {
         this.log(
-          `active-expiry scan checkpoint=${toBlock}/${safeHead} ` +
+          `active-expiry scan market=${this.marketId} checkpoint=${toBlock}/${safeHead} ` +
             `events=${logs.length} positions=${state.positions.length}`,
         );
       }
@@ -247,6 +284,10 @@ export class ActiveExpiryIndex {
     const loaded = await this.loadState();
     if (loaded && this.matchesDeployment(loaded)) {
       this.state = loaded;
+      this.log(
+        `active-expiry state loaded market=${this.marketId} path=${this.statePath} ` +
+          `checkpoint=${loaded.lastScannedBlock} positions=${loaded.positions.length}`,
+      );
       return;
     }
     if (loaded) this.log(`discarding incompatible active-expiry index ${this.statePath}`);
@@ -287,8 +328,37 @@ export class ActiveExpiryIndex {
       lastScannedBlockHash: previousHash,
       positions: [],
     };
-    this.log(`active-expiry index rebuilding from block ${fromBlock}`);
+    this.log(
+      `active-expiry index rebuilding market=${this.marketId} path=${this.statePath} ` +
+        `from block ${fromBlock}`,
+    );
     await this.saveState(this.state);
+  }
+
+  private async queryLogs(fromBlock: bigint, toBlock: bigint) {
+    let retry = 0;
+    while (true) {
+      try {
+        return await this.publicClient.getLogs({
+          address: this.addresses.subAccounts,
+          event: balanceAdjustedEvent,
+          fromBlock,
+          toBlock,
+          strict: true,
+        });
+      } catch (error) {
+        if (retry >= this.logQueryRetries || !isRetryableLogQueryError(error)) throw error;
+        retry += 1;
+        this.log(
+          `active-expiry log query retry ${retry}/${this.logQueryRetries} ` +
+            `market=${this.marketId} blocks=${fromBlock}-${toBlock}: ${errorSummary(error)}`,
+        );
+        if (this.retryDelayMs > 0) {
+          const delay = this.retryDelayMs * 2 ** Math.min(retry - 1, 4);
+          await new Promise((resolveDelay) => setTimeout(resolveDelay, delay));
+        }
+      }
+    }
   }
 
   /** Find the first block containing SubAccounts bytecode (O(log chain height)). */
@@ -355,6 +425,25 @@ export class ActiveExpiryIndex {
     if (!this.state) throw new Error("active-expiry index has not been synced");
     return this.state;
   }
+}
+
+function isRetryableLogQueryError(error: unknown): boolean {
+  return /timeout|timed out|took too long|rate.?limit|too many requests|429|502|503|504|gateway|temporar|connection|socket|fetch failed/i.test(
+    errorSummary(error),
+  );
+}
+
+function errorSummary(error: unknown): string {
+  const parts: string[] = [];
+  let current: unknown = error;
+  for (let depth = 0; depth < 4 && current; depth += 1) {
+    if (current instanceof Error) parts.push(current.message);
+    else parts.push(String(current));
+    current = typeof current === "object" && current !== null && "cause" in current
+      ? (current as { cause?: unknown }).cause
+      : undefined;
+  }
+  return parts.join(": ").replace(/\s+/g, " ").trim().slice(0, 240);
 }
 
 /** Decode SubAccounts' bytes32 packing: address in the high 160 bits, subId in low 96. */

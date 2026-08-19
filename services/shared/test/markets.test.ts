@@ -124,13 +124,13 @@ describe("market manifests", () => {
     ]);
   });
 
-  it("loads deployed BTC, XAU, and NVDA mainnet staging markets with conservative RFQ caps", () => {
+  it("loads deployed BTC, XAU, SPY, and NVDA mainnet staging markets with conservative RFQ caps", () => {
     const path = fileURLToPath(
       new URL("../../../protocol/deployments/staging/markets/56.json", import.meta.url),
     );
     const manifest = validateMarketManifest(JSON.parse(readFileSync(path, "utf8")), 56);
     expect(manifest.markets).toHaveLength(4);
-    expect(enabledMarkets(manifest).map((market) => market.id)).toEqual(["BTC", "XAU", "NVDA"]);
+    expect(enabledMarkets(manifest).map((market) => market.id)).toEqual(["BTC", "XAU", "SPY", "NVDA"]);
     expect(manifest.markets[0]).toMatchObject({
       id: "BTC",
       enabled: true,
@@ -150,11 +150,19 @@ describe("market manifests", () => {
     expect(manifest.markets[1]).toMatchObject({ id: "XAU", enabled: true, maxSize: "0.01" });
     expect(manifest.markets[2]).toMatchObject({
       id: "SPY",
-      enabled: false,
+      enabled: true,
+      maxSize: "0.1",
       oracleProvider: "chainlink",
       pythPriceId: null,
       chainlinkAggregator: "0xb24D1DeE5F9a3f761D286B56d2bC44CE1D02DF7e",
-      contracts: null,
+      contracts: {
+        marketId: 4,
+        optionAsset: "0x393e13a7104A6F3FF79BD9B83180C9Df6dB8950D",
+        spotFeed: "0x7DcF2a26E80F16ae85F22F412bA6C00c0d94ECF8",
+        signedSpotFeed: "0xcB1d64B06E3673d8F11acdc69c0AC0d6AE14c1b7",
+        settlementFixingFeed: "0x83A12D6c5c122c5666Ac26Ef2313Cf392aa918d7",
+        multiplierRegistry: "0xe1f96f15f0C4cA688AA4C0F1980dbE6aCC92aA56",
+      },
     });
     expect(manifest.markets[3]).toMatchObject({
       id: "NVDA",
@@ -168,6 +176,6 @@ describe("market manifests", () => {
         multiplierRegistry: "0x0eDd73fFE1D6539d5dF27b79692E50A799493f91",
       },
     });
-    expect(manifest.markets.slice(2).map((market) => market.enabled)).toEqual([false, true]);
+    expect(manifest.markets.slice(2).map((market) => market.enabled)).toEqual([true, true]);
   });
 });

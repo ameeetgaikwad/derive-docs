@@ -26,9 +26,15 @@ describe("settlement TWAP tracker", () => {
     expect(crossing?.currentSpotAggregate - crossing!.settlementStartAggregate).toBe(11_650n);
     expect(crossing?.lateStart).toBe(false);
 
-    const restarted = new SettlementTwapTracker({ chainId: 97, statePath });
+    const messages: string[] = [];
+    const restarted = new SettlementTwapTracker({
+      chainId: 97,
+      statePath,
+      log: (message) => messages.push(message),
+    });
     const next = await restarted.observe(expiry, 8_400n, 100n);
     expect(next?.currentSpotAggregate - next!.settlementStartAggregate).toBe(22_650n);
+    expect(messages).toContain(`settlement TWAP state loaded path=${statePath} series=1`);
   });
 
   it("marks a first observation inside the window as a reviewed late backfill", async () => {

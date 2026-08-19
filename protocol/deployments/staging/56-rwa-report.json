@@ -1,38 +1,38 @@
 {
   "chainId": 56,
-  "generatedAt": "2026-08-18T03:23:49.249Z",
+  "generatedAt": "2026-08-19T09:45:31.675Z",
   "deployer": "0x1DDAACC770033feCfcFE2a43e3C2a73b8fe3edFd",
   "feedSigner": "0x7a5e6A644A97d1E4Be9a0cd87092C3e9d3b8400c",
   "market": {
-    "id": "NVDA",
-    "displayName": "NVIDIA",
+    "id": "SPY",
+    "displayName": "S&P 500",
     "kind": "equity",
     "enabled": false,
     "collateral": {
-      "symbol": "NVDAB",
-      "address": "0x02Fca66C1D1aFB4E2A7884261eB00F63598a7436",
+      "symbol": "SPYB",
+      "address": "0x7138b48df7D98D7e3cc221BfE7192D0a178182D8",
       "decimals": 18,
       "scaledUi": true
     },
     "contracts": {
-      "marketId": 3,
-      "optionAsset": "0xD5253721A0Abe13edBC9379955F529257Fc9e171",
-      "baseAsset": "0xE380f84625546009E66EAd9364Fa3df209F96f66",
-      "spotFeed": "0x9569DB46A9FC07A18C81EF84643A5bB34b5096C9",
-      "signedSpotFeed": "0xD17b5e5CD77f18B461313647917b8C633B2eE3d4",
-      "forwardFeed": "0xC26370dCC0bA86c43091B56C6F2570eDC05F0Cc6",
-      "volFeed": "0x46268BeC895e1290b32683bDE5678E18e9c8b716",
-      "rateFeed": "0xD1Eec10d11edFCA3CaAC516119F7b9e0EA5E45F8",
-      "settlementFeed": "0x4dC12DEb8514B996F9E1d2A7369c59b8E55146dC",
-      "settlementFixingFeed": "0xF6e9cCbF35242Da3B4920Ed6b4A9A6F3026076C7",
-      "multiplierRegistry": "0x0eDd73fFE1D6539d5dF27b79692E50A799493f91"
+      "marketId": 4,
+      "optionAsset": "0x393e13a7104A6F3FF79BD9B83180C9Df6dB8950D",
+      "baseAsset": "0x1B95BE59fD2167b5a7d70e0647b5306F5fb2D975",
+      "spotFeed": "0x7DcF2a26E80F16ae85F22F412bA6C00c0d94ECF8",
+      "signedSpotFeed": "0xcB1d64B06E3673d8F11acdc69c0AC0d6AE14c1b7",
+      "forwardFeed": "0x53456Ad1C64607c5C8c934e466B31696CF1Aa73B",
+      "volFeed": "0xdCb7A3B0337DdfEEE17a71c81bc6B0905610801d",
+      "rateFeed": "0x31148c7907190a685F34ecaE85B6a411664bCBCF",
+      "settlementFeed": "0xdf1165ee1a6aA82516f5C29E6Ad74bD705d0A443",
+      "settlementFixingFeed": "0x83A12D6c5c122c5666Ac26Ef2313Cf392aa918d7",
+      "multiplierRegistry": "0xe1f96f15f0C4cA688AA4C0F1980dbE6aCC92aA56"
     },
     "oracleProvider": "chainlink",
     "pythPriceId": null,
-    "chainlinkAggregator": "0xea5c2Cbb5cD57daC24E26180b19a929F3E9699B8",
+    "chainlinkAggregator": "0xb24D1DeE5F9a3f761D286B56d2bC44CE1D02DF7e",
     "marketHours": "24/5",
     "strikeIncrement": 5,
-    "riskVolFloor": 0.35,
-    "maxSize": "0.25"
+    "riskVolFloor": 0.2,
+    "maxSize": "0.1"
   }
 }

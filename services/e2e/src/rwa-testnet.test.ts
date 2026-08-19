@@ -221,6 +221,10 @@ describe("RWA testnet deployment helpers", () => {
     await assert.doesNotReject(
       verifyStagingSequence(client as never, { standardManager: A("1") } as never, "NVDA"),
     );
+    lastMarketId = 3n;
+    await assert.doesNotReject(
+      verifyStagingSequence(client as never, { standardManager: A("1") } as never, "SPY"),
+    );
     lastMarketId = 4n;
     await assert.rejects(
       verifyStagingSequence(client as never, { standardManager: A("1") } as never, "SPY"),

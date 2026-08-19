@@ -1,0 +1,31 @@
+{
+  "createdAt": "2026-08-19T10:14:42Z",
+  "chainId": 56,
+  "environment": "mainnet-staging",
+  "baseCommit": "126ae538ce9a0d9506ac9d012f8bf0944af16671",
+  "overlayDigest": "sha256:ba2388268f849ae632b67a49261505376cb3f2e140331842da5e9a37e77c9410",
+  "overlayFiles": [
+    "services/oracle-feeds/src/activeExpiryIndex.ts",
+    "services/oracle-feeds/src/cli.ts",
+    "services/oracle-feeds/src/settlementTwap.ts",
+    "protocol/deployments/staging/56-SPY.json",
+    "protocol/deployments/staging/56-rwa-report.json",
+    "protocol/deployments/staging/markets/56.json"
+  ],
+  "platform": "linux/amd64",
+  "tag": "spy-live-126ae538-ba2388268f84",
+  "images": {
+    "oracleFeeds": {
+      "repository": "985539774899.dkr.ecr.us-east-1.amazonaws.com/hedge/oracle-feeds",
+      "digest": "sha256:55c46536458dbd0210c079f502a868eb2c4d7ebe80ce666336a427387432a700"
+    },
+    "rfqEngine": {
+      "repository": "985539774899.dkr.ecr.us-east-1.amazonaws.com/hedge/rfq-engine",
+      "digest": "sha256:da7cd5dc7e1dc2d309f4de9dfb2c29e9dbbc21a5ebfa1c1e5956e28f899357c4"
+    },
+    "makerBot": {
+      "repository": "985539774899.dkr.ecr.us-east-1.amazonaws.com/hedge/maker-bot",
+      "digest": "sha256:62043e22ea81234b221aebd39eb527ffb14f90bd404a5007846141534368708d"
+    }
+  }
+}

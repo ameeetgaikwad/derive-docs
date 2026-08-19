@@ -37,10 +37,17 @@ export interface SettlementAggregates {
 export class SettlementTwapTracker {
   private readonly statePath: string;
   private readonly chainId: number;
+  private readonly log: (message: string) => void;
   private state: TwapState | null = null;
 
-  constructor(options: { chainId: number; statePath?: string; marketId?: string }) {
+  constructor(options: {
+    chainId: number;
+    statePath?: string;
+    marketId?: string;
+    log?: (message: string) => void;
+  }) {
     this.chainId = options.chainId;
+    this.log = options.log ?? (() => undefined);
     const marketId = options.marketId ?? "BTC";
     this.statePath =
       options.statePath ??
@@ -133,11 +140,13 @@ export class SettlementTwapTracker {
         series.lateStart ??= false;
       }
       this.state = parsed;
+      this.log(`settlement TWAP state loaded path=${this.statePath} series=${parsed.series.length}`);
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
         throw new Error(`cannot load settlement TWAP state: ${(error as Error).message}`);
       }
       this.state = { version: STATE_VERSION, chainId: this.chainId, series: [] };
+      this.log(`settlement TWAP state initialized path=${this.statePath} series=0`);
     }
   }
 

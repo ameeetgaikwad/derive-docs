@@ -42,7 +42,11 @@ import {
   type PythAddresses,
   type PythBatchAddresses,
 } from "./pyth.js";
-import { ActiveExpiryIndex } from "./activeExpiryIndex.js";
+import {
+  ActiveExpiryIndex,
+  discoveryFromBlockForMarket,
+  statePathForMarket,
+} from "./activeExpiryIndex.js";
 import {
   buildOracleExpirySet,
   parseExpiryList,
@@ -95,7 +99,8 @@ Env: RPC_URL (default http://127.0.0.1:8545), CHAIN_ID (default 31337),
      PRICE_SOURCE=static|chainlink, SPOT_PRICE, CHAINLINK_AGGREGATOR,
      STABLE_PRICE_SOURCE=static|chainlink, STABLE_PRICE,
      STABLE_CHAINLINK_AGGREGATOR, STABLE_FEED_INTERVAL_SEC,
-     ORACLE_DISCOVERY_FROM_BLOCK, ORACLE_EXTRA_EXPIRIES, ORACLE_BATCH,
+     ORACLE_DISCOVERY_FROM_BLOCK, ORACLE_DISCOVERY_FROM_BLOCK_<MARKET>,
+     ORACLE_EXTRA_EXPIRIES, ORACLE_BATCH,
      AUTO_SETTLE, PYTH_PUSHER_KMS_KEY_ID or PYTH_PUSHER_PRIVATE_KEY.
 `;
 
@@ -277,17 +282,14 @@ async function cmdDaemon(args: Args): Promise<void> {
     );
   }
 
-  const activeIndex = activeExpiryIndexFromEnv(publicClient, chainId);
-  const twapTracker = new SettlementTwapTracker({
-    chainId,
-    ...(process.env.ORACLE_TWAP_STATE_PATH ? { statePath: process.env.ORACLE_TWAP_STATE_PATH } : {}),
-  });
+  const selectedMarketId = process.env.ORACLE_MARKET ?? "BTC";
+  const activeIndex = activeExpiryIndexFromEnv(publicClient, chainId, selectedMarketId);
+  const twapTracker = settlementTwapTrackerFromEnv(chainId, selectedMarketId, selectedMarketId);
   const allowLateTwapBackfill =
     (process.env.ORACLE_ALLOW_LATE_TWAP_BACKFILL ?? (chainId === 56 ? "false" : "true"))
       .toLowerCase() === "true";
   await activeIndex.sync();
   const activeMarkets = enabledMarkets(readMarketManifest(chainId));
-  const selectedMarketId = process.env.ORACLE_MARKET ?? "BTC";
   const selectedMarket = marketById(readMarketManifest(chainId), selectedMarketId);
   if (!selectedMarket?.enabled || !selectedMarket.contracts) {
     throw new Error(`ORACLE_MARKET ${selectedMarketId} is not enabled`);
@@ -310,11 +312,11 @@ async function cmdDaemon(args: Args): Promise<void> {
         transactionQueue,
       ),
       index: activeExpiryIndexFromEnv(publicClient, chainId, market.id),
-      twap: new SettlementTwapTracker({ chainId, marketId: market.id }),
+      twap: settlementTwapTrackerFromEnv(chainId, market.id, selectedMarketId),
       volatility: configuredRwaVolatility(market),
       rate: configuredRwaRate(market),
     }));
-  await Promise.all(rwaRuntimes.map((runtime) => runtime.index.sync()));
+  for (const runtime of rwaRuntimes) await runtime.index.sync();
 
   const pythDisabled =
     args.bools.has("no-pyth") || (process.env.PYTH_PUSH ?? "").toLowerCase() === "false";
@@ -434,7 +436,7 @@ async function cmdDaemon(args: Args): Promise<void> {
       process.env.ORACLE_DISCOVERY_INTERVAL_SEC ?? "15",
     ), async () => {
       await activeIndex.sync();
-      await Promise.all(rwaRuntimes.map((runtime) => runtime.index.sync()));
+      for (const runtime of rwaRuntimes) await runtime.index.sync();
     }),
   );
   loops.push(
@@ -812,14 +814,16 @@ function activeExpiryIndexFromEnv(
   chainId: number,
   marketId: string = process.env.ORACLE_MARKET ?? "BTC",
 ): ActiveExpiryIndex {
-  const discoveryFromBlock = optionalBigIntEnv("ORACLE_DISCOVERY_FROM_BLOCK");
+  const primaryMarketId = process.env.ORACLE_MARKET ?? "BTC";
+  const discoveryFromBlock = discoveryFromBlockForMarket(process.env, marketId, primaryMarketId);
+  const statePath = process.env.ORACLE_STATE_PATH
+    ? statePathForMarket(process.env.ORACLE_STATE_PATH, marketId, primaryMarketId)
+    : undefined;
   return new ActiveExpiryIndex({
     publicClient,
     chainId,
     marketId,
-    ...(marketId === (process.env.ORACLE_MARKET ?? "BTC") && process.env.ORACLE_STATE_PATH
-      ? { statePath: process.env.ORACLE_STATE_PATH }
-      : {}),
+    ...(statePath ? { statePath } : {}),
     ...(discoveryFromBlock !== undefined ? { fromBlock: discoveryFromBlock } : {}),
     confirmations: BigInt(
       nonNegativeInteger(
@@ -833,6 +837,30 @@ function activeExpiryIndexFromEnv(
         process.env.ORACLE_DISCOVERY_BLOCK_CHUNK ?? "2000",
       ),
     ),
+    logQueryRetries: nonNegativeInteger(
+      "ORACLE_DISCOVERY_LOG_RETRIES",
+      process.env.ORACLE_DISCOVERY_LOG_RETRIES ?? "4",
+    ),
+    retryDelayMs: nonNegativeInteger(
+      "ORACLE_DISCOVERY_RETRY_DELAY_MS",
+      process.env.ORACLE_DISCOVERY_RETRY_DELAY_MS ?? "500",
+    ),
+  });
+}
+
+function settlementTwapTrackerFromEnv(
+  chainId: number,
+  marketId: string,
+  primaryMarketId: string,
+): SettlementTwapTracker {
+  const statePath = process.env.ORACLE_TWAP_STATE_PATH
+    ? statePathForMarket(process.env.ORACLE_TWAP_STATE_PATH, marketId, primaryMarketId)
+    : undefined;
+  return new SettlementTwapTracker({
+    chainId,
+    marketId,
+    ...(statePath ? { statePath } : {}),
+    log: (message) => console.log(`[oracle-feeds] ${message}`),
   });
 }
 

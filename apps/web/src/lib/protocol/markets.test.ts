@@ -9,15 +9,25 @@ import {
 } from "./markets";
 
 describe("multi-asset amount conversion", () => {
-  it("loads enabled NVDA and the disabled SPY placeholder from the mainnet staging manifest", () => {
+  it("loads enabled SPY and NVDA from the mainnet staging manifest", () => {
     const markets = getMarkets(56);
     expect(markets.map((market) => market.id)).toEqual(["BTC", "XAU", "SPY", "NVDA"]);
     expect(markets.filter((market) => market.enabled).map((market) => market.id)).toEqual([
       "BTC",
       "XAU",
+      "SPY",
       "NVDA",
     ]);
     expect(markets[0]?.contracts?.optionAsset).toBe("0x3464351F36fb79Eb06a04785bDaF8DCb8FBC42bc");
+    expect(markets[2]).toMatchObject({
+      id: "SPY",
+      enabled: true,
+      maxSize: "0.1",
+      contracts: {
+        marketId: 4,
+        optionAsset: "0x393e13a7104A6F3FF79BD9B83180C9Df6dB8950D",
+      },
+    });
     expect(markets[3]).toMatchObject({ id: "NVDA", enabled: true, maxSize: "0.25" });
   });
 

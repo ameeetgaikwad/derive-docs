@@ -66,14 +66,26 @@
       "id": "SPY",
       "displayName": "S&P 500",
       "kind": "equity",
-      "enabled": false,
+      "enabled": true,
       "collateral": {
         "symbol": "SPYB",
         "address": "0x7138b48df7D98D7e3cc221BfE7192D0a178182D8",
         "decimals": 18,
         "scaledUi": true
       },
-      "contracts": null,
+      "contracts": {
+        "marketId": 4,
+        "optionAsset": "0x393e13a7104A6F3FF79BD9B83180C9Df6dB8950D",
+        "baseAsset": "0x1B95BE59fD2167b5a7d70e0647b5306F5fb2D975",
+        "spotFeed": "0x7DcF2a26E80F16ae85F22F412bA6C00c0d94ECF8",
+        "signedSpotFeed": "0xcB1d64B06E3673d8F11acdc69c0AC0d6AE14c1b7",
+        "forwardFeed": "0x53456Ad1C64607c5C8c934e466B31696CF1Aa73B",
+        "volFeed": "0xdCb7A3B0337DdfEEE17a71c81bc6B0905610801d",
+        "rateFeed": "0x31148c7907190a685F34ecaE85B6a411664bCBCF",
+        "settlementFeed": "0xdf1165ee1a6aA82516f5C29E6Ad74bD705d0A443",
+        "settlementFixingFeed": "0x83A12D6c5c122c5666Ac26Ef2313Cf392aa918d7",
+        "multiplierRegistry": "0xe1f96f15f0C4cA688AA4C0F1980dbE6aCC92aA56"
+      },
       "oracleProvider": "chainlink",
       "pythPriceId": null,
       "chainlinkAggregator": "0xb24D1DeE5F9a3f761D286B56d2bC44CE1D02DF7e",
