@@ -38,16 +38,20 @@ accordingly.
 The connected wallet receives an enumerable list from the RFQ engine's
 `GET /subaccounts` directory. The browser treats those IDs as candidates and
 live-validates the logical owner, StandardManager, Matching NFT custodian, and
-current balances in one multicall before rendering the selector. The user must
-choose an account explicitly or create another; the directory list and selected
-account ID are not written to local storage.
+current balances in one multicall before rendering the selector. After that live
+validation, the browser automatically selects the last account chosen for the
+current wallet, chain, and Matching deployment. If no cached account is still
+valid, it selects the validated account with the lowest numeric ID. Only that
+scoped decimal account ID is written to local storage; directory results and
+balances remain memory-only, and a cached ID never becomes active before live
+validation succeeds.
 
 If the directory request fails, the browser scans wallet-filtered
 `DepositedSubAccount` logs from the deployment's recorded
 `matchingDeploymentBlock`, then applies the same live validation. A failed API
 or RPC request is shown as an error, never as an empty account list. A newly
 confirmed `Matching.createSubAccount` receipt is decoded, validated, inserted,
-and selected immediately while the directory catches up asynchronously.
+selected, and cached immediately while the directory catches up asynchronously.
 
 ## Checks
 

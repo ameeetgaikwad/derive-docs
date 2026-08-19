@@ -1,5 +1,8 @@
+// @vitest-environment jsdom
+
 import { beforeEach, describe, expect, it } from "vitest";
 import {
+  subaccountSelectionStorageKey,
   subaccountScopeKey,
   useAccountStore,
   type SubaccountSummary,
@@ -16,21 +19,74 @@ const accounts: SubaccountSummary[] = [
   { accountId: 57n, cashBalance: -5n, nonZeroBalanceCount: 2 },
 ];
 
-describe("session subaccount state", () => {
+describe("scoped subaccount state", () => {
   beforeEach(() => {
-    useAccountStore.getState().setScope(null);
-    useAccountStore.getState().setSelectionLocked(false);
+    window.localStorage.clear();
+    useAccountStore.setState({
+      scopeKey: null,
+      accounts: [],
+      selectedAccountId: null,
+      rememberedAccountId: null,
+      selectionLocked: false,
+    });
   });
 
-  it("does not install persistence middleware or auto-select a discovered account", () => {
+  it("selects and caches the lowest discovered account when no preference exists", () => {
     expect((useAccountStore as unknown as { persist?: unknown }).persist).toBeUndefined();
+
+    const state = useAccountStore.getState();
+    state.setScope(scope);
+    state.replaceAccounts(scope, [...accounts].reverse());
+
+    expect(useAccountStore.getState().accounts).toEqual(accounts);
+    expect(useAccountStore.getState().selectedAccountId).toBe(42n);
+    expect(window.localStorage.getItem(subaccountSelectionStorageKey(scope))).toBe("42");
+  });
+
+  it("restores a cached selection only after it appears in the validated directory", () => {
+    const state = useAccountStore.getState();
+    state.setScope(scope);
+    state.replaceAccounts(scope, accounts);
+    state.selectAccount(scope, 57n);
+
+    state.setScope(null);
+    state.setScope(scope);
+    expect(useAccountStore.getState().selectedAccountId).toBeNull();
+
+    state.replaceAccounts(scope, accounts);
+    expect(useAccountStore.getState().selectedAccountId).toBe(57n);
+  });
+
+  it("replaces a stale cached id with the lowest validated account", () => {
+    window.localStorage.setItem(subaccountSelectionStorageKey(scope), "999");
 
     const state = useAccountStore.getState();
     state.setScope(scope);
     state.replaceAccounts(scope, accounts);
 
-    expect(useAccountStore.getState().accounts).toEqual(accounts);
-    expect(useAccountStore.getState().selectedAccountId).toBeNull();
+    expect(useAccountStore.getState().selectedAccountId).toBe(42n);
+    expect(window.localStorage.getItem(subaccountSelectionStorageKey(scope))).toBe("42");
+  });
+
+  it("isolates remembered selections by wallet, chain, and Matching deployment", () => {
+    const otherScope = subaccountScopeKey(
+      "0x3333333333333333333333333333333333333333",
+      97,
+      "0x4444444444444444444444444444444444444444",
+    );
+    const state = useAccountStore.getState();
+    state.setScope(scope);
+    state.replaceAccounts(scope, accounts);
+    state.selectAccount(scope, 57n);
+
+    state.setScope(otherScope);
+    state.replaceAccounts(otherScope, [
+      { accountId: 81n, cashBalance: 0n, nonZeroBalanceCount: 0 },
+    ]);
+
+    expect(useAccountStore.getState().selectedAccountId).toBe(81n);
+    expect(window.localStorage.getItem(subaccountSelectionStorageKey(scope))).toBe("57");
+    expect(window.localStorage.getItem(subaccountSelectionStorageKey(otherScope))).toBe("81");
   });
 
   it("keeps an explicit selection only while wallet, chain, and Matching scope are unchanged", () => {
@@ -39,6 +95,7 @@ describe("session subaccount state", () => {
     state.replaceAccounts(scope, accounts);
     state.selectAccount(scope, 57n);
     expect(useAccountStore.getState().selectedAccountId).toBe(57n);
+    expect(window.localStorage.getItem(subaccountSelectionStorageKey(scope))).toBe("57");
 
     state.setScope(
       subaccountScopeKey(
@@ -66,6 +123,7 @@ describe("session subaccount state", () => {
       81n,
     ]);
     expect(useAccountStore.getState().selectedAccountId).toBe(81n);
+    expect(window.localStorage.getItem(subaccountSelectionStorageKey(scope))).toBe("81");
   });
 
   it("blocks selection changes while a trade owns the account context", () => {

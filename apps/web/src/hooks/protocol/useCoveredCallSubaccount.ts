@@ -24,6 +24,7 @@ import {
   type SubaccountValidationSnapshot,
 } from "@/lib/protocol/subaccounts";
 import {
+  readRememberedSubaccountId,
   subaccountScopeKey,
   useAccountStore,
 } from "@/stores/account";
@@ -37,7 +38,7 @@ const RPC_FALLBACK_BLOCK_CHUNK = 2_000n;
  * The user's covered-call subaccount under Matching (SRM-managed).
  *
  * The directory supplies candidate ids. Every candidate is validated against
- * current protocol state before it reaches the session-only selector.
+ * current protocol state before it can become the active selection.
  */
 export function useCoveredCallSubaccount() {
   const { address } = useAccount();
@@ -207,20 +208,28 @@ export function useCoveredCallSubaccount() {
     refetchOnWindowFocus: false,
     queryFn: async () => {
       if (!address || !scopeKey) throw new Error("Wallet not connected");
+      const includeRememberedAccount = (accountIds: bigint[]) => {
+        const state = useAccountStore.getState();
+        const remembered = state.scopeKey === scopeKey
+          ? state.selectedAccountId ?? state.rememberedAccountId
+          : readRememberedSubaccountId(scopeKey);
+        return remembered === null || accountIds.includes(remembered)
+          ? accountIds
+          : [...accountIds, remembered];
+      };
       return discoverSubaccounts(
         { owner: address, chainId, matching: addresses.matching },
         {
           loadDirectory: async () => {
             const directory = await getSubaccountDirectory(address, chainId);
-            const selected = useAccountStore.getState().selectedAccountId;
-            return selected === null || directory.accountIds.includes(selected)
-              ? directory
-              : { ...directory, accountIds: [...directory.accountIds, selected] };
+            return {
+              ...directory,
+              accountIds: includeRememberedAccount(directory.accountIds),
+            };
           },
           scanDeposits: async () => {
             const ids = await scanDeposits();
-            const selected = useAccountStore.getState().selectedAccountId;
-            return selected === null || ids.includes(selected) ? ids : [...ids, selected];
+            return includeRememberedAccount(ids);
           },
           validateCandidates,
         },

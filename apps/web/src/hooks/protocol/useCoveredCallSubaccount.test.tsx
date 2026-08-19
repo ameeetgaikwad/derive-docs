@@ -6,7 +6,11 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import { encodeEventTopics } from "viem";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { matchingAbi } from "@/lib/protocol/abis";
-import { useAccountStore } from "@/stores/account";
+import {
+  subaccountSelectionStorageKey,
+  subaccountScopeKey,
+  useAccountStore,
+} from "@/stores/account";
 import { useCoveredCallSubaccount } from "./useCoveredCallSubaccount";
 
 const OWNER = "0x1111111111111111111111111111111111111111" as const;
@@ -64,6 +68,7 @@ function wrapper({ children }: { children: ReactNode }) {
 describe("useCoveredCallSubaccount", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    window.localStorage.clear();
     queryClient = new QueryClient({
       defaultOptions: { queries: { retry: false } },
     });
@@ -71,6 +76,8 @@ describe("useCoveredCallSubaccount", () => {
       scopeKey: null,
       accounts: [],
       selectedAccountId: null,
+      rememberedAccountId: null,
+      selectionLocked: false,
     });
     mocks.getSubaccountDirectory.mockResolvedValue({
       chainId: 97,
@@ -115,25 +122,33 @@ describe("useCoveredCallSubaccount", () => {
     });
   });
 
-  it("discovers validated ids without auto-selecting, then inserts and selects a receipt id", async () => {
+  it("auto-selects the lowest validated id, then inserts and selects a receipt id", async () => {
     const { result } = renderHook(() => useCoveredCallSubaccount(), { wrapper });
 
     await waitFor(() => expect(result.current.accounts).toHaveLength(1));
-    expect(result.current.subaccountId).toBeNull();
+    expect(result.current.subaccountId).toBe(7n);
     expect(result.current.accounts[0]).toEqual({
       accountId: 7n,
       cashBalance: 5n * 10n ** 18n,
       nonZeroBalanceCount: 1,
     });
 
-    act(() => result.current.selectSubaccount(7n));
-    expect(result.current.subaccountId).toBe(7n);
-
     await act(async () => {
       expect(await result.current.createSubaccount()).toBe(12n);
     });
     await waitFor(() => expect(result.current.subaccountId).toBe(12n));
     expect(result.current.accounts.map((account) => account.accountId)).toContain(12n);
+  });
+
+  it("includes and restores a cached account while the directory catches up", async () => {
+    const scope = subaccountScopeKey(OWNER, 97, MATCHING);
+    window.localStorage.setItem(subaccountSelectionStorageKey(scope), "6");
+
+    const { result } = renderHook(() => useCoveredCallSubaccount(), { wrapper });
+
+    await waitFor(() => expect(result.current.accounts).toHaveLength(2));
+    expect(result.current.accounts.map((account) => account.accountId)).toEqual([6n, 7n]);
+    expect(result.current.subaccountId).toBe(6n);
   });
 
   it("chunks the wallet-filtered RPC fallback only after a directory failure", async () => {
