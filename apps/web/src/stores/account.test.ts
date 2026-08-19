@@ -17,7 +17,10 @@ const accounts: SubaccountSummary[] = [
 ];
 
 describe("session subaccount state", () => {
-  beforeEach(() => useAccountStore.getState().setScope(null));
+  beforeEach(() => {
+    useAccountStore.getState().setScope(null);
+    useAccountStore.getState().setSelectionLocked(false);
+  });
 
   it("does not install persistence middleware or auto-select a discovered account", () => {
     expect((useAccountStore as unknown as { persist?: unknown }).persist).toBeUndefined();
@@ -63,5 +66,20 @@ describe("session subaccount state", () => {
       81n,
     ]);
     expect(useAccountStore.getState().selectedAccountId).toBe(81n);
+  });
+
+  it("blocks selection changes while a trade owns the account context", () => {
+    const state = useAccountStore.getState();
+    state.setScope(scope);
+    state.replaceAccounts(scope, accounts);
+    state.selectAccount(scope, 42n);
+    state.setSelectionLocked(true);
+
+    state.selectAccount(scope, 57n);
+    expect(useAccountStore.getState().selectedAccountId).toBe(42n);
+
+    state.setSelectionLocked(false);
+    state.selectAccount(scope, 57n);
+    expect(useAccountStore.getState().selectedAccountId).toBe(57n);
   });
 });

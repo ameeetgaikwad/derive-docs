@@ -71,6 +71,7 @@ resource "aws_ecs_task_definition" "rfq_engine" {
         { name = "HOST", value = "0.0.0.0" },
         { name = "PORT", value = "3030" },
         { name = "SUBACCOUNT_DIRECTORY_TABLE", value = aws_dynamodb_table.subaccount_directory.name },
+        { name = "SUBACCOUNT_DIRECTORY_CHUNK_SIZE", value = "1000" },
         { name = "SATS_DEPLOYMENTS_DIR", value = "/app/protocol/deployments/staging" },
         { name = "HEDGE_MARKETS_DIR", value = "/app/protocol/deployments/staging/markets" },
         { name = "TAKER_OPEN", value = "true" },

@@ -303,7 +303,7 @@ describe("covered-call quote rail", () => {
     const onRequestQuote = vi.fn();
     renderTicket({ hasSubaccount: false, depositedBalance: 0, onRequestQuote });
 
-    const button = screen.getByRole("button", { name: "Choose a subaccount above" });
+    const button = screen.getByRole("button", { name: "Choose a subaccount in the navigation" });
     expect((button as HTMLButtonElement).disabled).toBe(true);
     await user.click(button);
     expect(onRequestQuote).not.toHaveBeenCalled();

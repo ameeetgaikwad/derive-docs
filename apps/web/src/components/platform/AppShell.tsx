@@ -6,6 +6,7 @@ import { ConnectButton } from "@rainbow-me/rainbowkit";
 import { ExternalLink, FlaskConical, User, WalletIcon } from "lucide-react";
 import { useAccount, useSwitchChain } from "wagmi";
 import { NavbarLogo } from "@/components/root/navbar-logo";
+import { SubaccountMenu } from "@/components/platform/SubaccountMenu";
 import { Text } from "@/components/ui/text";
 import { useBtcbBalance, useMintBtcb } from "@/hooks/protocol/useBtcb";
 import { useNetwork } from "@/hooks/protocol/useNetwork";
@@ -86,6 +87,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 </button>
               ))}
             </div>
+            {isConnected && <SubaccountMenu />}
             {isConnected && isTestnet && (
               <details className="group relative hidden sm:block">
                 <summary

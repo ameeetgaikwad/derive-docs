@@ -51,11 +51,12 @@ and separate ALBs isolate them.
 5. Publish the reviewed RFQ, oracle, and maker images. The images must contain
    `protocol/deployments/staging/56.json` and its staging market manifest.
 6. Set only `rfq_engine_desired_count` to one and apply. Check its CloudWatch
-   startup preflight and `curl http://<alb-dns>/health`. The directory starts
-   at Matching block `115317084`, recorded as `matchingDeploymentBlock` in
-   `protocol/deployments/staging/56.json`; wait for
-   `GET /subaccounts?owner=<wallet>` to return checkpoint metadata before
-   treating the account list as synchronized.
+startup preflight and `curl http://<alb-dns>/health`. The directory starts
+at Matching block `115317084`, recorded as `matchingDeploymentBlock` in
+`protocol/deployments/staging/56.json`; wait for
+`GET /subaccounts?owner=<wallet>` to return checkpoint metadata before
+treating the account list as synchronized. Its RPC log scan uses 1,000-block
+chunks, verified against the configured staging provider.
 7. Stop every local chain-56 oracle, set `oracle_feeds_desired_count` to one,
    and apply again. The task pins `ORACLE_DISCOVERY_FROM_BLOCK=115316790`, the
    staging `SubAccounts` deployment block, because ordinary BNB RPC endpoints

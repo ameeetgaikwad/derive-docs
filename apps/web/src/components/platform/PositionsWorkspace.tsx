@@ -5,7 +5,6 @@ import { useConnectModal } from "@rainbow-me/rainbowkit";
 import { ArrowRight } from "lucide-react";
 import { useAccount } from "wagmi";
 import { CoveredCallPositions } from "@/components/earn/CoveredCallPositions";
-import { SubaccountSelector } from "@/components/shared/SubaccountSelector";
 import { usePositions } from "@/hooks/protocol/usePositionMonitor";
 
 export function PositionsWorkspace() {
@@ -21,14 +20,12 @@ export function PositionsWorkspace() {
         <p className="mt-3 max-w-2xl text-sm font-medium leading-6 text-zinc-500 sm:text-base">Collateral, moneyness, expiry, settlement status, and execution receipts.</p>
       </div>
 
-      {isConnected && <SubaccountSelector />}
-
       {!isConnected ? (
         <EmptyState title="Connect your wallet to load positions" text="Position balances and settlement status are read from the connected wallet’s on-chain covered-call account." action={<button type="button" onClick={openConnectModal} className="inline-flex min-h-11 items-center gap-2 rounded-[5px] bg-zinc-950 px-5 text-sm font-semibold text-white">Connect wallet <ArrowRight className="size-4" /></button>} />
       ) : !isLoading && subaccountId === null ? (
         <EmptyState
           title="Choose a trading subaccount"
-          text="Select one of your validated on-chain accounts above, or create another account."
+          text="Choose one of your validated on-chain accounts from the navigation, or create another account there."
           action={
             <Link href="/app" className="inline-flex min-h-11 items-center gap-2 rounded-[5px] bg-zinc-950 px-5 text-sm font-semibold text-white">Start a covered call <ArrowRight className="size-4" /></Link>
           }

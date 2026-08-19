@@ -22,6 +22,7 @@ import { useCollateralBalance, useDepositCollateral } from "@/hooks/protocol/use
 import { useOIFeeEstimate } from "@/hooks/protocol/useOIFeeEstimate";
 import { usePositionMonitor } from "@/hooks/protocol/usePositionMonitor";
 import { useSellCall } from "@/hooks/protocol/useSellCall";
+import { useSubaccountSelectionLock } from "@/hooks/protocol/useSubaccountSelectionLock";
 import { useBitcoinPriceHistory } from "@/hooks/useBitcoinPriceHistory";
 import { explorerTxUrl } from "@/lib/protocol/deployments";
 import { assertRfqEngineChain } from "@/lib/protocol/rfq-engine";
@@ -29,7 +30,6 @@ import { amountExceedsLimit, fromUnit, toUnit } from "@/lib/protocol/units";
 import { getSelectableMarkets, uiAmount18ToRaw18, type MarketId } from "@/lib/protocol/markets";
 import { useCoveredCallStore } from "@/stores/covered-call";
 import { useNetwork } from "@/hooks/protocol/useNetwork";
-import { SubaccountSelector } from "@/components/shared/SubaccountSelector";
 
 const DEFAULT_AMOUNT = "0.5";
 const DEFAULT_AMOUNTS: Record<MarketId, string> = {
@@ -196,6 +196,7 @@ export default function CoveredCallTrade({
     "done",
   ].includes(sellCall.phase);
   const controlsLocked = setupPhase !== "idle" || sellBusy || doneInfo !== null;
+  useSubaccountSelectionLock(controlsLocked);
 
   const handleExpiryChange = useCallback(
     (expiry: number) => {
@@ -415,8 +416,6 @@ export default function CoveredCallTrade({
         disabled={controlsLocked}
         onMarketChange={handleMarketChange}
       />
-
-      {isConnected && <SubaccountSelector disabled={controlsLocked} />}
 
       <div className="grid min-w-0 min-[960px]:grid-cols-[minmax(0,1fr)_360px]">
         <TradeConfigurator

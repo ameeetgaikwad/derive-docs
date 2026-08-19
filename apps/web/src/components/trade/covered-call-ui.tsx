@@ -1003,7 +1003,9 @@ function primaryAction({
 }): { label: string; disabled: boolean } {
   if (done) return { label: "Sell another call", disabled: false };
   if (!isConnected) return { label: "Connect wallet to continue", disabled: false };
-  if (!hasSubaccount) return { label: "Choose a subaccount above", disabled: true };
+  if (!hasSubaccount) {
+    return { label: "Choose a subaccount in the navigation", disabled: true };
+  }
   if (amountNumber <= 0) return { label: `Enter ${collateralSymbol} amount`, disabled: true };
   if (insufficient) return { label: `Insufficient ${collateralSymbol}`, disabled: true };
   if (exceedsMaximum) return { label: "Amount exceeds maximum", disabled: true };

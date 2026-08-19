@@ -11,9 +11,11 @@ interface AccountState {
   scopeKey: string | null;
   accounts: SubaccountSummary[];
   selectedAccountId: bigint | null;
+  selectionLocked: boolean;
   setScope: (scopeKey: string | null) => void;
   replaceAccounts: (scopeKey: string, accounts: SubaccountSummary[]) => void;
   selectAccount: (scopeKey: string, accountId: bigint | null) => void;
+  setSelectionLocked: (selectionLocked: boolean) => void;
   upsertAccount: (
     scopeKey: string,
     account: SubaccountSummary,
@@ -41,6 +43,7 @@ export const useAccountStore = create<AccountState>()((set) => ({
   scopeKey: null,
   accounts: [],
   selectedAccountId: null,
+  selectionLocked: false,
 
   setScope: (scopeKey) =>
     set((state) =>
@@ -63,7 +66,7 @@ export const useAccountStore = create<AccountState>()((set) => ({
 
   selectAccount: (scopeKey, accountId) =>
     set((state) => {
-      if (state.scopeKey !== scopeKey) return state;
+      if (state.scopeKey !== scopeKey || state.selectionLocked) return state;
       if (
         accountId !== null &&
         !state.accounts.some((account) => account.accountId === accountId)
@@ -72,6 +75,8 @@ export const useAccountStore = create<AccountState>()((set) => ({
       }
       return { selectedAccountId: accountId };
     }),
+
+  setSelectionLocked: (selectionLocked) => set({ selectionLocked }),
 
   upsertAccount: (scopeKey, account, select) =>
     set((state) => {
