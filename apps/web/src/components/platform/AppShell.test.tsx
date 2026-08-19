@@ -4,6 +4,7 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AppShell } from "./AppShell";
+import { useFundsStore } from "@/stores/funds";
 
 const mocks = vi.hoisted(() => ({
   pathname: "/app",
@@ -64,6 +65,9 @@ vi.mock("@/hooks/protocol/useCoveredCallSubaccount", () => ({
   }),
 }));
 vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
+vi.mock("@/components/funds/FundsModal", () => ({
+  FundsModal: ({ open }: { open: boolean }) => open ? <div role="dialog">Funds dialog</div> : null,
+}));
 
 function ActiveAccount({ view }: { view: string }): React.JSX.Element {
   return <p>{view} consumes account #{mocks.selectedAccountId.toString()}</p>;
@@ -74,6 +78,7 @@ describe("AppShell account context", () => {
     mocks.pathname = "/app";
     mocks.selectedAccountId = 7n;
     vi.clearAllMocks();
+    useFundsStore.setState({ isOpen: false });
   });
 
   it("keeps a navbar selection as the context consumed across app routes", async () => {
@@ -90,5 +95,13 @@ describe("AppShell account context", () => {
     rerender(<AppShell><ActiveAccount view="Positions" /></AppShell>);
     expect(screen.getByRole("button", { name: /trading subaccount #9/i })).toBeTruthy();
     expect(screen.getByText("Positions consumes account #9")).toBeTruthy();
+  });
+
+  it("opens Manage funds from the account action", async () => {
+    const user = userEvent.setup();
+    render(<AppShell><ActiveAccount view="Options" /></AppShell>);
+    await user.click(screen.getByRole("button", { name: /trading subaccount #7/i }));
+    await user.click(screen.getByRole("menuitem", { name: /manage funds/i }));
+    expect(screen.getByRole("dialog")).toBeTruthy();
   });
 });

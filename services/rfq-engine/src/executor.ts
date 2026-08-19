@@ -1,7 +1,19 @@
-import type { Hex } from "viem";
+import { keccak256, type Hex } from "viem";
 import { encodeRfqFillData, type Action } from "@hedge/shared";
-import { buildVerifyAndMatchCalldata, type TxSubmitter } from "./chain.js";
-import type { ExecutionResult, FillSummary, Quote, Rfq } from "./types.js";
+import {
+  UNKNOWN_BROADCAST_OPERATION,
+  buildVerifyAndMatchCalldata,
+  type TxSubmitter,
+  type VerifyAndMatchReconciliation,
+} from "./chain.js";
+import type {
+  ExecutionResult,
+  FillSummary,
+  Quote,
+  Rfq,
+  RfqActionIdentity,
+  RfqExecutionIntent,
+} from "./types.js";
 
 export interface RfqExecutionPlan {
   /** [makerAction, takerAction] — RfqModule.executeAction expects exactly this order */
@@ -78,11 +90,60 @@ export class Executor {
     return this.submitter.executorAddress;
   }
 
-  async execute(plan: RfqExecutionPlan): Promise<ExecutionResult> {
+  /** Rebuild the shared executor latch for a durable, unresolved RFQ. */
+  pauseForUnknownExecution(rfqId: string): void {
+    this.submitter.pauseForUnknownOperation?.(`rfq:${rfqId}`);
+  }
+
+  async createExecutionIntent(plan: RfqExecutionPlan): Promise<RfqExecutionIntent> {
+    const identity = (action: Action): RfqActionIdentity => ({
+      subaccountId: action.subaccountId,
+      nonce: action.nonce,
+      module: action.module,
+      expiry: action.expiry,
+      owner: action.owner,
+      signer: action.signer,
+      dataHash: keccak256(action.data),
+    });
+    return {
+      actions: [identity(plan.actions[0]), identity(plan.actions[1])],
+      calldataHash: keccak256(plan.calldata),
+      fromBlock: await (this.submitter.currentBlockNumber?.() ?? Promise.resolve(0n)),
+      txHash: null,
+      fill: plan.fill,
+    };
+  }
+
+  armExecutionRecovery(rfqId: string, txHash: Hex | null): void {
+    this.pauseForUnknownExecution(rfqId);
+    if (txHash) this.submitter.adoptUnresolvedTransaction?.(txHash);
+  }
+
+  async reconcileExecution(intent: RfqExecutionIntent): Promise<VerifyAndMatchReconciliation> {
+    return this.submitter.reconcileVerifyAndMatch?.({
+      txHash: intent.txHash,
+      calldataHash: intent.calldataHash,
+      actions: intent.actions,
+      fromBlock: intent.fromBlock,
+    }) ?? { state: "pending" };
+  }
+
+  /** Call only after the RFQ terminal state has been durably persisted. */
+  clearExecutionRecovery(rfqId: string, txHash: Hex | null, wasHashless: boolean): void {
+    this.submitter.clearUnknownOperation?.(`rfq:${rfqId}`);
+    if (txHash) this.submitter.clearUnresolvedTransaction?.(txHash);
+    if (wasHashless) this.submitter.clearUnknownOperation?.(UNKNOWN_BROADCAST_OPERATION);
+  }
+
+  async execute(
+    plan: RfqExecutionPlan,
+    onSubmitted?: (txHash: Hex) => Promise<void>,
+  ): Promise<ExecutionResult> {
     const result = await this.submitter.submitVerifyAndMatch(
       plan.actions,
       plan.signatures,
       plan.actionData,
+      onSubmitted,
     );
     return {
       txHash: result.txHash,

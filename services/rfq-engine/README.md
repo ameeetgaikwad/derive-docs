@@ -48,6 +48,10 @@ script) and verifies on-chain that the executor key is registered via
 | `RFQ_RATE_LIMIT_PER_MIN` | `30` | RFQ creations allowed per IP per minute (REST `POST /rfq` **and** taker-WS `create_rfq`); over-limit ⇒ `429` / WS error. `0` disables |
 | `TRUST_PROXY` | `false` | trust the first `X-Forwarded-For` address for rate limiting; enable only when security groups/firewalls block direct container access |
 | `STORE_PATH` | unset (in-memory) | path to a JSONL file for durable auctions + trade history (see Persistence) |
+| `WITHDRAWALS_ENABLED` | `false` | fail-closed switch for preview/prepare/submit; status reads remain available |
+| `FUNDS_STORE_PATH` | unset | dedicated fsynced withdrawal-operation JSONL; required off Anvil when withdrawals are enabled |
+| `WITHDRAWAL_PREVIEW_RATE_LIMIT_PER_MIN` | `6` | pinned max previews per IP per minute; `0` disables |
+| `WITHDRAWAL_EXECUTION_RATE_LIMIT_PER_MIN` | `12` | prepare + submit requests per IP per minute; `0` disables |
 | `SUBACCOUNT_DIRECTORY_TABLE` | unset (disabled) | DynamoDB table for the focused Matching subaccount directory |
 | `SUBACCOUNT_DIRECTORY_DEPLOYMENT_BLOCK` | `matchingDeploymentBlock` from deployments JSON | optional Matching event-scan origin override |
 | `SUBACCOUNT_DIRECTORY_CONFIRMATIONS` | `6` (`0` on anvil) | blocks held behind the chain head before indexing |
@@ -91,6 +95,58 @@ connection dedupe, accept-deadline expiry, heartbeat drops, the fee-aware
 collateral pre-check, rate limiting and JSONL restart recovery.
 
 ## API
+
+### Collateral withdrawals
+
+All amounts are wrapped-token native units encoded as decimal strings. Clients
+select only canonical IDs (`cash` or `market:<deployed-market-id>`); contract
+addresses are resolved and checked by the service.
+
+- `POST /withdrawals/preview` with `{ owner, subaccountId, assetId }` pins one
+  canonical block and returns balance/debt/margin diagnostics plus exact
+  `protocolMaxTokenUnits`, buffered `recommendedMaxTokenUnits`, metadata,
+  multiplier, cash exchange-rate/temporary-fee diagnostics, blocker, block
+  hash, and a 30-second expiry. Cash fails closed with
+  `CASH_WITHDRAWALS_BLOCKED` while the temporary insolvency fee is active:
+  the signed action fixes stablecoin received but cannot cap the variable
+  internal cash burn. Collateral previews remain contract-authoritative.
+- `POST /withdrawals` requires `Idempotency-Key` and
+  `{ owner, subaccountId, assetId, tokenUnits, previewBlockHash }`. It reruns
+  the policy and exact simulation at latest state, then returns the immutable
+  `{ withdrawalId, action, typedData, review }` to sign. Same owner/key/body
+  replays the same persisted action; a changed body conflicts.
+- `POST /withdrawals/:id/submit` accepts only `{ signature }`, returns `202`,
+  and progresses asynchronously through `submitting` / `submitted` to
+  `confirmed`, `reverted`, `rejected`, or fail-closed `unknown`.
+- `GET /withdrawals/:id` returns the durable operation and remains available
+  while new withdrawal mutations are disabled.
+
+The executor serializes RFQ and withdrawal writes. Final preflight runs inside
+that queue and the shared per-subaccount reservation lock; an ambiguous
+broadcast or restart pauses later writes until exact nonce/event/receipt
+evidence reconciles it; receipts are accepted only while their block hash is
+canonical. A hashless action that is canonically past expiry with its module
+nonce unused becomes terminal `expired` and releases its latches. The
+operation journal never stores user signatures.
+
+V1 treats the first currently canonical receipt as terminal because the
+approved API has no separate mined/finalized state. Before enabling withdrawals
+on chain 97 or 56, operators must choose a chain-specific confirmation-depth
+policy, exercise reorg handling in the rollout canary, and alert on any receipt
+that loses canonicality; production enablement remains blocked until that
+policy is documented and monitored.
+
+An RFQ broadcast/receipt ambiguity is likewise not reported as a terminal
+failure: the RFQ stays `executing`, its maker reservation remains held, and
+the shared writer is latched. Before broadcast, the fsynced RFQ record stores
+the two non-signature action identities, exact calldata digest, fill, and block
+anchor; the tx hash is fsynced by the submit callback before receipt waiting.
+Startup and `GET /rfq/:id` reconcile a known hash from an exact canonical
+transaction, or a hashless success from the module nonce event plus that same
+calldata digest. If both actions are canonically expired and both module nonces
+remain unused, the attempt fails terminally and releases the writer. Every
+other ambiguous outcome stays `executing` and reserved. A request rejected
+before its own broadcast by an older latch returns to `closed`.
 
 ### Subaccount directory
 
@@ -293,8 +349,9 @@ open ──window ends──▶ closed (winner, acceptDeadlineAt set) ──acce
 ## Persistence (`STORE_PATH`)
 
 `STORE_PATH=/var/lib/hedge/rfq.jsonl` switches the store from in-memory to an
-append-only JSONL log + in-memory index (no native deps; safe against torn
-final lines). Every RFQ/quote mutation is appended; on boot the engine
+append-only, fsync-on-every-mutation JSONL log + in-memory index (no native
+deps; safe against torn final lines). Every RFQ/quote mutation is appended;
+on boot the engine
 replays the log and then `recover()`s:
 
 - open auctions whose window is still running are re-armed (close timer +
@@ -303,9 +360,10 @@ replays the log and then `recover()`s:
   quote selected, accept deadline armed);
 - closed auctions past their accept deadline are expired; still-live ones get
   their deadline timer re-armed;
-- RFQs caught in `executing` are marked `failed` with
-  "engine restarted during execution — verify on-chain state manually" (the
-  engine never blindly resubmits);
+- RFQs caught in `executing` reinstall the shared-writer latch, rebuild the
+  winning reservation, and reconcile exact canonical evidence without ever
+  resubmitting; exact success/revert and expired-with-both-nonces-unused become
+  durable terminal states, while missing/mismatched evidence stays latched;
 - executed/failed/expired RFQs are kept as durable trade history.
 
 The in-memory store remains the default (tests, dev). The log is never

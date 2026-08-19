@@ -131,10 +131,14 @@ export async function httpJson<T>(
   method: string,
   url: string,
   body?: unknown,
+  headers?: Record<string, string>,
 ): Promise<{ status: number; json: T }> {
   const res = await fetch(url, {
     method,
-    headers: body !== undefined ? { "content-type": "application/json" } : undefined,
+    headers:
+      body !== undefined || headers
+        ? { ...(body !== undefined ? { "content-type": "application/json" } : {}), ...headers }
+        : undefined,
     body: body !== undefined ? JSON.stringify(body) : undefined,
   });
   const json = (await res.json()) as T;

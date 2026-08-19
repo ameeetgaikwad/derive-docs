@@ -144,6 +144,27 @@ export const wrappedErc20AssetAbi = [
   },
 ] as const;
 
+/** CashAsset accepts its wrapped ERC-20 in native token units. */
+export const cashAssetAbi = [
+  {
+    type: "function",
+    name: "calculateBalanceWithInterest",
+    inputs: [{ name: "accountId", type: "uint256", internalType: "uint256" }],
+    outputs: [{ name: "balance", type: "int256", internalType: "int256" }],
+    stateMutability: "nonpayable",
+  },
+  {
+    type: "function",
+    name: "deposit",
+    inputs: [
+      { name: "recipientAccount", type: "uint256", internalType: "uint256" },
+      { name: "assetAmount", type: "uint256", internalType: "uint256" },
+    ],
+    outputs: [],
+    stateMutability: "nonpayable",
+  },
+] as const;
+
 /** Mock BTCB/USDT on testnet: standard ERC20 plus an unrestricted mint. */
 export const mockErc20Abi = [
   {

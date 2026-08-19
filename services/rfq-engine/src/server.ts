@@ -6,6 +6,11 @@ import { AuctionEngine } from "./auction.js";
 import { QuoteValidationError } from "./quotes.js";
 import { marketStatus, type PublicMarketStatus } from "./markets.js";
 import type { SubaccountDirectoryReader } from "./subaccount-directory.js";
+import { WithdrawalEngine } from "./withdrawal.js";
+import {
+  WithdrawalApiError,
+  type WithdrawalAssetId,
+} from "./withdrawal-types.js";
 import type { MarketDefinition } from "@hedge/shared";
 import {
   addressEq,
@@ -72,6 +77,11 @@ export interface RfqEngineServerOptions {
   marketStatusProvider?: (market: MarketDefinition) => Promise<PublicMarketStatus>;
   /** Event-derived candidate directory; contract reads remain authoritative. */
   subaccountDirectory?: SubaccountDirectoryReader;
+  /** Canonical collateral withdrawal workflow; omitted only in focused legacy tests. */
+  withdrawals?: WithdrawalEngine;
+  withdrawalsEnabled?: boolean;
+  withdrawalPreviewRateLimitPerMin?: number;
+  withdrawalExecutionRateLimitPerMin?: number;
 }
 
 /** Fixed-window-ish per-key rate limiter (sliding 60s window of timestamps). */
@@ -128,6 +138,10 @@ export class RfqEngineServer {
   private readonly markets: MarketDefinition[];
   private readonly marketStatusProvider: (market: MarketDefinition) => Promise<PublicMarketStatus>;
   private readonly subaccountDirectory: SubaccountDirectoryReader | undefined;
+  private readonly withdrawals: WithdrawalEngine | undefined;
+  private readonly withdrawalsEnabled: boolean;
+  private readonly withdrawalPreviewLimiter: RateLimiter;
+  private readonly withdrawalExecutionLimiter: RateLimiter;
 
   constructor(opts: RfqEngineServerOptions) {
     this.engine = opts.engine;
@@ -145,6 +159,14 @@ export class RfqEngineServer {
     this.markets = opts.markets ?? [];
     this.marketStatusProvider = opts.marketStatusProvider ?? (async (market) => marketStatus(market));
     this.subaccountDirectory = opts.subaccountDirectory;
+    this.withdrawals = opts.withdrawals;
+    this.withdrawalsEnabled = opts.withdrawalsEnabled ?? false;
+    this.withdrawalPreviewLimiter = new RateLimiter(
+      opts.withdrawalPreviewRateLimitPerMin ?? 6,
+    );
+    this.withdrawalExecutionLimiter = new RateLimiter(
+      opts.withdrawalExecutionRateLimitPerMin ?? 12,
+    );
 
     this.httpServer = createServer((req, res) => {
       this.handleHttp(req, res).catch((err) => {
@@ -213,7 +235,8 @@ export class RfqEngineServer {
   }
 
   async stop(): Promise<void> {
-    this.engine.stop();
+    // Focused HTTP embedders may provide a read-only engine facade.
+    (this.engine as AuctionEngine & { stop?: () => void }).stop?.();
     if (this.heartbeatTimer) {
       clearInterval(this.heartbeatTimer);
       this.heartbeatTimer = null;
@@ -321,6 +344,90 @@ export class RfqEngineServer {
             message: "subaccount directory is not ready",
           },
         });
+      }
+    }
+
+    if (req.method === "POST" && path === "/withdrawals/preview") {
+      if (!this.withdrawals) return withdrawalUnavailable(res);
+      if (!this.withdrawalsEnabled) return withdrawalsDisabled(res);
+      if (!this.withdrawalPreviewLimiter.allow(this.clientIp(req))) {
+        return withdrawalRateLimited(res);
+      }
+      try {
+        const body = await readWithdrawalBody(req);
+        assertExactKeys(body, ["owner", "subaccountId", "assetId"]);
+        const preview = await this.withdrawals.preview({
+          owner: asWithdrawalAddress(body.owner, "owner"),
+          subaccountId: asDecimalString(body.subaccountId, "subaccountId"),
+          assetId: asWithdrawalAssetId(body.assetId),
+        });
+        return sendJson(res, 200, { preview });
+      } catch (error) {
+        return sendWithdrawalError(res, error);
+      }
+    }
+
+    if (req.method === "POST" && path === "/withdrawals") {
+      if (!this.withdrawals) return withdrawalUnavailable(res);
+      if (!this.withdrawalsEnabled) return withdrawalsDisabled(res);
+      if (!this.withdrawalExecutionLimiter.allow(this.clientIp(req))) {
+        return withdrawalRateLimited(res);
+      }
+      try {
+        const body = await readWithdrawalBody(req);
+        assertExactKeys(body, [
+          "owner",
+          "subaccountId",
+          "assetId",
+          "tokenUnits",
+          "previewBlockHash",
+        ]);
+        const rawKey = req.headers["idempotency-key"];
+        const idempotencyKey = Array.isArray(rawKey) ? rawKey[0] ?? "" : rawKey ?? "";
+        const prepared = await this.withdrawals.prepare(
+          {
+            owner: asWithdrawalAddress(body.owner, "owner"),
+            subaccountId: asDecimalString(body.subaccountId, "subaccountId"),
+            assetId: asWithdrawalAssetId(body.assetId),
+            tokenUnits: asDecimalString(body.tokenUnits, "tokenUnits"),
+            previewBlockHash: asWithdrawalHex(body.previewBlockHash, "previewBlockHash"),
+          },
+          idempotencyKey,
+        );
+        return sendJson(res, prepared.replayed ? 200 : 201, prepared.response);
+      } catch (error) {
+        return sendWithdrawalError(res, error);
+      }
+    }
+
+    const withdrawalMatch = path.match(/^\/withdrawals\/([0-9a-fA-F-]{8,64})$/);
+    if (req.method === "GET" && withdrawalMatch) {
+      if (!this.withdrawals) return withdrawalUnavailable(res);
+      try {
+        return sendJson(res, 200, await this.withdrawals.get(withdrawalMatch[1] as string));
+      } catch (error) {
+        return sendWithdrawalError(res, error);
+      }
+    }
+
+    const submitWithdrawalMatch = path.match(
+      /^\/withdrawals\/([0-9a-fA-F-]{8,64})\/submit$/,
+    );
+    if (req.method === "POST" && submitWithdrawalMatch) {
+      if (!this.withdrawals) return withdrawalUnavailable(res);
+      if (!this.withdrawalsEnabled) return withdrawalsDisabled(res);
+      if (!this.withdrawalExecutionLimiter.allow(this.clientIp(req))) {
+        return withdrawalRateLimited(res);
+      }
+      try {
+        const body = await readWithdrawalBody(req);
+        assertExactKeys(body, ["signature"]);
+        const response = await this.withdrawals.submit(submitWithdrawalMatch[1] as string, {
+          signature: asWithdrawalHex(body.signature, "signature"),
+        });
+        return sendJson(res, 202, response);
+      } catch (error) {
+        return sendWithdrawalError(res, error);
       }
     }
 
@@ -657,7 +764,7 @@ export class RfqEngineServer {
 const CORS_HEADERS = {
   "access-control-allow-origin": "*",
   "access-control-allow-methods": "GET, POST, OPTIONS",
-  "access-control-allow-headers": "content-type",
+  "access-control-allow-headers": "content-type, idempotency-key",
   "access-control-max-age": "86400",
 } as const;
 
@@ -694,4 +801,125 @@ async function readJsonBody(req: IncomingMessage): Promise<unknown> {
 
 function errMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
+}
+
+function asObject(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new WithdrawalApiError(400, "INVALID_REQUEST", "request body must be a JSON object");
+  }
+  return value as Record<string, unknown>;
+}
+
+async function readWithdrawalBody(req: IncomingMessage): Promise<Record<string, unknown>> {
+  try {
+    return asObject(await readJsonBody(req));
+  } catch (error) {
+    if (error instanceof WithdrawalApiError) throw error;
+    const tooLarge = error instanceof Error && error.message === "request body too large";
+    throw new WithdrawalApiError(
+      tooLarge ? 413 : 400,
+      tooLarge ? "REQUEST_TOO_LARGE" : "INVALID_REQUEST",
+      tooLarge ? "request body exceeds the size limit" : "request body is not valid JSON",
+    );
+  }
+}
+
+function asWithdrawalAddress(value: unknown, label: string): Address {
+  try {
+    return asAddress(value, label);
+  } catch {
+    throw new WithdrawalApiError(400, "INVALID_REQUEST", `${label} must be a valid EVM address`);
+  }
+}
+
+function asWithdrawalHex(value: unknown, label: string): `0x${string}` {
+  try {
+    return asHex(value, label);
+  } catch {
+    throw new WithdrawalApiError(400, "INVALID_REQUEST", `${label} must be valid even-length hex`);
+  }
+}
+
+function asDecimalString(value: unknown, label: string): string {
+  if (typeof value !== "string" || !/^(0|[1-9]\d*)$/.test(value)) {
+    throw new WithdrawalApiError(400, "INVALID_REQUEST", `${label} must be a decimal integer string`);
+  }
+  return value;
+}
+
+function assertExactKeys(body: Record<string, unknown>, allowed: string[]): void {
+  const expected = new Set(allowed);
+  const keys = Object.keys(body);
+  const unknown = keys.filter((key) => !expected.has(key));
+  const missing = allowed.filter((key) => !(key in body));
+  if (unknown.length > 0 || missing.length > 0) {
+    throw new WithdrawalApiError(
+      400,
+      "INVALID_REQUEST",
+      "request body does not match the endpoint schema",
+      false,
+      {
+        unknownFields: unknown.join(","),
+        missingFields: missing.join(","),
+      },
+    );
+  }
+}
+
+function asWithdrawalAssetId(value: unknown): WithdrawalAssetId {
+  if (value === "cash") return value;
+  if (typeof value === "string" && /^market:[A-Za-z0-9_-]+$/.test(value)) {
+    return value as WithdrawalAssetId;
+  }
+  throw new WithdrawalApiError(
+    400,
+    "UNSUPPORTED_ASSET",
+    "assetId must be cash or market:<deployed-market-id>",
+  );
+}
+
+function withdrawalUnavailable(res: ServerResponse): void {
+  sendJson(res, 503, {
+    error: {
+      code: "WITHDRAWALS_UNAVAILABLE",
+      message: "withdrawal engine is not configured",
+      retryable: true,
+    },
+  });
+}
+
+function withdrawalsDisabled(res: ServerResponse): void {
+  sendJson(res, 503, {
+    error: {
+      code: "WITHDRAWALS_DISABLED",
+      message: "withdrawal mutations are disabled",
+      retryable: false,
+    },
+  });
+}
+
+function withdrawalRateLimited(res: ServerResponse): void {
+  sendJson(res, 429, {
+    error: {
+      code: "RATE_LIMITED",
+      message: "withdrawal request rate limit exceeded",
+      retryable: true,
+    },
+  });
+}
+
+function sendWithdrawalError(res: ServerResponse, error: unknown): void {
+  if (error instanceof WithdrawalApiError) {
+    return sendJson(res, error.httpStatus, { error: error.body });
+  }
+  // Keep provider URLs, headers, and viem internals out of the public envelope.
+  // eslint-disable-next-line no-console
+  console.error("withdrawal request failed:", error);
+  return sendJson(res, 503, {
+    error: {
+      code: "CHAIN_UNAVAILABLE",
+      message: "the chain preflight service is temporarily unavailable",
+      retryable: true,
+    },
+  });
 }

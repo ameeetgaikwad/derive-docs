@@ -3,10 +3,14 @@ import { privateKeyToAccount } from "viem/accounts";
 import { describe, expect, it } from "vitest";
 import {
   buildAction,
+  buildWithdrawalAction,
+  decodeWithdrawData,
   encodeDepositData,
   encodeTransferData,
   encodeWithdrawData,
+  generateNonce,
   getActionDigest,
+  getActionTypedData,
   getDomainSeparator,
   hashActionTypedData,
   signAction,
@@ -78,8 +82,36 @@ describe("Action signing", () => {
     expect(getDomainSeparator(97, MATCHING)).not.toBe(a);
   });
 
+  it("generates browser/server-safe uint256 nonces with full-width entropy", () => {
+    const nonces = Array.from({ length: 64 }, () => generateNonce());
+    const uint256Max = (1n << 256n) - 1n;
+
+    expect(new Set(nonces).size).toBe(nonces.length);
+    expect(nonces.every((nonce) => nonce >= 0n && nonce <= uint256Max)).toBe(true);
+    // A timestamp/random suffix nonce is far below this boundary. Web Crypto
+    // output exceeds it with overwhelming probability.
+    expect(nonces.some((nonce) => nonce >= 1n << 128n)).toBe(true);
+  });
+
+  it("returns the canonical wallet-signable Action typed data", () => {
+    expect(getActionTypedData(action, CHAIN_ID, MATCHING)).toEqual({
+      domain: {
+        name: "Matching",
+        version: "1.0",
+        chainId: CHAIN_ID,
+        verifyingContract: MATCHING,
+      },
+      types: ACTION_TYPES,
+      primaryType: "Action",
+      message: action,
+    });
+  });
+
   it("module data encodings round-trip with abi.decode shapes", () => {
-    const withdraw = encodeWithdrawData({ asset: MODULE, assetAmount: 5n });
+    // 1.234567 units of a six-decimal token. WithdrawalModule passes this
+    // integer through unchanged; the helper must not scale it to 18 decimals.
+    const nativeTokenAmount = 1_234_567n;
+    const withdraw = encodeWithdrawData({ asset: MODULE, assetAmount: nativeTokenAmount });
     const [w] = decodeAbiParameters(
       [
         {
@@ -92,7 +124,24 @@ describe("Action signing", () => {
       ],
       withdraw,
     );
-    expect(w.assetAmount).toBe(5n);
+    expect(w.assetAmount).toBe(nativeTokenAmount);
+    expect(decodeWithdrawData(withdraw)).toEqual({
+      asset: MODULE,
+      assetAmount: nativeTokenAmount,
+    });
+
+    const withdrawalAction = buildWithdrawalAction({
+      subaccountId: 7n,
+      withdrawalModule: MODULE,
+      asset: MODULE,
+      assetAmount: nativeTokenAmount,
+      owner: account.address,
+      nonce: 99n,
+      expiry: 1_900_000_000n,
+    });
+    expect(withdrawalAction.module).toBe(MODULE);
+    expect(withdrawalAction.signer).toBe(account.address);
+    expect(decodeWithdrawData(withdrawalAction.data).assetAmount).toBe(nativeTokenAmount);
 
     const transfer = encodeTransferData({
       toAccountId: 7n,

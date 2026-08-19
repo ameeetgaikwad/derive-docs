@@ -1,4 +1,5 @@
 import {
+  decodeAbiParameters,
   encodeAbiParameters,
   encodePacked,
   hashDomain,
@@ -12,7 +13,6 @@ import {
   ACTION_TYPES,
   MATCHING_DOMAIN_NAME,
   MATCHING_DOMAIN_VERSION,
-  matchingDomain,
 } from "./constants.js";
 
 /**
@@ -47,9 +47,22 @@ export interface TypedDataSigner {
   }): Promise<Hex>;
 }
 
-/** Millisecond-timestamp-based nonce, unique enough for off-chain order flow. */
+const UINT256_BYTES = 32;
+
+/**
+ * Cryptographically secure uint256 nonce for signed Matching actions.
+ *
+ * Web Crypto is available in supported browsers and Node 22+, so this remains
+ * browser/server-safe without a Node-only `crypto` import. Module replay
+ * protection treats the nonce as an opaque uint256 scoped by owner.
+ */
 export function generateNonce(): bigint {
-  return BigInt(Date.now()) * 1000n + BigInt(Math.floor(Math.random() * 1000));
+  const bytes = new Uint8Array(UINT256_BYTES);
+  globalThis.crypto.getRandomValues(bytes);
+
+  let nonce = 0n;
+  for (const byte of bytes) nonce = (nonce << 8n) | BigInt(byte);
+  return nonce;
 }
 
 /** Unix-seconds expiry, `durationSeconds` from now (default 10 minutes). */
@@ -153,17 +166,22 @@ export function hashActionTypedData(
   chainId: number,
   matchingAddress: Address,
 ): Hex {
-  return hashTypedData({
-    domain: matchingDomain(chainId, matchingAddress) as {
-      name: string;
-      version: string;
-      chainId: number;
-      verifyingContract: Address;
+  return hashTypedData(getActionTypedData(action, chainId, matchingAddress));
+}
+
+/** Canonical wallet-signable EIP-712 payload for browser and server clients. */
+export function getActionTypedData(action: Action, chainId: number, matchingAddress: Address) {
+  return {
+    domain: {
+      name: MATCHING_DOMAIN_NAME,
+      version: MATCHING_DOMAIN_VERSION,
+      chainId,
+      verifyingContract: matchingAddress,
     },
     types: ACTION_TYPES,
-    primaryType: "Action",
+    primaryType: "Action" as const,
     message: action,
-  });
+  };
 }
 
 /**
@@ -178,17 +196,7 @@ export async function signAction(params: {
   matchingAddress: Address;
 }): Promise<Hex> {
   const { action, signer, chainId, matchingAddress } = params;
-  return signer.signTypedData({
-    domain: {
-      name: MATCHING_DOMAIN_NAME,
-      version: MATCHING_DOMAIN_VERSION,
-      chainId,
-      verifyingContract: matchingAddress,
-    },
-    types: ACTION_TYPES,
-    primaryType: "Action",
-    message: action,
-  });
+  return signer.signTypedData(getActionTypedData(action, chainId, matchingAddress));
 }
 
 // ---------------------------------------------------------------------------
@@ -222,24 +230,63 @@ export function encodeDepositData(params: {
   );
 }
 
-/**
- * IWithdrawalModule.WithdrawalData { address asset; uint assetAmount; }
- * NOTE: assetAmount is the *asset* (shares/18dp) amount passed to
- * IERC20BasedAsset.withdraw, not token-native units for CashAsset.
- */
-export function encodeWithdrawData(params: { asset: Address; assetAmount: bigint }): Hex {
-  return encodeAbiParameters(
-    [
-      {
-        type: "tuple",
-        components: [
-          { name: "asset", type: "address" },
-          { name: "assetAmount", type: "uint256" },
-        ],
-      },
+export interface WithdrawalData {
+  asset: Address;
+  /** Exact wrapped-token amount in native token decimals. */
+  assetAmount: bigint;
+}
+
+const WITHDRAWAL_DATA_PARAMETERS = [
+  {
+    type: "tuple",
+    components: [
+      { name: "asset", type: "address" },
+      { name: "assetAmount", type: "uint256" },
     ],
+  },
+] as const;
+
+/**
+ * IWithdrawalModule.WithdrawalData { address asset; uint assetAmount; }.
+ *
+ * `assetAmount` is passed unchanged to IERC20BasedAsset.withdraw and therefore
+ * uses the wrapped token's native decimals for both WrappedERC20Asset and
+ * CashAsset. It is not an 18-decimal SubAccounts balance.
+ */
+export function encodeWithdrawData(params: WithdrawalData): Hex {
+  return encodeAbiParameters(
+    WITHDRAWAL_DATA_PARAMETERS,
     [params],
   );
+}
+
+/** Decode the exact WithdrawalData tuple consumed by WithdrawalModule. */
+export function decodeWithdrawData(data: Hex): WithdrawalData {
+  const [decoded] = decodeAbiParameters(WITHDRAWAL_DATA_PARAMETERS, data);
+  return { asset: decoded.asset, assetAmount: decoded.assetAmount };
+}
+
+/** Build a single-owner WithdrawalModule action with canonical action data. */
+export function buildWithdrawalAction(params: {
+  subaccountId: bigint;
+  withdrawalModule: Address;
+  asset: Address;
+  /** Exact wrapped-token amount in native token decimals. */
+  assetAmount: bigint;
+  owner: Address;
+  signer?: Address;
+  nonce?: bigint;
+  expiry?: bigint;
+}): Action {
+  return buildAction({
+    subaccountId: params.subaccountId,
+    module: params.withdrawalModule,
+    data: encodeWithdrawData({ asset: params.asset, assetAmount: params.assetAmount }),
+    owner: params.owner,
+    signer: params.signer,
+    nonce: params.nonce,
+    expiry: params.expiry,
+  });
 }
 
 export interface TransferItem {

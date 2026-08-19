@@ -9,10 +9,12 @@
  *   POST /rfq (sell 1x BTC 110k call, 7d) -> bot quotes (Black-76 on the
  *   posted feeds) -> taker signs TakerOrder -> engine executes
  *   Matching.verifyAndMatch on-chain -> balance assertions (option/cash/BTCB,
- *   OI fees, SRM margin) -> evm_snapshot -> warp + settle OTM -> evm_revert ->
- *   warp + settle ITM -> final balance assertions.
+ *   OI fees, SRM margin) -> signed executor-backed partial BTCB withdrawal ->
+ *   evm_revert -> warp + settle OTM -> evm_revert -> warp + settle ITM ->
+ *   direct wallet-to-CashAsset USDT repayment -> final balance assertions.
  *
- * One command: `pnpm e2e` (from services/e2e). Results: protocol/E2E.md.
+ * One command: `pnpm e2e` (from services/e2e). Results: protocol/E2E.md unless
+ * E2E_REPORT_PATH directs validation output elsewhere.
  * Every spawned process (anvil, rfq-engine, maker-bot) is killed on exit.
  */
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -21,6 +23,7 @@ import { fileURLToPath } from "node:url";
 import {
   createTestClient,
   http,
+  parseAbi,
   toHex,
   type Address,
   type Hex,
@@ -31,11 +34,15 @@ import {
 import { mnemonicToAccount, privateKeyToAccount, type PrivateKeyAccount } from "viem/accounts";
 import { foundry } from "viem/chains";
 import {
+  cashAssetAbi,
   buildAction,
+  decodeWithdrawData,
   encodeOptionSubId,
   encodeSpotData,
   encodeTakerOrder,
   fromUnit,
+  generateNonce,
+  getActionTypedData,
   getDeployedAddress,
   lyraForwardFeedAbi,
   lyraSpotFeedAbi,
@@ -50,6 +57,7 @@ import {
   subAccountsAbi,
   toUnit,
   wrappedErc20AssetAbi,
+  type Action,
   type DeploymentsFile,
 } from "@hedge/shared";
 import { FeedPoster, feedAddressesFromDeployments } from "@hedge/oracle-feeds";
@@ -74,7 +82,9 @@ const SERVICES_DIR = resolve(HERE, "..", "..");
 const ROOT = resolve(SERVICES_DIR, "..");
 const PROTOCOL_DIR = join(ROOT, "protocol");
 const DEPLOYMENTS_DIR = join(PROTOCOL_DIR, "deployments");
-const E2E_MD = join(PROTOCOL_DIR, "E2E.md");
+const E2E_MD = process.env.E2E_REPORT_PATH
+  ? resolve(process.env.E2E_REPORT_PATH)
+  : join(PROTOCOL_DIR, "E2E.md");
 const TMP_DIR = join(SERVICES_DIR, "e2e", ".tmp");
 
 const CHAIN_ID = 31337;
@@ -96,14 +106,16 @@ const MAKER_USDT_DEPOSIT = "150000"; // maker cash (token units, 18dp on BNB)
 const OTM_SETTLEMENT = toUnit("90000"); // below strike -> option expires worthless
 const ITM_SETTLEMENT = toUnit("130000"); // above strike -> payout 20k/option
 
-// OI fee per DeployAll.s.sol: viewer rate 0.1e18, SRM minOIFee 10e18.
-const OI_FEE_RATE = toUnit("0.1");
-const MIN_OI_FEE = toUnit("10");
 const ONE = 10n ** 18n;
+const srmViewerAbi = parseAbi([
+  "function OIFeeRateBPS(address asset) view returns (uint256)",
+]);
 
 // interest accrues on the taker's borrow during the 7-day warp; settlement
 // cash assertions use this absolute tolerance (USDT, 18dp).
 const SETTLE_TOL = toUnit("25");
+const DIRECT_REPAY_AMOUNT = toUnit("1000");
+const WITHDRAWAL_POLL_TIMEOUT_MS = 60_000;
 
 // ---------------------------------------------------------------------------
 // Accounts (derived from the anvil mnemonic — see oracle-feeds report on
@@ -173,6 +185,24 @@ async function getBalance(ctx: Ctx, sub: bigint, asset: Address, subId: bigint):
     functionName: "getBalance",
     args: [sub, asset, subId],
   }) as Promise<bigint>;
+}
+
+async function getTokenBalance(ctx: Ctx, token: Address, owner: Address): Promise<bigint> {
+  return ctx.publicClient.readContract({
+    address: token,
+    abi: mockErc20Abi,
+    functionName: "balanceOf",
+    args: [owner],
+  }) as Promise<bigint>;
+}
+
+async function getSubaccountNftOwner(ctx: Ctx, subaccountId: bigint): Promise<Address> {
+  return ctx.publicClient.readContract({
+    address: ctx.addr("subAccounts"),
+    abi: subAccountsAbi,
+    functionName: "ownerOf",
+    args: [subaccountId],
+  }) as Promise<Address>;
 }
 
 interface Balances {
@@ -462,6 +492,8 @@ async function stageServicesUp(ctx: Ctx): Promise<void> {
       AUCTION_WINDOW_MS: "4000",
       SATS_DEPLOYMENTS_DIR: DEPLOYMENTS_DIR,
       EXECUTOR_PRIVATE_KEY: DEPLOYER_KEY, // registered trade executor
+      WITHDRAWALS_ENABLED: "true",
+      FUNDS_STORE_PATH: join(TMP_DIR, "funds.jsonl"),
     },
   });
   await waitFor("rfq-engine /health", async () => {
@@ -500,6 +532,151 @@ interface RfqStatus {
   bestQuote: BestQuote | null;
   execution: { txHash: string; status: string; blockNumber: string | null } | null;
   error: string | null;
+}
+
+type WithdrawalStatus =
+  | "prepared"
+  | "submitting"
+  | "submitted"
+  | "confirmed"
+  | "rejected"
+  | "reverted"
+  | "expired"
+  | "unknown";
+
+interface SerializedAction {
+  subaccountId: string;
+  nonce: string;
+  module: Address;
+  data: Hex;
+  expiry: string;
+  owner: Address;
+  signer: Address;
+}
+
+interface WithdrawalErrorBody {
+  code: string;
+  message: string;
+  retryable: boolean;
+  details?: Record<string, string | number | boolean | null>;
+}
+
+interface WithdrawalPreviewResponse {
+  preview: {
+    chainId: number;
+    matching: Address;
+    withdrawalModule: Address;
+    owner: Address;
+    subaccountId: string;
+    asset: {
+      assetId: string;
+      kind: "cash" | "market-collateral";
+      marketId: string | null;
+      symbol: string;
+      assetAddress: Address;
+      tokenAddress: Address;
+      tokenDecimals: number;
+      scaledUi: boolean;
+    };
+    internalBalance: string;
+    balanceTokenUnits: string;
+    cashWithInterest: string | null;
+    debtTokenUnits: string;
+    margin: {
+      initial: { margin: string; markToMarket: string };
+      maintenance: { margin: string; markToMarket: string };
+    };
+    protocolMaxTokenUnits: string;
+    recommendedMaxTokenUnits: string;
+    multiplier: string;
+    blockNumber: string;
+    blockHash: Hex;
+    checkedAt: number;
+    expiresAt: number;
+    blocker: { code: string; message: string } | null;
+  };
+}
+
+interface PublicWithdrawal {
+  id: string;
+  status: WithdrawalStatus;
+  chainId: number;
+  matching: Address;
+  owner: Address;
+  subaccountId: string;
+  asset: WithdrawalPreviewResponse["preview"]["asset"];
+  tokenUnits: string;
+  maxWithdrawableAtPrepare: string;
+  previewBlockHash: Hex;
+  preparedAtBlockNumber: string;
+  preparedAtBlockHash: Hex;
+  action: SerializedAction;
+  actionDigest: Hex;
+  createdAt: number;
+  expiresAt: number;
+  submittedAt: number | null;
+  confirmedAt: number | null;
+  txHash: Hex | null;
+  blockNumber: string | null;
+  error: WithdrawalErrorBody | null;
+}
+
+interface PrepareWithdrawalResponse {
+  withdrawalId: string;
+  action: SerializedAction;
+  typedData: {
+    domain: {
+      name: string;
+      version: string;
+      chainId: number;
+      verifyingContract: Address;
+    };
+    types: {
+      Action: readonly { readonly name: string; readonly type: string }[];
+    };
+    primaryType: "Action";
+    message: SerializedAction;
+  };
+  review: {
+    recipient: Address;
+    assetId: string;
+    assetAddress: Address;
+    tokenAddress: Address;
+    tokenUnits: string;
+    displayAmount: string;
+    tokenDecimals: number;
+    multiplier: string;
+    preparedBlockNumber: string;
+    preparedBlockHash: Hex;
+  };
+}
+
+interface WithdrawalResponse {
+  withdrawal: PublicWithdrawal;
+}
+
+interface WithdrawalErrorResponse {
+  error: WithdrawalErrorBody;
+}
+
+function actionFromWire(action: SerializedAction): Action {
+  return {
+    subaccountId: BigInt(action.subaccountId),
+    nonce: BigInt(action.nonce),
+    module: action.module,
+    data: action.data,
+    expiry: BigInt(action.expiry),
+    owner: action.owner,
+    signer: action.signer,
+  };
+}
+
+function idempotencyKey(label: string): string {
+  return `e2e-${label}-${generateNonce().toString(16).padStart(64, "0")}`;
+}
+
+function addressEq(actual: string, expected: string): boolean {
+  return actual.toLowerCase() === expected.toLowerCase();
 }
 
 async function stageAuction(ctx: Ctx): Promise<RfqStatus> {
@@ -595,17 +772,34 @@ async function stageExecute(ctx: Ctx, st: RfqStatus): Promise<{ premium: bigint;
   assert(res.json.status === "success", `execution status ${res.json.status}`);
   stage.tx(`verifyAndMatch executed (block ${res.json.blockNumber})`, res.json.txHash);
 
-  // expected OI fee (charged to BOTH sides, paid to fee recipient subaccount):
-  // max(|delta| * forward * 0.1, 10) per StandardManager/_payFee + SRMPortfolioViewer
-  const [fwd] = (await ctx.publicClient.readContract({
-    address: ctx.addr("btcForwardFeed"),
-    abi: lyraForwardFeedAbi,
-    functionName: "getForwardPrice",
-    args: [ctx.expiry],
-  })) as [bigint, bigint];
-  let fee = (((AMOUNT * fwd) / ONE) * OI_FEE_RATE) / ONE;
-  if (fee < MIN_OI_FEE) fee = MIN_OI_FEE;
-  stage.note(`expected OI fee per side: ${fromUnit(fee)} USDT (rate 0.1 x forward ${fromUnit(fwd)}, min 10)`);
+  // Expected OI fee (charged to BOTH sides, paid to the fee recipient
+  // subaccount). Both parameters are governance-settable, so acceptance must
+  // use the deployed values rather than duplicating deploy-script defaults.
+  const [[fwd], oiFeeRate, minOIFee] = await Promise.all([
+    ctx.publicClient.readContract({
+      address: ctx.addr("btcForwardFeed"),
+      abi: lyraForwardFeedAbi,
+      functionName: "getForwardPrice",
+      args: [ctx.expiry],
+    }) as Promise<readonly [bigint, bigint]>,
+    ctx.publicClient.readContract({
+      address: ctx.addr("srmViewer"),
+      abi: srmViewerAbi,
+      functionName: "OIFeeRateBPS",
+      args: [ctx.addr("btcOptionAsset")],
+    }),
+    ctx.publicClient.readContract({
+      address: ctx.addr("standardManager"),
+      abi: standardManagerAbi,
+      functionName: "minOIFee",
+    }),
+  ]);
+  let fee = (((AMOUNT * fwd) / ONE) * oiFeeRate) / ONE;
+  if (fee > 0n && fee < minOIFee) fee = minOIFee;
+  stage.note(
+    `expected OI fee per side: ${fromUnit(fee)} USDT ` +
+      `(live rate ${fromUnit(oiFeeRate)} x forward ${fromUnit(fwd)}, live min ${fromUnit(minOIFee)})`,
+  );
 
   const post = await readBalances(ctx);
   balanceTable(stage, "after execution", post);
@@ -643,13 +837,446 @@ async function stageExecute(ctx: Ctx, st: RfqStatus): Promise<{ premium: bigint;
   return { premium, post, fee };
 }
 
+async function pollWithdrawalConfirmed(withdrawalId: string): Promise<PublicWithdrawal> {
+  const deadline = Date.now() + WITHDRAWAL_POLL_TIMEOUT_MS;
+  for (;;) {
+    const response = await httpJson<WithdrawalResponse | WithdrawalErrorResponse>(
+      "GET",
+      `${ENGINE_URL}/withdrawals/${withdrawalId}`,
+    );
+    assert(response.status === 200, `GET withdrawal -> ${response.status}: ${JSON.stringify(response.json)}`);
+    assert("withdrawal" in response.json, `GET withdrawal returned error: ${JSON.stringify(response.json)}`);
+
+    const withdrawal = response.json.withdrawal;
+    if (withdrawal.status === "confirmed") return withdrawal;
+    if (["rejected", "reverted", "expired", "unknown"].includes(withdrawal.status)) {
+      throw new Error(
+        `withdrawal ${withdrawal.id} reached terminal status ${withdrawal.status}: ${JSON.stringify(withdrawal.error)}`,
+      );
+    }
+    if (Date.now() >= deadline) {
+      throw new Error(
+        `withdrawal ${withdrawal.id} did not confirm within ${WITHDRAWAL_POLL_TIMEOUT_MS}ms (last status ${withdrawal.status})`,
+      );
+    }
+    await sleep(200);
+  }
+}
+
+async function requestWithdrawalPreview(
+  owner: Address,
+  subaccountId: bigint,
+  assetId: "cash" | "market:BTC",
+): Promise<WithdrawalPreviewResponse["preview"]> {
+  const response = await httpJson<WithdrawalPreviewResponse | WithdrawalErrorResponse>(
+    "POST",
+    `${ENGINE_URL}/withdrawals/preview`,
+    { owner, subaccountId: subaccountId.toString(), assetId },
+  );
+  assert(
+    response.status === 200,
+    `POST withdrawal preview (${assetId}) -> ${response.status}: ${JSON.stringify(response.json)}`,
+  );
+  assert("preview" in response.json, `withdrawal preview error: ${JSON.stringify(response.json)}`);
+  return response.json.preview;
+}
+
+async function executePreparedWithdrawal(params: {
+  ctx: Ctx;
+  owner: PrivateKeyAccount;
+  subaccountId: bigint;
+  assetId: "cash" | "market:BTC";
+  tokenUnits: bigint;
+  previewBlockHash: Hex;
+  idempotencyLabel: string;
+}): Promise<PublicWithdrawal> {
+  const preparedResponse = await httpJson<PrepareWithdrawalResponse | WithdrawalErrorResponse>(
+    "POST",
+    `${ENGINE_URL}/withdrawals`,
+    {
+      owner: params.owner.address,
+      subaccountId: params.subaccountId.toString(),
+      assetId: params.assetId,
+      tokenUnits: params.tokenUnits.toString(),
+      previewBlockHash: params.previewBlockHash,
+    },
+    { "Idempotency-Key": idempotencyKey(params.idempotencyLabel) },
+  );
+  assert(
+    preparedResponse.status === 201,
+    `POST prepare withdrawal (${params.assetId}) -> ${preparedResponse.status}: ${JSON.stringify(preparedResponse.json)}`,
+  );
+  assert(
+    "withdrawalId" in preparedResponse.json,
+    `prepare withdrawal error: ${JSON.stringify(preparedResponse.json)}`,
+  );
+  const prepared = preparedResponse.json;
+  assertEq(BigInt(prepared.review.tokenUnits), params.tokenUnits, "prepared token-native amount");
+  assert(addressEq(prepared.review.recipient, params.owner.address), "prepared recipient must be owner");
+
+  const action = actionFromWire(prepared.action);
+  const signature = await signAction({
+    action,
+    signer: params.owner,
+    chainId: CHAIN_ID,
+    matchingAddress: params.ctx.addr("matching"),
+  });
+  const submitResponse = await httpJson<WithdrawalResponse | WithdrawalErrorResponse>(
+    "POST",
+    `${ENGINE_URL}/withdrawals/${prepared.withdrawalId}/submit`,
+    { signature },
+  );
+  assert(
+    submitResponse.status === 202,
+    `POST submit withdrawal (${params.assetId}) -> ${submitResponse.status}: ${JSON.stringify(submitResponse.json)}`,
+  );
+  assert("withdrawal" in submitResponse.json, `submit withdrawal error: ${JSON.stringify(submitResponse.json)}`);
+  assert(
+    ["submitting", "submitted", "confirmed"].includes(submitResponse.json.withdrawal.status),
+    `unexpected accepted submission status ${submitResponse.json.withdrawal.status}`,
+  );
+  return pollWithdrawalConfirmed(prepared.withdrawalId);
+}
+
+async function stagePausedWithdrawalBlocker(ctx: Ctx): Promise<void> {
+  const stage = ctx.report.stage("withdrawal preview: contract adjustments pause blocks funds");
+  const snapshotId = await ctx.testClient.snapshot();
+  try {
+    const guardianTx = await writeTx(ctx, ctx.deployerWallet, deployer, {
+      address: ctx.addr("standardManager"),
+      abi: standardManagerAbi,
+      functionName: "setGuardian",
+      args: [deployer.address],
+    });
+    stage.tx("set deployer as temporary StandardManager guardian", guardianTx);
+    const pauseTx = await writeTx(ctx, ctx.deployerWallet, deployer, {
+      address: ctx.addr("standardManager"),
+      abi: standardManagerAbi,
+      functionName: "setAdjustmentsPaused",
+      args: [true],
+    });
+    stage.tx("guardian pauses StandardManager adjustments", pauseTx);
+
+    const preview = await requestWithdrawalPreview(
+      taker.address,
+      ctx.takerSubaccount,
+      "market:BTC",
+    );
+    assert(preview.blocker !== null, "paused StandardManager preview must include a blocker");
+    assert(
+      preview.blocker.code === "ADJUSTMENTS_PAUSED",
+      `paused preview blocker ${preview.blocker.code}, expected ADJUSTMENTS_PAUSED`,
+    );
+    assertEq(BigInt(preview.protocolMaxTokenUnits), 0n, "paused protocol max");
+    stage.note("pinned real withdraw simulation decoded BM_AdjustmentsPaused as ADJUSTMENTS_PAUSED");
+  } finally {
+    await ctx.testClient.revert({ id: snapshotId });
+  }
+  const paused = (await ctx.publicClient.readContract({
+    address: ctx.addr("standardManager"),
+    abi: standardManagerAbi,
+    functionName: "adjustmentsPaused",
+  })) as boolean;
+  assert(!paused, "snapshot revert must restore unpaused StandardManager state");
+  stage.status = "passed";
+}
+
+async function stageIdleFullWithdrawalsAndRevert(ctx: Ctx): Promise<void> {
+  const stage = ctx.report.stage("withdrawal API: idle full BTCB and cash execution");
+  const snapshotId = await ctx.testClient.snapshot();
+  const cases = [
+    {
+      label: "idle-full-btcb",
+      assetId: "market:BTC" as const,
+      owner: taker,
+      subaccountId: ctx.takerSubaccount,
+      asset: ctx.addr("btcBaseAsset"),
+      token: ctx.addr("btcb"),
+      symbol: "BTCB",
+    },
+    {
+      label: "idle-full-cash",
+      assetId: "cash" as const,
+      owner: maker,
+      subaccountId: ctx.makerSubaccount,
+      asset: ctx.addr("cashAsset"),
+      token: ctx.addr("usdt"),
+      symbol: "USDT",
+    },
+  ];
+  const original = new Map<string, { ledger: bigint; wallet: bigint }>();
+  try {
+    for (const item of cases) {
+      const ledgerBefore = await getBalance(ctx, item.subaccountId, item.asset, 0n);
+      const walletBefore = await getTokenBalance(ctx, item.token, item.owner.address);
+      original.set(item.label, { ledger: ledgerBefore, wallet: walletBefore });
+      const preview = await requestWithdrawalPreview(
+        item.owner.address,
+        item.subaccountId,
+        item.assetId,
+      );
+      assert(preview.blocker === null, `${item.symbol} idle preview blocker: ${JSON.stringify(preview.blocker)}`);
+      const protocolMax = BigInt(preview.protocolMaxTokenUnits);
+      assertEq(protocolMax, BigInt(preview.balanceTokenUnits), `${item.symbol} idle max equals full balance`);
+      assertEq(
+        BigInt(preview.recommendedMaxTokenUnits),
+        protocolMax,
+        `${item.symbol} idle recommended max is not haircut`,
+      );
+      assert(protocolMax > 0n, `${item.symbol} idle full amount must be positive`);
+
+      const confirmed = await executePreparedWithdrawal({
+        ctx,
+        owner: item.owner,
+        subaccountId: item.subaccountId,
+        assetId: item.assetId,
+        tokenUnits: protocolMax,
+        previewBlockHash: preview.blockHash,
+        idempotencyLabel: item.label,
+      });
+      assert(confirmed.txHash !== null, `${item.symbol} confirmed withdrawal missing txHash`);
+      stage.tx(`idle full ${item.symbol} withdrawal`, confirmed.txHash);
+      assertEq(await getBalance(ctx, item.subaccountId, item.asset, 0n), 0n, `${item.symbol} ledger emptied`);
+      assertEq(
+        await getTokenBalance(ctx, item.token, item.owner.address),
+        walletBefore + protocolMax,
+        `${item.symbol} wallet credited by full amount`,
+      );
+      assert(
+        addressEq(await getSubaccountNftOwner(ctx, item.subaccountId), ctx.addr("matching")),
+        `${item.symbol} full withdrawal must return NFT to Matching`,
+      );
+      stage.note(
+        `idle ${item.symbol}: full balance ${fromUnit(protocolMax)} withdrew with no 0.5% Max haircut`,
+      );
+    }
+  } finally {
+    await ctx.testClient.revert({ id: snapshotId });
+  }
+  for (const item of cases) {
+    const before = original.get(item.label);
+    if (!before) throw new Error(`missing original ${item.symbol} balance snapshot`);
+    assertEq(
+      await getBalance(ctx, item.subaccountId, item.asset, 0n),
+      before.ledger,
+      `snapshot revert restored ${item.symbol} ledger`,
+    );
+    assertEq(
+      await getTokenBalance(ctx, item.token, item.owner.address),
+      before.wallet,
+      `snapshot revert restored ${item.symbol} wallet`,
+    );
+  }
+  stage.note("reverted idle withdrawals so RFQ acceptance starts from the funded accounts");
+  stage.status = "passed";
+}
+
+async function stageWithdrawalAndRevert(ctx: Ctx): Promise<void> {
+  const stage = ctx.report.stage("withdrawal API: BTC max guard + signed partial execution");
+  const snapshotId = await ctx.testClient.snapshot();
+  const baseAsset = ctx.addr("btcBaseAsset");
+  const btcb = ctx.addr("btcb");
+
+  const ledgerBefore = await getBalance(ctx, ctx.takerSubaccount, baseAsset, 0n);
+  const walletBefore = await getTokenBalance(ctx, btcb, taker.address);
+  assertEq(ledgerBefore, AMOUNT, "pre-withdrawal BTCB ledger balance");
+  assert(
+    addressEq(await getSubaccountNftOwner(ctx, ctx.takerSubaccount), ctx.addr("matching")),
+    "taker subaccount NFT must be held by Matching before withdrawal",
+  );
+
+  const previewResponse = await httpJson<WithdrawalPreviewResponse | WithdrawalErrorResponse>(
+    "POST",
+    `${ENGINE_URL}/withdrawals/preview`,
+    {
+      owner: taker.address,
+      subaccountId: ctx.takerSubaccount.toString(),
+      assetId: "market:BTC",
+    },
+  );
+  assert(
+    previewResponse.status === 200,
+    `POST withdrawal preview -> ${previewResponse.status}: ${JSON.stringify(previewResponse.json)}`,
+  );
+  assert("preview" in previewResponse.json, `withdrawal preview error: ${JSON.stringify(previewResponse.json)}`);
+  const preview = previewResponse.json.preview;
+  assert(preview.blocker === null, `BTC withdrawal preview blocker: ${JSON.stringify(preview.blocker)}`);
+  assert(preview.asset.assetId === "market:BTC", `preview assetId ${preview.asset.assetId}`);
+  assert(addressEq(preview.asset.assetAddress, baseAsset), "preview must resolve BTC base-asset wrapper");
+  assert(addressEq(preview.asset.tokenAddress, btcb), "preview must resolve BTCB token");
+  assert(preview.asset.tokenDecimals === 18, `expected BTCB tokenDecimals 18, got ${preview.asset.tokenDecimals}`);
+  assertEq(BigInt(preview.internalBalance), ledgerBefore, "preview internal BTCB balance");
+  assertEq(BigInt(preview.balanceTokenUnits), ledgerBefore, "preview BTCB token-native balance");
+
+  const protocolMax = BigInt(preview.protocolMaxTokenUnits);
+  const recommendedMax = BigInt(preview.recommendedMaxTokenUnits);
+  assert(protocolMax > 1n, `protocol BTC max must be positive, got ${protocolMax}`);
+  assert(
+    recommendedMax > 1n && recommendedMax <= protocolMax,
+    `recommended BTC max ${recommendedMax} must be in (1, protocol max ${protocolMax}]`,
+  );
+  stage.note(
+    `BTC preview at block ${preview.blockNumber}: protocol max ${fromUnit(protocolMax)}, recommended max ${fromUnit(recommendedMax)}`,
+  );
+
+  const tooLargeResponse = await httpJson<WithdrawalErrorResponse | PrepareWithdrawalResponse>(
+    "POST",
+    `${ENGINE_URL}/withdrawals`,
+    {
+      owner: taker.address,
+      subaccountId: ctx.takerSubaccount.toString(),
+      assetId: "market:BTC",
+      tokenUnits: (protocolMax + 1n).toString(),
+      previewBlockHash: preview.blockHash,
+    },
+    { "Idempotency-Key": idempotencyKey("max-plus-one") },
+  );
+  assert(
+    tooLargeResponse.status === 409,
+    `max+1 prepare must return 409, got ${tooLargeResponse.status}: ${JSON.stringify(tooLargeResponse.json)}`,
+  );
+  assert("error" in tooLargeResponse.json, `max+1 response missing structured error: ${JSON.stringify(tooLargeResponse.json)}`);
+  assert(
+    tooLargeResponse.json.error.code === "AMOUNT_EXCEEDS_MAX",
+    `max+1 error code ${tooLargeResponse.json.error.code}`,
+  );
+  assert(
+    tooLargeResponse.json.error.details?.protocolMaxTokenUnits === protocolMax.toString(),
+    `max+1 error must report protocol max ${protocolMax}`,
+  );
+  stage.note("preparing protocol max + 1 token unit was rejected with AMOUNT_EXCEEDS_MAX");
+
+  // Use half of the already-haircut recommendation so the signed request has
+  // ample room for state/price movement between preview and executor preflight.
+  const partialAmount = recommendedMax / 2n;
+  assert(partialAmount > 0n, "buffered partial BTC withdrawal rounded to zero");
+  const prepareResponse = await httpJson<PrepareWithdrawalResponse | WithdrawalErrorResponse>(
+    "POST",
+    `${ENGINE_URL}/withdrawals`,
+    {
+      owner: taker.address,
+      subaccountId: ctx.takerSubaccount.toString(),
+      assetId: "market:BTC",
+      tokenUnits: partialAmount.toString(),
+      previewBlockHash: preview.blockHash,
+    },
+    { "Idempotency-Key": idempotencyKey("buffered-partial") },
+  );
+  assert(
+    prepareResponse.status === 201,
+    `POST prepare withdrawal -> ${prepareResponse.status}: ${JSON.stringify(prepareResponse.json)}`,
+  );
+  assert("withdrawalId" in prepareResponse.json, `prepare withdrawal error: ${JSON.stringify(prepareResponse.json)}`);
+  const prepared = prepareResponse.json;
+  assertEq(BigInt(prepared.review.tokenUnits), partialAmount, "prepared token-native amount");
+  assert(prepared.typedData.primaryType === "Action", `signing primaryType ${prepared.typedData.primaryType}`);
+  assert(
+    BigInt(prepared.review.preparedBlockNumber) >= BigInt(preview.blockNumber),
+    `prepare block ${prepared.review.preparedBlockNumber} predates preview block ${preview.blockNumber}`,
+  );
+
+  const action = actionFromWire(prepared.action);
+  const typedData = getActionTypedData(action, CHAIN_ID, ctx.addr("matching"));
+  assert(
+    JSON.stringify(prepared.typedData.message) === JSON.stringify(prepared.action),
+    "typed-data message must equal the server action",
+  );
+  assert(prepared.typedData.domain.name === typedData.domain.name, "signing domain name mismatch");
+  assert(prepared.typedData.domain.version === typedData.domain.version, "signing domain version mismatch");
+  assert(prepared.typedData.domain.chainId === CHAIN_ID, "signing chainId mismatch");
+  assert(
+    addressEq(prepared.typedData.domain.verifyingContract, ctx.addr("matching")),
+    "signing verifyingContract mismatch",
+  );
+  assert(
+    JSON.stringify(prepared.typedData.types) === JSON.stringify(typedData.types),
+    "signing Action types mismatch",
+  );
+  assertEq(action.subaccountId, ctx.takerSubaccount, "signed withdrawal subaccount");
+  assert(addressEq(action.owner, taker.address), "signed withdrawal owner must be taker");
+  assert(addressEq(action.signer, taker.address), "signed withdrawal signer must be owner");
+  assert(addressEq(action.module, ctx.addr("withdrawalModule")), "signed module must be WithdrawalModule");
+  const withdrawalData = decodeWithdrawData(action.data);
+  assert(addressEq(withdrawalData.asset, baseAsset), "signed withdrawal asset must be BTC base wrapper");
+  assertEq(withdrawalData.assetAmount, partialAmount, "signed withdrawal native-token amount");
+
+  const signature = await signAction({
+    action,
+    signer: taker,
+    chainId: CHAIN_ID,
+    matchingAddress: ctx.addr("matching"),
+  });
+  const submitResponse = await httpJson<WithdrawalResponse | WithdrawalErrorResponse>(
+    "POST",
+    `${ENGINE_URL}/withdrawals/${prepared.withdrawalId}/submit`,
+    { signature },
+  );
+  assert(
+    submitResponse.status === 202,
+    `POST submit withdrawal -> ${submitResponse.status}: ${JSON.stringify(submitResponse.json)}`,
+  );
+  assert("withdrawal" in submitResponse.json, `submit withdrawal error: ${JSON.stringify(submitResponse.json)}`);
+  assert(
+    ["submitting", "submitted", "confirmed"].includes(submitResponse.json.withdrawal.status),
+    `unexpected accepted submission status ${submitResponse.json.withdrawal.status}`,
+  );
+
+  const confirmed = await pollWithdrawalConfirmed(prepared.withdrawalId);
+  assert(confirmed.txHash !== null, "confirmed withdrawal missing txHash");
+  assert(confirmed.blockNumber !== null, "confirmed withdrawal missing blockNumber");
+  stage.tx(
+    `WithdrawalModule partial BTCB withdrawal confirmed at block ${confirmed.blockNumber}`,
+    confirmed.txHash,
+  );
+
+  const ledgerAfter = await getBalance(ctx, ctx.takerSubaccount, baseAsset, 0n);
+  const walletAfter = await getTokenBalance(ctx, btcb, taker.address);
+  assertEq(ledgerAfter, ledgerBefore - partialAmount, "BTCB ledger debited by withdrawal");
+  assertEq(walletAfter, walletBefore + partialAmount, "taker wallet credited by withdrawal");
+  assert(
+    addressEq(await getSubaccountNftOwner(ctx, ctx.takerSubaccount), ctx.addr("matching")),
+    "WithdrawalModule must return the subaccount NFT to Matching",
+  );
+  const recordedOwner = (await ctx.publicClient.readContract({
+    address: ctx.addr("matching"),
+    abi: matchingAbi,
+    functionName: "subAccountToOwner",
+    args: [ctx.takerSubaccount],
+  })) as Address;
+  assert(addressEq(recordedOwner, taker.address), "Matching owner mapping must remain the taker");
+  stage.note(
+    `partial withdrawal moved ${fromUnit(partialAmount)} BTCB from ledger to wallet; account NFT remained in Matching`,
+  );
+
+  // Restore the exact post-trade state before the pre-existing OTM/ITM branches.
+  // The off-chain operation journal deliberately remains as execution evidence;
+  // no further withdrawal call is made after this local-chain-only revert.
+  await ctx.testClient.revert({ id: snapshotId });
+  assertEq(
+    await getBalance(ctx, ctx.takerSubaccount, baseAsset, 0n),
+    ledgerBefore,
+    "snapshot revert restored BTCB ledger",
+  );
+  assertEq(
+    await getTokenBalance(ctx, btcb, taker.address),
+    walletBefore,
+    "snapshot revert restored taker BTCB wallet",
+  );
+  assert(
+    addressEq(await getSubaccountNftOwner(ctx, ctx.takerSubaccount), ctx.addr("matching")),
+    "snapshot revert restored Matching NFT custody",
+  );
+  stage.note("reverted the withdrawal snapshot; settlement scenarios start from the original post-trade state");
+  stage.status = "passed";
+}
+
 async function settleScenario(
   ctx: Ctx,
   label: string,
   settlementPrice: bigint,
   postTrade: Balances,
   expectedPayout: bigint, // cash maker receives / taker pays (0 for OTM)
-): Promise<void> {
+): Promise<Balances> {
   const stage = ctx.report.stage(`settlement — ${label} (settle @ ${fromUnit(settlementPrice)})`);
 
   // warp past expiry
@@ -708,6 +1335,124 @@ async function settleScenario(
     `${label}: payout ${fromUnit(expectedPayout)} USDT/option — maker ${fromUnit(post.makerCash - postTrade.makerCash)}, taker ${fromUnit(post.takerCash - postTrade.takerCash)} (interest drift within ${fromUnit(SETTLE_TOL)})`,
   );
   stage.status = "passed";
+  return post;
+}
+
+async function cashBalanceWithInterest(ctx: Ctx): Promise<bigint> {
+  const simulation = await ctx.publicClient.simulateContract({
+    address: ctx.addr("cashAsset"),
+    abi: cashAssetAbi,
+    functionName: "calculateBalanceWithInterest",
+    args: [ctx.takerSubaccount],
+    account: taker,
+  });
+  return simulation.result as bigint;
+}
+
+async function stageDirectRepayment(ctx: Ctx): Promise<void> {
+  const stage = ctx.report.stage("direct USDT repayment after ITM settlement");
+  const usdt = ctx.addr("usdt");
+  const cashAsset = ctx.addr("cashAsset");
+  // The ITM branch warped seven days. Refresh the stable feed before asking
+  // StandardManager for a new contract-authoritative collateral maximum.
+  const stableTx = await postStableFeed(ctx);
+  stage.tx("refresh USDT stable feed after settlement warp", stableTx);
+  const maxBeforeRepayment = await requestWithdrawalPreview(
+    taker.address,
+    ctx.takerSubaccount,
+    "market:BTC",
+  );
+  assert(
+    maxBeforeRepayment.blocker === null,
+    `pre-repayment BTC preview blocker: ${JSON.stringify(maxBeforeRepayment.blocker)}`,
+  );
+  const protocolMaxBefore = BigInt(maxBeforeRepayment.protocolMaxTokenUnits);
+  const debtBalanceBefore = await cashBalanceWithInterest(ctx);
+  assert(debtBalanceBefore < 0n, `expected negative cash debt after ITM settlement, got ${debtBalanceBefore}`);
+  assert(
+    -debtBalanceBefore > DIRECT_REPAY_AMOUNT,
+    `expected debt ${fromUnit(-debtBalanceBefore)} to exceed partial repayment ${fromUnit(DIRECT_REPAY_AMOUNT)}`,
+  );
+
+  const walletBefore = await getTokenBalance(ctx, usdt, taker.address);
+  const cashAssetTokensBefore = await getTokenBalance(ctx, usdt, cashAsset);
+  stage.note(
+    `interest-adjusted taker debt before repayment: ${fromUnit(-debtBalanceBefore)} USDT; repaying ${fromUnit(DIRECT_REPAY_AMOUNT)} directly`,
+  );
+
+  const mintTx = await writeTx(ctx, ctx.deployerWallet, deployer, {
+    address: usdt,
+    abi: mockErc20Abi,
+    functionName: "mint",
+    args: [taker.address, DIRECT_REPAY_AMOUNT],
+  });
+  stage.tx(`mint ${fromUnit(DIRECT_REPAY_AMOUNT)} mock USDT to taker`, mintTx);
+  assertEq(
+    await getTokenBalance(ctx, usdt, taker.address),
+    walletBefore + DIRECT_REPAY_AMOUNT,
+    "USDT mint credited taker wallet",
+  );
+
+  const approveTx = await writeTx(ctx, ctx.takerWallet, taker, {
+    address: usdt,
+    abi: mockErc20Abi,
+    functionName: "approve",
+    args: [cashAsset, DIRECT_REPAY_AMOUNT],
+  });
+  stage.tx("taker USDT.approve(CashAsset)", approveTx);
+
+  const depositTx = await writeTx(ctx, ctx.takerWallet, taker, {
+    address: cashAsset,
+    abi: cashAssetAbi,
+    functionName: "deposit",
+    args: [ctx.takerSubaccount, DIRECT_REPAY_AMOUNT],
+  });
+  stage.tx("taker CashAsset.deposit(subaccount, 1000 USDT)", depositTx);
+
+  const debtBalanceAfter = await cashBalanceWithInterest(ctx);
+  assert(debtBalanceAfter < 0n, "partial repayment should leave a smaller negative balance");
+  assert(debtBalanceAfter > debtBalanceBefore, "direct deposit must reduce the negative cash balance");
+  assertApprox(
+    (-debtBalanceBefore) - (-debtBalanceAfter),
+    DIRECT_REPAY_AMOUNT,
+    toUnit("1"),
+    "interest-adjusted debt reduction equals direct deposit",
+  );
+  assertEq(
+    await getTokenBalance(ctx, usdt, taker.address),
+    walletBefore,
+    "minted repayment USDT was fully deposited",
+  );
+  assertEq(
+    await getTokenBalance(ctx, usdt, cashAsset),
+    cashAssetTokensBefore + DIRECT_REPAY_AMOUNT,
+    "CashAsset received repayment tokens",
+  );
+  assert(
+    addressEq(await getSubaccountNftOwner(ctx, ctx.takerSubaccount), ctx.addr("matching")),
+    "direct CashAsset repayment must not move the account NFT out of Matching",
+  );
+  const maxAfterRepayment = await requestWithdrawalPreview(
+    taker.address,
+    ctx.takerSubaccount,
+    "market:BTC",
+  );
+  assert(
+    maxAfterRepayment.blocker === null,
+    `post-repayment BTC preview blocker: ${JSON.stringify(maxAfterRepayment.blocker)}`,
+  );
+  const protocolMaxAfter = BigInt(maxAfterRepayment.protocolMaxTokenUnits);
+  assert(
+    protocolMaxAfter > protocolMaxBefore,
+    `repayment must increase BTC protocol Max (${protocolMaxBefore} -> ${protocolMaxAfter})`,
+  );
+  stage.note(
+    `debt reduced from ${fromUnit(-debtBalanceBefore)} to ${fromUnit(-debtBalanceAfter)} USDT while Matching retained NFT custody`,
+  );
+  stage.note(
+    `contract-authoritative BTC Max increased from ${fromUnit(protocolMaxBefore)} to ${fromUnit(protocolMaxAfter)} after repayment`,
+  );
+  stage.status = "passed";
 }
 
 // ---------------------------------------------------------------------------
@@ -733,14 +1478,18 @@ async function main(): Promise<void> {
     await stageFeeds(ctx);
     await stageFundAndSubaccounts(ctx);
     await stageServicesUp(ctx);
+    await stagePausedWithdrawalBlocker(ctx);
+    await stageIdleFullWithdrawalsAndRevert(ctx);
     const auction = await stageAuction(ctx);
     const { premium, post, fee } = await stageExecute(ctx, auction);
     report.meta["winning premium"] = `${fromUnit(premium)} USDT`;
     report.meta["OI fee per side"] = `${fromUnit(fee)} USDT`;
 
-    // settlement scenarios don't need the services — stop them before warping
-    // (the bot would otherwise see expired feeds / the engine has no open RFQs)
-    await procs.stop(["maker-bot", "rfq-engine"]);
+    await stageWithdrawalAndRevert(ctx);
+
+    // Stop the quoting bot before warping. Keep rfq-engine alive so the ITM
+    // repayment branch can prove that a fresh protocol preview increases Max.
+    await procs.stop(["maker-bot"]);
 
     const snapshotId = await ctx.testClient.snapshot();
     await settleScenario(ctx, "OTM", OTM_SETTLEMENT, post, 0n);
@@ -748,6 +1497,7 @@ async function main(): Promise<void> {
     const reverted = await readBalances(ctx);
     assertEq(reverted.takerOption, post.takerOption, "snapshot revert restored taker option balance");
     await settleScenario(ctx, "ITM", ITM_SETTLEMENT, post, ITM_SETTLEMENT - STRIKE);
+    await stageDirectRepayment(ctx);
   } catch (err) {
     failed = err instanceof Error ? err : new Error(String(err));
     const stage = report.stages.at(-1);

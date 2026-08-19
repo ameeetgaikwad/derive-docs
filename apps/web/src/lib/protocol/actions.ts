@@ -20,9 +20,15 @@ export interface Action {
   signer: Address;
 }
 
-/** Millisecond-timestamp-based nonce, unique enough for off-chain order flow. */
+/** Cryptographically random uint256 nonce for replay-protected actions. */
 export function generateNonce(): bigint {
-  return BigInt(Date.now()) * 1000n + BigInt(Math.floor(Math.random() * 1000));
+  if (!globalThis.crypto?.getRandomValues) {
+    throw new Error("Secure randomness is unavailable; cannot create an action nonce");
+  }
+  const bytes = globalThis.crypto.getRandomValues(new Uint8Array(32));
+  let nonce = 0n;
+  for (const byte of bytes) nonce = (nonce << 8n) | BigInt(byte);
+  return nonce;
 }
 
 /** Unix-seconds expiry, `durationSeconds` from now (default 10 minutes). */

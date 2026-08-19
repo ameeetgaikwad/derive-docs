@@ -20,10 +20,15 @@ encodings differ in places.
   - `ACTION_TYPEHASH` for `Action(uint256 subaccountId,uint256 nonce,address module,bytes data,uint256 expiry,address owner,address signer)`.
   - Feed domains: `LyraSpotFeed/LyraForwardFeed/LyraVolFeed/LyraRateFeed`, version `"1"`,
     `FeedData(bytes data,uint256 deadline,uint64 timestamp)`.
-- **`src/actions.ts`** — `buildAction`, `signAction` (any viem account with
-  `signTypedData`), digest helpers, and module data encoders:
-  `encodeDepositData`, `encodeWithdrawData`, `encodeTransferData`,
+- **`src/actions.ts`** — `buildAction`, cryptographically secure browser/server
+  nonce generation, `getActionTypedData`, `signAction` (any viem account with
+  `signTypedData`), digest helpers, and module data encoders/builders:
+  `encodeDepositData`, `encodeWithdrawData`, `decodeWithdrawData`,
+  `buildWithdrawalAction`, `encodeTransferData`,
   `encodeTradeData`, `encodeTradeOrderData`, `encodeManagerData`.
+  Withdrawal `assetAmount` values always use the wrapped token's native
+  decimals; they are passed unchanged to `CashAsset.withdraw` or
+  `WrappedERC20Asset.withdraw`, not encoded as an 18-decimal account balance.
 - **`src/rfq.ts`** — RfqModule encodings per `IRfqModule.sol`:
   `encodeRfqOrder` (maker), `encodeTakerOrder` + `hashRfqTrades`
   (`keccak256(abi.encode(trades))`), `encodeRfqFillData` (executor actionData),

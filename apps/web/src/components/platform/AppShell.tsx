@@ -7,12 +7,14 @@ import { ExternalLink, FlaskConical, User, WalletIcon } from "lucide-react";
 import { useAccount, useSwitchChain } from "wagmi";
 import { NavbarLogo } from "@/components/root/navbar-logo";
 import { SubaccountMenu } from "@/components/platform/SubaccountMenu";
+import { FundsModal } from "@/components/funds/FundsModal";
 import { Text } from "@/components/ui/text";
 import { useBtcbBalance, useMintBtcb } from "@/hooks/protocol/useBtcb";
 import { useNetwork } from "@/hooks/protocol/useNetwork";
 import { TBNB_FAUCET_URL } from "@/lib/protocol/chain";
 import { cn } from "@/lib/utils";
 import type { AppChainId } from "@/stores/network";
+import { useFundsStore } from "@/stores/funds";
 
 const navItems = [
   { href: "/app", label: "Options", exact: true },
@@ -35,6 +37,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const mintBtcb = useMintBtcb();
   const { chainId, isTestnet, setChainId } = useNetwork();
   const { switchChainAsync } = useSwitchChain();
+  const fundsOpen = useFundsStore((state) => state.isOpen);
+  const setFundsOpen = useFundsStore((state) => state.setOpen);
   const setNetwork = (nextChainId: AppChainId) => {
     setChainId(nextChainId);
     switchChainAsync({ chainId: nextChainId }).catch(() => {});
@@ -150,7 +154,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             {isConnected && isTestnet && (
               <details className="group relative">
                 <summary className="min-h-9 cursor-pointer list-none py-2 font-mono text-[11px] font-medium uppercase tracking-[0.04em] text-zinc-500 marker:hidden">
-                  Funds
+                  Test faucet
                 </summary>
                 <div className="absolute left-0 top-full z-50 mt-1 w-52 border border-zinc-200 bg-white p-4 shadow-sm">
                   <p className="font-mono text-[11px] text-zinc-500">
@@ -184,6 +188,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <main className="mx-auto min-h-[calc(100vh-76px)] w-full max-w-[1512px] px-5 py-6 sm:px-8 sm:py-8 lg:px-[clamp(2rem,13.93vw_-_110.66px,6.25rem)]">
         {children}
       </main>
+      {isConnected && <FundsModal open={fundsOpen} onOpenChange={setFundsOpen} />}
     </div>
   );
 }

@@ -51,7 +51,13 @@ export interface Rfq {
   status: RfqStatus;
   bestQuoteId: string | null;
   execution: ExecutionResult | null;
-  /** set when status === "failed" (or "expired" past the accept deadline) */
+  /**
+   * Durable, non-secret identity for an accepted execution. Written before
+   * broadcast and retained for crash recovery. It contains hashes rather than
+   * the maker/taker signatures embedded in submitted calldata.
+   */
+  executionIntent?: RfqExecutionIntent | null;
+  /** Terminal failure/expiry reason, or reconciliation warning while executing. */
   error: string | null;
 }
 
@@ -83,6 +89,28 @@ export interface ExecutionResult {
   txHash: Hex;
   status: "success" | "reverted";
   blockNumber: bigint | null;
+  fill: FillSummary;
+}
+
+export interface RfqActionIdentity {
+  subaccountId: bigint;
+  nonce: bigint;
+  module: Address;
+  expiry: bigint;
+  owner: Address;
+  signer: Address;
+  /** keccak256(Action.data), binding data without logging it. */
+  dataHash: Hex;
+}
+
+export interface RfqExecutionIntent {
+  actions: [RfqActionIdentity, RfqActionIdentity];
+  /** keccak256 of the exact Matching.verifyAndMatch calldata. */
+  calldataHash: Hex;
+  /** Inclusive chain block anchor captured before the intent is persisted. */
+  fromBlock: bigint;
+  /** Filled by the submitter callback before receipt waiting. */
+  txHash: Hex | null;
   fill: FillSummary;
 }
 

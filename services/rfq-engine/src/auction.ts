@@ -1,7 +1,11 @@
 import { EventEmitter } from "node:events";
 import type { Address, Hex } from "viem";
 import { encodeOptionSubId, instrumentName, toUnit, type Action, type MarketDefinition } from "@hedge/shared";
-import type { ChainReader } from "./chain.js";
+import {
+  UnresolvedExecutorOperationError,
+  UnresolvedExecutorTransactionError,
+  type ChainReader,
+} from "./chain.js";
 import { QuoteValidationError, validateQuote, validateTakerAccept } from "./quotes.js";
 import type { RfqStore } from "./store.js";
 import {
@@ -15,6 +19,7 @@ import {
 import { buildRfqExecution, type Executor } from "./executor.js";
 import type { ExecutionResult } from "./types.js";
 import { assertMarketTradeable } from "./markets.js";
+import { AccountLock } from "./account-lock.js";
 
 export interface AuctionEvents {
   rfq_open: [rfq: Rfq];
@@ -47,6 +52,7 @@ export interface AuctionEngineOptions {
   /** ms the taker has to accept after the auction closes with a winner (default 120s) */
   acceptDeadlineMs?: number;
   now?: () => number;
+  accountLock?: AccountLock;
 }
 
 const DEFAULT_ACCEPT_DEADLINE_MS = 120_000;
@@ -63,13 +69,17 @@ export class AuctionEngine extends EventEmitter<AuctionEvents> {
   private readonly acceptTimers = new Map<string, NodeJS.Timeout>();
   /** quoteId -> reserved maker cash (totalPremium + maxFee + OI fee) */
   private readonly reservations = new Map<string, { subaccountId: bigint; amount: bigint }>();
+  private readonly activeExecutions = new Set<string>();
+  private readonly reconciliations = new Map<string, Promise<Rfq>>();
   private readonly now: () => number;
   private readonly acceptDeadlineMs: number;
+  private readonly accountLock: AccountLock;
 
   constructor(private readonly opts: AuctionEngineOptions) {
     super();
     this.now = opts.now ?? Date.now;
     this.acceptDeadlineMs = opts.acceptDeadlineMs ?? DEFAULT_ACCEPT_DEADLINE_MS;
+    this.accountLock = opts.accountLock ?? new AccountLock();
   }
 
   /** Sum of cash reserved against a maker subaccount, excluding given quotes. */
@@ -142,6 +152,7 @@ export class AuctionEngine extends EventEmitter<AuctionEvents> {
       status: "open",
       bestQuoteId: null,
       execution: null,
+      executionIntent: null,
       error: null,
     };
     await this.opts.store.putRfq(rfq);
@@ -159,7 +170,9 @@ export class AuctionEngine extends EventEmitter<AuctionEvents> {
   }
 
   async getRfq(id: string): Promise<Rfq | null> {
-    return this.opts.store.getRfq(id);
+    const rfq = await this.opts.store.getRfq(id);
+    if (!rfq || rfq.status !== "executing" || this.activeExecutions.has(id)) return rfq;
+    return this.reconcileExecuting(rfq);
   }
 
   async listOpenRfqs(): Promise<Rfq[]> {
@@ -183,6 +196,19 @@ export class AuctionEngine extends EventEmitter<AuctionEvents> {
    * on rejection.
    */
   async submitQuote(params: {
+    rfqId: string;
+    maker: Address;
+    action: Action;
+    signature: Hex;
+  }): Promise<{ quote: Quote; replacedQuoteId: string | null }> {
+    return this.accountLock.runResource(`rfq:${params.rfqId}`, () =>
+      this.accountLock.run([params.action.subaccountId], () =>
+        this.submitQuoteLocked(params),
+      ),
+    );
+  }
+
+  private async submitQuoteLocked(params: {
     rfqId: string;
     maker: Address;
     action: Action;
@@ -234,16 +260,28 @@ export class AuctionEngine extends EventEmitter<AuctionEvents> {
       // identical error for unknown vs foreign quotes — don't leak ids
       throw new QuoteValidationError(`unknown quote ${params.quoteId}`);
     }
-    const rfq = await this.opts.store.getRfq(quote.rfqId);
-    if (!rfq || rfq.status !== "open" || this.now() >= rfq.auctionEndsAt) {
-      throw new QuoteValidationError("auction window closed — quote can no longer be cancelled");
-    }
-    await this.opts.store.deleteQuote(quote.id);
-    this.releaseReservation(quote.id);
-    return quote;
+    return this.accountLock.runResource(`rfq:${quote.rfqId}`, () =>
+      this.accountLock.run([quote.makerSubaccountId], async () => {
+        const current = await this.opts.store.getQuote(params.quoteId);
+        if (!current || !addressEq(current.maker, params.maker)) {
+          throw new QuoteValidationError(`unknown quote ${params.quoteId}`);
+        }
+        const rfq = await this.opts.store.getRfq(current.rfqId);
+        if (!rfq || rfq.status !== "open" || this.now() >= rfq.auctionEndsAt) {
+          throw new QuoteValidationError("auction window closed — quote can no longer be cancelled");
+        }
+        await this.opts.store.deleteQuote(current.id);
+        this.releaseReservation(current.id);
+        return current;
+      }),
+    );
   }
 
   async closeAuction(rfqId: string): Promise<void> {
+    return this.accountLock.runResource(`rfq:${rfqId}`, () => this.closeAuctionLocked(rfqId));
+  }
+
+  private async closeAuctionLocked(rfqId: string): Promise<void> {
     const timer = this.timers.get(rfqId);
     if (timer) {
       clearTimeout(timer);
@@ -269,9 +307,9 @@ export class AuctionEngine extends EventEmitter<AuctionEvents> {
     rfq.bestQuoteId = best?.id ?? null;
     if (best) {
       rfq.acceptDeadlineAt = this.now() + this.acceptDeadlineMs;
-      this.armAcceptTimer(rfq);
     }
     await this.opts.store.putRfq(rfq);
+    if (best) this.armAcceptTimer(rfq);
     this.emit("rfq_closed", rfq, best);
   }
 
@@ -297,14 +335,25 @@ export class AuctionEngine extends EventEmitter<AuctionEvents> {
 
   /** Won-but-unaccepted RFQ hit the taker-accept deadline: close it out. */
   async expireAccept(rfqId: string): Promise<void> {
+    return this.accountLock.runResource(`rfq:${rfqId}`, async () => {
+      const rfq = await this.opts.store.getRfq(rfqId);
+      const winner = rfq?.bestQuoteId ? await this.opts.store.getQuote(rfq.bestQuoteId) : null;
+      return this.accountLock.run(
+        winner ? [winner.makerSubaccountId] : [],
+        () => this.expireAcceptLocked(rfqId),
+      );
+    });
+  }
+
+  private async expireAcceptLocked(rfqId: string): Promise<void> {
     this.clearAcceptTimer(rfqId);
     const rfq = await this.opts.store.getRfq(rfqId);
     if (!rfq || rfq.status !== "closed") return;
     const winner = rfq.bestQuoteId ? await this.opts.store.getQuote(rfq.bestQuoteId) : null;
-    if (winner) this.releaseReservation(winner.id);
     rfq.status = "expired";
     rfq.error = "taker did not accept before the deadline";
     await this.opts.store.putRfq(rfq);
+    if (winner) this.releaseReservation(winner.id);
     this.emit("rfq_accept_expired", rfq, winner);
   }
 
@@ -313,6 +362,24 @@ export class AuctionEngine extends EventEmitter<AuctionEvents> {
    * Builds the RfqModule action pair and submits Matching.verifyAndMatch.
    */
   async acceptRfq(params: {
+    rfqId: string;
+    action: Action;
+    signature: Hex;
+  }): Promise<ExecutionResult> {
+    return this.accountLock.runResource(`rfq:${params.rfqId}`, async () => {
+      const candidate = await this.opts.store.getRfq(params.rfqId);
+      const candidateQuote = candidate?.bestQuoteId
+        ? await this.opts.store.getQuote(candidate.bestQuoteId)
+        : null;
+      const accountIds = [
+        ...(candidate ? [candidate.takerSubaccountId] : []),
+        ...(candidateQuote ? [candidateQuote.makerSubaccountId] : []),
+      ];
+      return this.accountLock.run(accountIds, () => this.acceptRfqLocked(params));
+    });
+  }
+
+  private async acceptRfqLocked(params: {
     rfqId: string;
     action: Action;
     signature: Hex;
@@ -329,7 +396,7 @@ export class AuctionEngine extends EventEmitter<AuctionEvents> {
     if (!quote) throw new QuoteValidationError("no winning quote to accept");
 
     if (rfq.acceptDeadlineAt !== null && this.now() >= rfq.acceptDeadlineAt) {
-      await this.expireAccept(rfq.id);
+      await this.expireAcceptLocked(rfq.id);
       throw new QuoteValidationError("taker accept deadline passed");
     }
 
@@ -348,40 +415,192 @@ export class AuctionEngine extends EventEmitter<AuctionEvents> {
       takerSignature: params.signature,
     });
 
-    this.clearAcceptTimer(rfq.id);
-    rfq.status = "executing";
-    await this.opts.store.putRfq(rfq);
+    const intent = await this.opts.executor.createExecutionIntent(plan);
+    // Validation and block-anchor reads can outlive the accept deadline. The
+    // RFQ lock keeps the expiry timer queued while this final state/time check
+    // decides which durable transition wins.
+    const fresh = await this.opts.store.getRfq(rfq.id);
+    if (!fresh || fresh.status !== "closed" || fresh.bestQuoteId !== quote.id) {
+      throw new QuoteValidationError("rfq changed while validating acceptance");
+    }
+    if (fresh.acceptDeadlineAt !== null && this.now() >= fresh.acceptDeadlineAt) {
+      await this.expireAcceptLocked(fresh.id);
+      throw new QuoteValidationError("taker accept deadline passed");
+    }
+
+    const executing: Rfq = {
+      ...fresh,
+      status: "executing",
+      executionIntent: intent,
+      error: null,
+    };
+    // Mark active before exposing `executing` in the store. GET cannot start
+    // reconciliation in the await gap between the durable put and broadcast.
+    this.activeExecutions.add(executing.id);
+    this.clearAcceptTimer(executing.id);
     try {
-      const result = await this.opts.executor.execute(plan);
-      rfq.status = result.status === "success" ? "executed" : "failed";
-      rfq.execution = result;
-      rfq.error = result.status === "success" ? null : "verifyAndMatch reverted";
-      await this.opts.store.putRfq(rfq);
-      this.releaseReservation(quote.id);
-      if (result.status === "success") {
-        this.emit("rfq_executed", rfq, result);
-      } else {
-        this.emit("rfq_failed", rfq, rfq.error ?? "reverted");
+      try {
+        // JsonlRfqStore fsyncs this intent before the submitter can broadcast.
+        await this.opts.store.putRfq(executing);
+      } catch (error) {
+        this.armAcceptTimer(fresh);
+        throw error;
       }
-      return result;
-    } catch (err) {
-      rfq.status = "failed";
-      rfq.error = err instanceof Error ? err.message : String(err);
-      await this.opts.store.putRfq(rfq);
-      this.releaseReservation(quote.id);
-      this.emit("rfq_failed", rfq, rfq.error);
-      throw err;
+
+      try {
+        const result = await this.opts.executor.execute(plan, async (txHash) => {
+          intent.txHash = txHash;
+          // The hash is durable before ViemTxSubmitter starts receipt waiting.
+          await this.opts.store.putRfq(executing);
+        });
+        const terminal = await this.terminalizeMined(executing, intent, result);
+        return terminal.execution!;
+      } catch (err) {
+        if (
+          err instanceof UnresolvedExecutorOperationError ||
+          err instanceof UnresolvedExecutorTransactionError
+        ) {
+          // serializeWrite rejected this RFQ before invoking its broadcast work
+          // because an older executor outcome is unresolved. Return this still-
+          // valid acceptance to `closed`, preserve only its existing winner
+          // reservation, and let the taker retry after the older latch clears.
+          // Do not create a second ambiguous-operation latch.
+          const closed: Rfq = {
+            ...executing,
+            status: "closed",
+            executionIntent: null,
+            error: `executor unavailable: ${err.message}`,
+          };
+          await this.opts.store.putRfq(closed);
+          if (closed.acceptDeadlineAt !== null && this.now() >= closed.acceptDeadlineAt) {
+            await this.expireAcceptLocked(closed.id);
+          } else {
+            this.armAcceptTimer(closed);
+          }
+          throw err;
+        }
+        // A thrown executor call is not proof that verifyAndMatch was never
+        // broadcast: eth_sendRawTransaction and receipt RPCs can fail after the
+        // executor transaction entered the mempool. Keep the RFQ non-terminal,
+        // retain the maker cash reservation, and latch all executor writes. A
+        // reverted receipt is returned as a normal result above and remains the
+        // only terminal failure path.
+        this.opts.executor.armExecutionRecovery(executing.id, intent.txHash);
+        const unresolved = {
+          ...executing,
+          error: `execution outcome unresolved: ${err instanceof Error ? err.message : String(err)}`,
+        };
+        await this.opts.store.putRfq(unresolved);
+        throw err;
+      }
+    } finally {
+      this.activeExecutions.delete(executing.id);
+    }
+  }
+
+  private async terminalizeMined(
+    rfq: Rfq,
+    intent: NonNullable<Rfq["executionIntent"]>,
+    result: Pick<ExecutionResult, "txHash" | "status" | "blockNumber">,
+  ): Promise<Rfq> {
+    const wasHashless = intent.txHash === null;
+    if (intent.txHash && intent.txHash.toLowerCase() !== result.txHash.toLowerCase()) {
+      throw new Error(`reconciled hash ${result.txHash} does not match persisted ${intent.txHash}`);
+    }
+    const terminalIntent = { ...intent, txHash: result.txHash };
+    const execution: ExecutionResult = { ...result, fill: intent.fill };
+    const terminal: Rfq = {
+      ...rfq,
+      status: result.status === "success" ? "executed" : "failed",
+      execution,
+      executionIntent: terminalIntent,
+      error: result.status === "success" ? null : "verifyAndMatch reverted",
+    };
+    // Durability is the authority: release no collateral and clear no latch
+    // until the terminal RFQ record has reached fsync.
+    await this.opts.store.putRfq(terminal);
+    this.releaseReservation(intent.fill.quoteId);
+    this.opts.executor.clearExecutionRecovery(rfq.id, result.txHash, wasHashless);
+    if (result.status === "success") this.emit("rfq_executed", terminal, execution);
+    else this.emit("rfq_failed", terminal, terminal.error ?? "reverted");
+    return terminal;
+  }
+
+  private async terminalizeExpiredUnused(
+    rfq: Rfq,
+    intent: NonNullable<Rfq["executionIntent"]>,
+  ): Promise<Rfq> {
+    const terminal: Rfq = {
+      ...rfq,
+      status: "failed",
+      execution: null,
+      error: "execution did not consume either action nonce before both actions expired",
+    };
+    await this.opts.store.putRfq(terminal);
+    this.releaseReservation(intent.fill.quoteId);
+    this.opts.executor.clearExecutionRecovery(rfq.id, intent.txHash, intent.txHash === null);
+    this.emit("rfq_failed", terminal, terminal.error!);
+    return terminal;
+  }
+
+  private reconcileExecuting(rfq: Rfq): Promise<Rfq> {
+    const existing = this.reconciliations.get(rfq.id);
+    if (existing) return existing;
+    const run = this.reconcileExecutingOnce(rfq).finally(() => {
+      this.reconciliations.delete(rfq.id);
+    });
+    this.reconciliations.set(rfq.id, run);
+    return run;
+  }
+
+  private async reconcileExecutingOnce(candidate: Rfq): Promise<Rfq> {
+    const rfq = await this.opts.store.getRfq(candidate.id) ?? candidate;
+    if (rfq.status !== "executing") return rfq;
+    const intent = rfq.executionIntent;
+    this.opts.executor.armExecutionRecovery(rfq.id, intent?.txHash ?? null);
+    if (!intent) {
+      if (!rfq.error?.includes("legacy execution record")) {
+        const unresolved = {
+          ...rfq,
+          error: "legacy execution record has no durable action identity; manual reconciliation required",
+        };
+        await this.opts.store.putRfq(unresolved);
+        return unresolved;
+      }
+      return rfq;
+    }
+    try {
+      const reconciled = await this.opts.executor.reconcileExecution(intent);
+      if (reconciled.state === "mined") {
+        return this.terminalizeMined(rfq, intent, reconciled.result);
+      }
+      if (reconciled.state === "expired-unused") {
+        return this.terminalizeExpiredUnused(rfq, intent);
+      }
+      return rfq;
+    } catch (error) {
+      const message = `execution reconciliation remains ambiguous: ${error instanceof Error ? error.message : String(error)}`;
+      if (rfq.error === message) return rfq;
+      const unresolved = { ...rfq, error: message };
+      await this.opts.store.putRfq(unresolved);
+      return unresolved;
     }
   }
 
   /**
    * Restart recovery (durable stores): re-arm timers for live RFQs, close or
    * expire anything whose window/deadline passed while the engine was down,
-   * fail RFQs that were mid-execution, and rebuild collateral reservations.
+   * latch RFQs that were mid-execution, and rebuild collateral reservations.
    * Call once on startup, before serving traffic.
    */
-  async recover(): Promise<{ rearmed: number; closed: number; expired: number; failed: number }> {
-    const summary = { rearmed: 0, closed: 0, expired: 0, failed: 0 };
+  async recover(): Promise<{
+    rearmed: number;
+    closed: number;
+    expired: number;
+    unresolved: number;
+    resolved: number;
+  }> {
+    const summary = { rearmed: 0, closed: 0, expired: 0, unresolved: 0, resolved: 0 };
     for (const rfq of await this.opts.store.listRfqs()) {
       if (rfq.status === "open") {
         if (this.now() < rfq.auctionEndsAt) {
@@ -424,11 +643,18 @@ export class AuctionEngine extends EventEmitter<AuctionEvents> {
           summary.rearmed += 1;
         }
       } else if (rfq.status === "executing") {
-        // a tx may or may not have landed — surface loudly, never resubmit
-        rfq.status = "failed";
-        rfq.error = "engine restarted during execution — verify on-chain state manually";
-        await this.opts.store.putRfq(rfq);
-        summary.failed += 1;
+        // Rebuild reservation and install the exact executor latch before any
+        // read-side reconciliation. recover() completes before traffic starts.
+        const winner = rfq.bestQuoteId ? await this.opts.store.getQuote(rfq.bestQuoteId) : null;
+        if (winner) {
+          this.reservations.set(winner.id, {
+            subaccountId: winner.makerSubaccountId,
+            amount: winner.reservedCash,
+          });
+        }
+        const reconciled = await this.reconcileExecuting(rfq);
+        if (reconciled.status === "executing") summary.unresolved += 1;
+        else summary.resolved += 1;
       }
     }
     return summary;

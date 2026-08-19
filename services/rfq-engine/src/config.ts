@@ -36,13 +36,21 @@ export interface EngineConfig {
   trustProxy: boolean;
   /** JSONL persistence path; null = in-memory store */
   storePath: string | null;
+  /** Fail-closed mutation switch. GET status remains available when false. */
+  withdrawalsEnabled: boolean;
+  /** Dedicated fsynced withdrawal operation journal. */
+  fundsStorePath: string | null;
+  withdrawalPreviewRateLimitPerMin: number;
+  withdrawalExecutionRateLimitPerMin: number;
   /** Focused wallet-to-subaccount projection; null leaves the directory endpoint unavailable. */
   subaccountDirectory: SubaccountDirectoryConfig | null;
   /** Matching contract (EIP-712 verifying contract) */
   matching: Address;
   rfqModule: Address;
+  withdrawalModule: Address;
   subAccounts: Address;
   cashAsset: Address;
+  cashToken: Address;
   /** SRMPortfolioViewer — live OIFeeRateBPS reads for the collateral pre-check */
   srmViewer: Address;
   standardManager: Address;
@@ -178,6 +186,12 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): EngineConfig {
     }
   }
 
+  const withdrawalsEnabled = env.WITHDRAWALS_ENABLED === "true";
+  const fundsStorePath = env.FUNDS_STORE_PATH?.trim() || null;
+  if (withdrawalsEnabled && chainId !== 31337 && !fundsStorePath) {
+    throw new Error("FUNDS_STORE_PATH is required when WITHDRAWALS_ENABLED=true off Anvil");
+  }
+
   return {
     chainId,
     rpcUrl: getRpcUrl(),
@@ -191,11 +205,25 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): EngineConfig {
     rfqRateLimitPerMin: Number(env.RFQ_RATE_LIMIT_PER_MIN ?? 30),
     trustProxy: env.TRUST_PROXY === "true",
     storePath: env.STORE_PATH ?? null,
+    withdrawalsEnabled,
+    fundsStorePath,
+    withdrawalPreviewRateLimitPerMin: parseIntegerSetting(
+      "WITHDRAWAL_PREVIEW_RATE_LIMIT_PER_MIN",
+      env.WITHDRAWAL_PREVIEW_RATE_LIMIT_PER_MIN ?? "6",
+      0,
+    ),
+    withdrawalExecutionRateLimitPerMin: parseIntegerSetting(
+      "WITHDRAWAL_EXECUTION_RATE_LIMIT_PER_MIN",
+      env.WITHDRAWAL_EXECUTION_RATE_LIMIT_PER_MIN ?? "12",
+      0,
+    ),
     subaccountDirectory: readSubaccountDirectoryConfig(env, deployments, chainId),
     matching: getDeployedAddress(deployments, "matching"),
     rfqModule: getDeployedAddress(deployments, "rfqModule"),
+    withdrawalModule: getDeployedAddress(deployments, "withdrawalModule"),
     subAccounts: getDeployedAddress(deployments, "subAccounts"),
     cashAsset: getDeployedAddress(deployments, "cashAsset"),
+    cashToken: getDeployedAddress(deployments, "usdt"),
     srmViewer: getDeployedAddress(deployments, "srmViewer"),
     standardManager: getDeployedAddress(deployments, "standardManager"),
     optionAssets: Object.fromEntries(activeMarkets.map((market) => [market.id, market.contracts!.optionAsset])),

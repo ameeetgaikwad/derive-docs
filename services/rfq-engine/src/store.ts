@@ -1,4 +1,12 @@
-import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
+import {
+  closeSync,
+  existsSync,
+  fsyncSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  writeSync,
+} from "node:fs";
 import { dirname } from "node:path";
 import type { Address, Hex } from "viem";
 import type { RfqTradeData } from "@hedge/shared";
@@ -8,6 +16,8 @@ import {
   serializeTrade,
   type Quote,
   type Rfq,
+  type FillSummary,
+  type RfqActionIdentity,
   type RfqStatus,
   type SerializedAction,
   type SerializedTrade,
@@ -91,9 +101,9 @@ export class InMemoryRfqStore implements RfqStore {
 
 // ---------------------------------------------------------------------------
 // JSONL persistence — append-only log, replayed into the in-memory index on
-// startup. Latest record per id wins; quote deletions are tombstoned. No
-// native deps, single file, durable enough for v1 (fsync-on-append is left to
-// the OS; the engine re-validates recovered state on boot).
+// startup. Latest record per id wins; quote deletions are tombstoned. Every
+// append is fsynced because intent, hashes, and terminal states gate reuse of
+// the shared executor wallet.
 // ---------------------------------------------------------------------------
 
 interface StoredInstrument {
@@ -135,7 +145,38 @@ interface StoredRfq {
       takerFee: string;
     };
   } | null;
+  executionIntent?: {
+    actions: [StoredRfqActionIdentity, StoredRfqActionIdentity];
+    calldataHash: Hex;
+    fromBlock: string;
+    txHash: Hex | null;
+    fill: StoredFill;
+  } | null;
   error: string | null;
+}
+
+interface StoredRfqActionIdentity {
+  subaccountId: string;
+  nonce: string;
+  module: string;
+  expiry: string;
+  owner: string;
+  signer: string;
+  dataHash: Hex;
+}
+
+interface StoredFill {
+  rfqId: string;
+  quoteId: string;
+  instrument: string;
+  maker: string;
+  makerSubaccountId: string;
+  takerSubaccountId: string;
+  amount: string;
+  premium: string;
+  totalPremium: string;
+  makerFee: string;
+  takerFee: string;
 }
 
 interface StoredQuote {
@@ -157,6 +198,62 @@ type StoreRecord =
   | { k: "rfq"; v: StoredRfq }
   | { k: "quote"; v: StoredQuote }
   | { k: "quote_del"; id: string };
+
+function fillToStored(fill: FillSummary): StoredFill {
+  return {
+    rfqId: fill.rfqId,
+    quoteId: fill.quoteId,
+    instrument: fill.instrument,
+    maker: fill.maker,
+    makerSubaccountId: fill.makerSubaccountId.toString(),
+    takerSubaccountId: fill.takerSubaccountId.toString(),
+    amount: fill.amount.toString(),
+    premium: fill.premium.toString(),
+    totalPremium: fill.totalPremium.toString(),
+    makerFee: fill.makerFee.toString(),
+    takerFee: fill.takerFee.toString(),
+  };
+}
+
+function fillFromStored(fill: StoredFill): FillSummary {
+  return {
+    rfqId: fill.rfqId,
+    quoteId: fill.quoteId,
+    instrument: fill.instrument,
+    maker: fill.maker as Address,
+    makerSubaccountId: BigInt(fill.makerSubaccountId),
+    takerSubaccountId: BigInt(fill.takerSubaccountId),
+    amount: BigInt(fill.amount),
+    premium: BigInt(fill.premium),
+    totalPremium: BigInt(fill.totalPremium),
+    makerFee: BigInt(fill.makerFee),
+    takerFee: BigInt(fill.takerFee),
+  };
+}
+
+function actionIdentityToStored(action: RfqActionIdentity): StoredRfqActionIdentity {
+  return {
+    subaccountId: action.subaccountId.toString(),
+    nonce: action.nonce.toString(),
+    module: action.module,
+    expiry: action.expiry.toString(),
+    owner: action.owner,
+    signer: action.signer,
+    dataHash: action.dataHash,
+  };
+}
+
+function actionIdentityFromStored(action: StoredRfqActionIdentity): RfqActionIdentity {
+  return {
+    subaccountId: BigInt(action.subaccountId),
+    nonce: BigInt(action.nonce),
+    module: action.module as Address,
+    expiry: BigInt(action.expiry),
+    owner: action.owner as Address,
+    signer: action.signer as Address,
+    dataHash: action.dataHash,
+  };
+}
 
 export function rfqToStored(rfq: Rfq): StoredRfq {
   return {
@@ -196,6 +293,18 @@ export function rfqToStored(rfq: Rfq): StoredRfq {
             makerFee: rfq.execution.fill.makerFee.toString(),
             takerFee: rfq.execution.fill.takerFee.toString(),
           },
+        }
+      : null,
+    executionIntent: rfq.executionIntent
+      ? {
+          actions: [
+            actionIdentityToStored(rfq.executionIntent.actions[0]),
+            actionIdentityToStored(rfq.executionIntent.actions[1]),
+          ],
+          calldataHash: rfq.executionIntent.calldataHash,
+          fromBlock: rfq.executionIntent.fromBlock.toString(),
+          txHash: rfq.executionIntent.txHash,
+          fill: fillToStored(rfq.executionIntent.fill),
         }
       : null,
     error: rfq.error,
@@ -240,6 +349,18 @@ export function rfqFromStored(s: StoredRfq): Rfq {
             makerFee: BigInt(s.execution.fill.makerFee),
             takerFee: BigInt(s.execution.fill.takerFee),
           },
+        }
+      : null,
+    executionIntent: s.executionIntent
+      ? {
+          actions: [
+            actionIdentityFromStored(s.executionIntent.actions[0]),
+            actionIdentityFromStored(s.executionIntent.actions[1]),
+          ],
+          calldataHash: s.executionIntent.calldataHash,
+          fromBlock: BigInt(s.executionIntent.fromBlock),
+          txHash: s.executionIntent.txHash,
+          fill: fillFromStored(s.executionIntent.fill),
         }
       : null,
     error: s.error,
@@ -341,7 +462,13 @@ export class JsonlRfqStore extends InMemoryRfqStore {
   }
 
   private append(record: StoreRecord): void {
-    appendFileSync(this.path, `${JSON.stringify(record)}\n`, "utf8");
+    const fd = openSync(this.path, "a");
+    try {
+      writeSync(fd, `${JSON.stringify(record)}\n`, undefined, "utf8");
+      fsyncSync(fd);
+    } finally {
+      closeSync(fd);
+    }
   }
 
   override async putRfq(rfq: Rfq): Promise<void> {

@@ -9,18 +9,28 @@ import {
   buildAction,
   encodeOptionSubId,
   encodeRfqOrder,
+  encodeTakerOrder,
   signAction,
   toUnit,
   type Action,
 } from "@hedge/shared";
 import { AuctionEngine } from "../src/auction.js";
-import type { ChainReader, SubmitResult, TxSubmitter } from "../src/chain.js";
+import {
+  ExecutorBroadcastUnknownError,
+  UNKNOWN_BROADCAST_OPERATION,
+  UnresolvedExecutorOperationError,
+  type ChainReader,
+  type SubmitResult,
+  type TxSubmitter,
+  type VerifyAndMatchReconciliation,
+  type VerifyAndMatchReconciliationRequest,
+} from "../src/chain.js";
 import { Executor } from "../src/executor.js";
 import { QuoteValidationError } from "../src/quotes.js";
 import { RfqEngineServer, WS_CLOSE_NOT_ALLOWLISTED, WS_CLOSE_SUPERSEDED } from "../src/server.js";
 import { InMemoryRfqStore, JsonlRfqStore } from "../src/store.js";
 import type { SubaccountDirectoryReader } from "../src/subaccount-directory.js";
-import { serializeAction } from "../src/types.js";
+import { serializeAction, type Quote, type Rfq } from "../src/types.js";
 
 // ---------------------------------------------------------------------------
 // Fixtures (mirroring test/auction.test.ts)
@@ -80,13 +90,59 @@ class FakeChainReader implements ChainReader {
 class FakeSubmitter implements TxSubmitter {
   executorAddress = "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266" as Address;
   calls: { actions: Action[]; signatures: Hex[]; actionData: Hex }[] = [];
+  error: Error | null = null;
+  paused: string[] = [];
+  cleared: string[] = [];
+  blocked = new Set<string>();
+  adopted: Hex[] = [];
+  clearedHashes: Hex[] = [];
+  reconciliation: VerifyAndMatchReconciliation = { state: "pending" };
+  reconciliationError: Error | null = null;
+  reconciliations: VerifyAndMatchReconciliationRequest[] = [];
+  eventLog: string[] | null = null;
+  async currentBlockNumber(): Promise<bigint> {
+    return 100n;
+  }
   async submitVerifyAndMatch(
     actions: Action[],
     signatures: Hex[],
     actionData: Hex,
+    onSubmitted?: (txHash: Hex) => Promise<void>,
   ): Promise<SubmitResult> {
+    if (this.blocked.size > 0) {
+      throw new UnresolvedExecutorOperationError([...this.blocked].sort());
+    }
     this.calls.push({ actions, signatures, actionData });
+    if (this.error instanceof UnresolvedExecutorOperationError) throw this.error;
+    if (this.error instanceof ExecutorBroadcastUnknownError) {
+      this.pauseForUnknownOperation(UNKNOWN_BROADCAST_OPERATION);
+      throw this.error;
+    }
+    await onSubmitted?.(FAKE_TX);
+    if (this.error) throw this.error;
     return { txHash: FAKE_TX, status: "success", blockNumber: 1n };
+  }
+  async reconcileVerifyAndMatch(
+    request: VerifyAndMatchReconciliationRequest,
+  ): Promise<VerifyAndMatchReconciliation> {
+    this.reconciliations.push(request);
+    if (this.reconciliationError) throw this.reconciliationError;
+    return this.reconciliation;
+  }
+  pauseForUnknownOperation(operationId: string): void {
+    this.paused.push(operationId);
+    this.blocked.add(operationId);
+  }
+  clearUnknownOperation(operationId: string): void {
+    this.cleared.push(operationId);
+    this.blocked.delete(operationId);
+    this.eventLog?.push(`clear:${operationId}`);
+  }
+  adoptUnresolvedTransaction(txHash: Hex): void {
+    this.adopted.push(txHash);
+  }
+  clearUnresolvedTransaction(txHash: Hex): void {
+    this.clearedHashes.push(txHash);
   }
 }
 
@@ -448,6 +504,65 @@ describe("quote cancel / replace", () => {
     const rej = await ws2.next("cancel_rejected");
     expect(String(rej.reason)).toContain("unknown quote");
   });
+
+  it("serializes quote admission with auction close so no late orphan reservation survives", async () => {
+    let announceQuoteWrite!: () => void;
+    let releaseQuoteWrite!: () => void;
+    const quoteWriteStarted = new Promise<void>((resolve) => { announceQuoteWrite = resolve; });
+    const quoteWriteGate = new Promise<void>((resolve) => { releaseQuoteWrite = resolve; });
+    class DelayedQuoteStore extends InMemoryRfqStore {
+      private delayed = false;
+      override async putQuote(quote: Quote): Promise<void> {
+        if (!this.delayed) {
+          this.delayed = true;
+          announceQuoteWrite();
+          await quoteWriteGate;
+        }
+        await super.putQuote(quote);
+      }
+    }
+
+    const store = new DelayedQuoteStore();
+    const engine = new AuctionEngine({
+      store,
+      chainReader: makeReader(),
+      executor: new Executor(new FakeSubmitter()),
+      chainId: CHAIN_ID,
+      matching: MATCHING,
+      rfqModule: RFQ_MODULE,
+      optionAssets: { BTC: OPTION_ASSET },
+      auctionWindowMs: 60_000,
+    });
+    cleanups.push(() => engine.stop());
+    const rfq = await engine.openRfq({
+      subaccountId: TAKER_SUBACC.toString(),
+      instrument: { asset: "BTC", expiry: EXPIRY.toString(), strike: "110000", isCall: true },
+      amount: "1",
+      direction: "sell",
+    });
+    const signed = await signedMakerQuote({
+      account: maker1,
+      subaccountId: MAKER1_SUBACC,
+      premium: toUnit("1500"),
+    });
+
+    const admission = engine.submitQuote({ rfqId: rfq.id, maker: maker1.address, ...signed });
+    await quoteWriteStarted;
+    let closeFinished = false;
+    const closing = engine.closeAuction(rfq.id).then(() => { closeFinished = true; });
+    await Promise.resolve();
+    expect(closeFinished).toBe(false);
+
+    releaseQuoteWrite();
+    const { quote } = await admission;
+    await closing;
+    expect(await engine.getRfq(rfq.id)).toMatchObject({
+      status: "closed",
+      bestQuoteId: quote.id,
+    });
+    expect(await engine.listQuotes(rfq.id)).toHaveLength(1);
+    expect(engine.reservedFor(MAKER1_SUBACC)).toBe(quote.reservedCash);
+  });
 });
 
 describe("connection dedupe (superseded)", () => {
@@ -668,14 +783,328 @@ describe("fee-aware collateral pre-check", () => {
   });
 });
 
+describe("uncertain RFQ execution", () => {
+  async function readyAcceptance(
+    submitter: FakeSubmitter,
+    store: InMemoryRfqStore = new InMemoryRfqStore(),
+    options: { now?: () => number; acceptDeadlineMs?: number } = {},
+  ) {
+    const reader = makeReader();
+    reader.owners.set(TAKER_SUBACC, maker2.address);
+    const engine = new AuctionEngine({
+      store,
+      chainReader: reader,
+      executor: new Executor(submitter),
+      chainId: CHAIN_ID,
+      matching: MATCHING,
+      rfqModule: RFQ_MODULE,
+      optionAssets: { BTC: OPTION_ASSET },
+      auctionWindowMs: 60_000,
+      acceptDeadlineMs: options.acceptDeadlineMs,
+      now: options.now,
+    });
+    cleanups.push(() => engine.stop());
+
+    const rfq = await engine.openRfq({
+      subaccountId: TAKER_SUBACC.toString(),
+      instrument: { asset: "BTC", expiry: EXPIRY.toString(), strike: "110000", isCall: true },
+      amount: "1",
+      direction: "sell",
+    });
+    const makerQuote = await signedMakerQuote({
+      account: maker1,
+      subaccountId: MAKER1_SUBACC,
+      premium: toUnit("1500"),
+    });
+    await engine.submitQuote({ rfqId: rfq.id, maker: maker1.address, ...makerQuote });
+    await engine.closeAuction(rfq.id);
+    const closed = (await engine.getRfq(rfq.id))!;
+    const winner = (await engine.getBestQuote(closed))!;
+    expect(engine.reservedFor(MAKER1_SUBACC)).toBe(toUnit("1500"));
+
+    const takerAction = buildAction({
+      subaccountId: TAKER_SUBACC,
+      module: RFQ_MODULE,
+      data: encodeTakerOrder({ orderHash: winner.orderHash, maxFee: 0n }),
+      owner: maker2.address,
+    });
+    const takerSignature = await signAction({
+      action: takerAction,
+      signer: maker2,
+      chainId: CHAIN_ID,
+      matchingAddress: MATCHING,
+    });
+    return { engine, rfq, reader, store, takerAction, takerSignature };
+  }
+
+  it("keeps a broadcast-ambiguous RFQ non-terminal, reserved, and globally latched", async () => {
+    const submitter = new FakeSubmitter();
+    const { engine, rfq, takerAction, takerSignature } = await readyAcceptance(submitter);
+    submitter.error = new Error("receipt RPC timed out after broadcast");
+
+    await expect(
+      engine.acceptRfq({ rfqId: rfq.id, action: takerAction, signature: takerSignature }),
+    ).rejects.toThrow("receipt RPC timed out");
+    expect(await engine.getRfq(rfq.id)).toMatchObject({
+      status: "executing",
+      executionIntent: {
+        txHash: FAKE_TX,
+        fromBlock: 100n,
+        actions: [
+          expect.objectContaining({ owner: maker1.address }),
+          expect.objectContaining({ owner: maker2.address }),
+        ],
+      },
+      error: expect.stringContaining("execution outcome unresolved"),
+    });
+    expect(engine.reservedFor(MAKER1_SUBACC)).toBe(toUnit("1500"));
+    expect(submitter.paused).toContain(`rfq:${rfq.id}`);
+  });
+
+  it("returns a pre-broadcast shared-latch rejection to closed without cascading latches", async () => {
+    const submitter = new FakeSubmitter();
+    const { engine, rfq, takerAction, takerSignature } = await readyAcceptance(submitter);
+    submitter.error = new UnresolvedExecutorOperationError(["older-withdrawal"]);
+
+    await expect(
+      engine.acceptRfq({ rfqId: rfq.id, action: takerAction, signature: takerSignature }),
+    ).rejects.toBeInstanceOf(UnresolvedExecutorOperationError);
+    expect(await engine.getRfq(rfq.id)).toMatchObject({
+      status: "closed",
+      executionIntent: null,
+      error: expect.stringContaining("executor unavailable"),
+    });
+    expect(engine.reservedFor(MAKER1_SUBACC)).toBe(toUnit("1500"));
+    expect(submitter.paused).not.toContain(`rfq:${rfq.id}`);
+  });
+
+  it("does not let a status poll reconcile while the executing intent is being persisted", async () => {
+    let announceExecuting!: () => void;
+    let releaseExecuting!: () => void;
+    const executingVisible = new Promise<void>((resolve) => { announceExecuting = resolve; });
+    const executingGate = new Promise<void>((resolve) => { releaseExecuting = resolve; });
+    class InterleavingStore extends InMemoryRfqStore {
+      private delayed = false;
+      override async putRfq(next: Rfq): Promise<void> {
+        await super.putRfq(next);
+        if (next.status === "executing" && !this.delayed) {
+          this.delayed = true;
+          announceExecuting();
+          await executingGate;
+        }
+      }
+    }
+
+    const submitter = new FakeSubmitter();
+    const store = new InterleavingStore();
+    const { engine, rfq, takerAction, takerSignature } = await readyAcceptance(submitter, store);
+    const acceptance = engine.acceptRfq({
+      rfqId: rfq.id,
+      action: takerAction,
+      signature: takerSignature,
+    });
+
+    await executingVisible;
+    expect(await engine.getRfq(rfq.id)).toMatchObject({ status: "executing" });
+    expect(submitter.reconciliations).toHaveLength(0);
+    expect(submitter.blocked).not.toContain(`rfq:${rfq.id}`);
+
+    releaseExecuting();
+    await expect(acceptance).resolves.toMatchObject({ status: "success" });
+    expect(await engine.getRfq(rfq.id)).toMatchObject({ status: "executed" });
+  });
+
+  it("expires instead of broadcasting when the block-anchor read crosses the accept deadline", async () => {
+    let announceAnchor!: () => void;
+    let releaseAnchor!: () => void;
+    const anchorStarted = new Promise<void>((resolve) => { announceAnchor = resolve; });
+    const anchorGate = new Promise<void>((resolve) => { releaseAnchor = resolve; });
+    class DelayedAnchorSubmitter extends FakeSubmitter {
+      override async currentBlockNumber(): Promise<bigint> {
+        announceAnchor();
+        await anchorGate;
+        return 100n;
+      }
+    }
+
+    let nowMs = Date.now();
+    const submitter = new DelayedAnchorSubmitter();
+    const { engine, rfq, takerAction, takerSignature } = await readyAcceptance(
+      submitter,
+      new InMemoryRfqStore(),
+      { now: () => nowMs, acceptDeadlineMs: 60_000 },
+    );
+    const acceptance = engine.acceptRfq({
+      rfqId: rfq.id,
+      action: takerAction,
+      signature: takerSignature,
+    });
+    await anchorStarted;
+    nowMs += 60_001;
+    const expiry = engine.expireAccept(rfq.id);
+    releaseAnchor();
+
+    await expect(acceptance).rejects.toThrow("taker accept deadline passed");
+    await expiry;
+    expect(submitter.calls).toHaveLength(0);
+    expect(await engine.getRfq(rfq.id)).toMatchObject({ status: "expired" });
+    expect(engine.reservedFor(MAKER1_SUBACC)).toBe(0n);
+  });
+
+  it("keeps an attribution mismatch executing, reserved, and latched", async () => {
+    const submitter = new FakeSubmitter();
+    const { engine, rfq, takerAction, takerSignature } = await readyAcceptance(submitter);
+    submitter.error = new Error("receipt unavailable");
+    await expect(engine.acceptRfq({
+      rfqId: rfq.id,
+      action: takerAction,
+      signature: takerSignature,
+    })).rejects.toThrow("receipt unavailable");
+
+    submitter.reconciliationError = new Error("calldata does not match RFQ intent");
+    const unresolved = await engine.getRfq(rfq.id);
+    expect(unresolved).toMatchObject({
+      status: "executing",
+      error: expect.stringContaining("calldata does not match RFQ intent"),
+    });
+    expect(engine.reservedFor(MAKER1_SUBACC)).toBe(toUnit("1500"));
+    expect(submitter.blocked).toContain(`rfq:${rfq.id}`);
+    expect(submitter.cleared).not.toContain(`rfq:${rfq.id}`);
+  });
+
+  it("terminalizes a hashless expired-unused attempt before clearing latches and allows the next writer", async () => {
+    const submitter = new FakeSubmitter();
+    const { engine, rfq, takerAction, takerSignature } = await readyAcceptance(submitter);
+    submitter.error = new ExecutorBroadcastUnknownError();
+
+    await expect(
+      engine.acceptRfq({ rfqId: rfq.id, action: takerAction, signature: takerSignature }),
+    ).rejects.toBeInstanceOf(ExecutorBroadcastUnknownError);
+    expect((await engine.getRfq(rfq.id))?.executionIntent?.txHash).toBeNull();
+    expect(submitter.blocked).toContain(UNKNOWN_BROADCAST_OPERATION);
+    expect(submitter.blocked).toContain(`rfq:${rfq.id}`);
+
+    submitter.reconciliation = { state: "expired-unused" };
+    const terminal = await engine.getRfq(rfq.id);
+    expect(terminal).toMatchObject({ status: "failed", execution: null });
+    expect(engine.reservedFor(MAKER1_SUBACC)).toBe(0n);
+    expect(submitter.cleared).toEqual(expect.arrayContaining([
+      `rfq:${rfq.id}`,
+      UNKNOWN_BROADCAST_OPERATION,
+    ]));
+    expect(submitter.blocked.size).toBe(0);
+
+    submitter.error = null;
+    await expect(submitter.submitVerifyAndMatch([], [], "0x")).resolves.toMatchObject({
+      status: "success",
+    });
+  });
+
+  it("recovers a durably hashed execution after restart and clears only after terminal fsync", async () => {
+    const path = join(mkdtempSync(join(tmpdir(), "rfq-known-hash-")), "rfq.jsonl");
+    const firstSubmitter = new FakeSubmitter();
+    const first = await readyAcceptance(firstSubmitter, new JsonlRfqStore(path));
+    firstSubmitter.error = new Error("receipt lookup lost after broadcast");
+    await expect(first.engine.acceptRfq({
+      rfqId: first.rfq.id,
+      action: first.takerAction,
+      signature: first.takerSignature,
+    })).rejects.toThrow("receipt lookup lost");
+    first.engine.stop();
+
+    const onDisk = (await new JsonlRfqStore(path).getRfq(first.rfq.id))!;
+    expect(onDisk).toMatchObject({
+      status: "executing",
+      executionIntent: { txHash: FAKE_TX },
+    });
+    expect(onDisk.executionIntent).not.toHaveProperty("calldata");
+
+    const order: string[] = [];
+    class RecordingStore extends JsonlRfqStore {
+      override async putRfq(rfq: Rfq): Promise<void> {
+        await super.putRfq(rfq);
+        order.push(`persist:${rfq.status}`);
+      }
+    }
+    const secondSubmitter = new FakeSubmitter();
+    secondSubmitter.eventLog = order;
+    secondSubmitter.reconciliation = {
+      state: "mined",
+      result: { txHash: FAKE_TX, status: "success", blockNumber: 101n },
+    };
+    const engine2 = new AuctionEngine({
+      store: new RecordingStore(path),
+      chainReader: first.reader,
+      executor: new Executor(secondSubmitter),
+      chainId: CHAIN_ID,
+      matching: MATCHING,
+      rfqModule: RFQ_MODULE,
+      optionAssets: { BTC: OPTION_ASSET },
+      auctionWindowMs: 60_000,
+    });
+    cleanups.push(() => engine2.stop());
+
+    const summary = await engine2.recover();
+    expect(summary.resolved).toBe(1);
+    expect((await new JsonlRfqStore(path).getRfq(first.rfq.id))?.status).toBe("executed");
+    expect(engine2.reservedFor(MAKER1_SUBACC)).toBe(0n);
+    expect(order.indexOf("persist:executed")).toBeLessThan(
+      order.indexOf(`clear:rfq:${first.rfq.id}`),
+    );
+    expect(secondSubmitter.clearedHashes).toContain(FAKE_TX);
+  });
+
+  it("durably fails and releases a known execution whose canonical receipt reverted", async () => {
+    const path = join(mkdtempSync(join(tmpdir(), "rfq-reverted-hash-")), "rfq.jsonl");
+    const firstSubmitter = new FakeSubmitter();
+    const first = await readyAcceptance(firstSubmitter, new JsonlRfqStore(path));
+    firstSubmitter.error = new Error("receipt unavailable");
+    await expect(first.engine.acceptRfq({
+      rfqId: first.rfq.id,
+      action: first.takerAction,
+      signature: first.takerSignature,
+    })).rejects.toThrow("receipt unavailable");
+    first.engine.stop();
+
+    const secondSubmitter = new FakeSubmitter();
+    secondSubmitter.reconciliation = {
+      state: "mined",
+      result: { txHash: FAKE_TX, status: "reverted", blockNumber: 102n },
+    };
+    const engine2 = new AuctionEngine({
+      store: new JsonlRfqStore(path),
+      chainReader: first.reader,
+      executor: new Executor(secondSubmitter),
+      chainId: CHAIN_ID,
+      matching: MATCHING,
+      rfqModule: RFQ_MODULE,
+      optionAssets: { BTC: OPTION_ASSET },
+      auctionWindowMs: 60_000,
+    });
+    cleanups.push(() => engine2.stop());
+
+    await engine2.recover();
+    expect(await engine2.getRfq(first.rfq.id)).toMatchObject({
+      status: "failed",
+      execution: { txHash: FAKE_TX, status: "reverted", blockNumber: 102n },
+    });
+    expect(engine2.reservedFor(MAKER1_SUBACC)).toBe(0n);
+    expect(secondSubmitter.clearedHashes).toContain(FAKE_TX);
+  });
+});
+
 describe("persistent store + restart recovery", () => {
   const tmp = () => join(mkdtempSync(join(tmpdir(), "rfq-store-")), "rfq.jsonl");
 
-  function makeEngine(storePath: string, reader: FakeChainReader): AuctionEngine {
+  function makeEngine(
+    storePath: string,
+    reader: FakeChainReader,
+    submitter: FakeSubmitter = new FakeSubmitter(),
+  ): AuctionEngine {
     const engine = new AuctionEngine({
       store: new JsonlRfqStore(storePath),
       chainReader: reader,
-      executor: new Executor(new FakeSubmitter()),
+      executor: new Executor(submitter),
       chainId: CHAIN_ID,
       matching: MATCHING,
       rfqModule: RFQ_MODULE,
@@ -719,7 +1148,7 @@ describe("persistent store + restart recovery", () => {
     expect(engine2.reservedFor(MAKER1_SUBACC)).toBe(toUnit("1500"));
   });
 
-  it("closes auctions whose window elapsed while down, expires stale accepts, fails in-flight executions", async () => {
+  it("closes auctions whose window elapsed while down and latches in-flight executions", async () => {
     const path = tmp();
     const reader = makeReader();
 
@@ -767,10 +1196,11 @@ describe("persistent store + restart recovery", () => {
     engine1.stop();
 
     // restart far past the auction window
-    const engine2 = makeEngine(path, reader);
+    const legacySubmitter = new FakeSubmitter();
+    const engine2 = makeEngine(path, reader, legacySubmitter);
     const summary = await engine2.recover();
     expect(summary.closed).toBe(1);
-    expect(summary.failed).toBe(1);
+    expect(summary.unresolved).toBe(1);
 
     const closed = await engine2.getRfq(rfqOpen.id);
     expect(closed?.status).toBe("closed"); // best quote selected post-restart
@@ -778,15 +1208,16 @@ describe("persistent store + restart recovery", () => {
     expect(closed?.acceptDeadlineAt).not.toBeNull();
     expect(engine2.reservedFor(MAKER1_SUBACC)).toBe(toUnit("1500"));
 
-    const failed = await engine2.getRfq(rfqExecuting.id);
-    expect(failed?.status).toBe("failed");
-    expect(String(failed?.error)).toContain("restarted during execution");
+    const unresolved = await engine2.getRfq(rfqExecuting.id);
+    expect(unresolved?.status).toBe("executing");
+    expect(String(unresolved?.error)).toContain("legacy execution record");
+    expect(legacySubmitter.blocked).toContain(`rfq:${rfqExecuting.id}`);
 
     // a third boot sees the durable post-recovery state (trade history intact)
     engine2.stop();
     const engine3 = makeEngine(path, reader);
     expect((await engine3.getRfq(rfqOpen.id))?.status).toBe("closed");
-    expect((await engine3.getRfq(rfqExecuting.id))?.status).toBe("failed");
+    expect((await engine3.getRfq(rfqExecuting.id))?.status).toBe("executing");
     expect(await engine3.listQuotes(rfqOpen.id)).toHaveLength(1);
   });
 });

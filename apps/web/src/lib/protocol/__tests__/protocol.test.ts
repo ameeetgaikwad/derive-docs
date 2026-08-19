@@ -1,6 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { hashTypedData } from "viem";
-import { actionTypedData, buildAction } from "../actions";
+import { actionTypedData, buildAction, generateNonce } from "../actions";
 import {
   ACTION_TYPEHASH,
   computeDomainSeparator,
@@ -38,6 +38,19 @@ describe("EIP-712 constants vs on-chain-verified deployment values", () => {
 });
 
 describe("EIP-712 Action wallet payload", () => {
+  it("uses Web Crypto to generate a full uint256 nonce", () => {
+    const getRandomValues = vi.spyOn(globalThis.crypto, "getRandomValues").mockImplementation((array) => {
+      const bytes = array as Uint8Array;
+      bytes.fill(0);
+      bytes[0] = 0x80;
+      bytes[31] = 0x01;
+      return array;
+    });
+    expect(generateNonce()).toBe((1n << 255n) + 1n);
+    expect(getRandomValues).toHaveBeenCalledTimes(1);
+    getRandomValues.mockRestore();
+  });
+
   it("serializes uint fields without bigint suffixes and preserves the digest", () => {
     const owner = "0x93104E260cb74E94038F4325098d31EE426C6F85" as const;
     const matching = "0x0c412a552cbfD904C202E205380DF6444d81f49f" as const;

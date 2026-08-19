@@ -1,12 +1,13 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Check, ChevronDown, Plus, RefreshCw } from "lucide-react";
+import { ArrowDownToLine, Check, ChevronDown, Plus, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import { formatUnits } from "viem";
 import { useCoveredCallSubaccount } from "@/hooks/protocol/useCoveredCallSubaccount";
 import { cn } from "@/lib/utils";
 import { useAccountStore } from "@/stores/account";
+import { useFundsStore } from "@/stores/funds";
 
 function cashLabel(balance: bigint): string {
   const amount = Number(formatUnits(balance, 18));
@@ -20,6 +21,7 @@ export function SubaccountMenu(): React.JSX.Element {
   const containerRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const selectionLocked = useAccountStore((state) => state.selectionLocked);
+  const openFunds = useFundsStore((state) => state.open);
   const {
     accounts,
     subaccountId,
@@ -190,6 +192,15 @@ export function SubaccountMenu(): React.JSX.Element {
 
           {!error && (
             <div className="border-t-[0.5px] border-zinc-200 p-2">
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => { openFunds(); closeAndFocus(); }}
+                className="flex min-h-11 w-full items-center gap-3 px-2 font-mono text-[10px] font-semibold uppercase tracking-[0.06em] text-zinc-700 outline-none transition-colors hover:bg-orange-50 hover:text-orange-700 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-orange-500"
+              >
+                <ArrowDownToLine className="size-4" aria-hidden="true" />
+                Manage funds
+              </button>
               <button
                 type="button"
                 role="menuitem"

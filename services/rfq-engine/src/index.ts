@@ -16,6 +16,14 @@ import {
 } from "./subaccount-directory.js";
 import { SubaccountDirectoryWorker } from "./subaccount-directory-worker.js";
 import { ViemDirectoryChainReader } from "./viem-subaccount-directory.js";
+import { WithdrawalEngine } from "./withdrawal.js";
+import { ViemWithdrawalGateway } from "./withdrawal-gateway.js";
+import {
+  InMemoryWithdrawalOperationStore,
+  JsonlWithdrawalOperationStore,
+} from "./withdrawal-store.js";
+import type { WithdrawalAssetDefinition } from "./withdrawal-types.js";
+import { AccountLock } from "./account-lock.js";
 
 export * from "./types.js";
 export * from "./store.js";
@@ -30,6 +38,11 @@ export * from "./subaccount-directory.js";
 export * from "./subaccount-directory-worker.js";
 export * from "./viem-subaccount-directory.js";
 export * from "./dynamodb-subaccount-directory.js";
+export * from "./withdrawal-types.js";
+export * from "./withdrawal-store.js";
+export * from "./withdrawal-gateway.js";
+export * from "./withdrawal.js";
+export * from "./account-lock.js";
 
 async function main(): Promise<void> {
   const config = loadConfig();
@@ -97,6 +110,7 @@ async function main(): Promise<void> {
     );
   }
 
+  const accountLock = new AccountLock();
   const engine = new AuctionEngine({
     store,
     chainReader: reader,
@@ -111,6 +125,60 @@ async function main(): Promise<void> {
       assertMarketFeedsReady(publicClient, market, expiry, strike, rawAmount),
     auctionWindowMs: config.auctionWindowMs,
     acceptDeadlineMs: config.takerAcceptDeadlineMs,
+    accountLock,
+  });
+
+  const withdrawalAssets: WithdrawalAssetDefinition[] = [
+    {
+      assetId: "cash",
+      kind: "cash",
+      marketId: null,
+      symbol: "Cash",
+      assetAddress: config.cashAsset,
+      configuredTokenAddress: config.cashToken,
+      // CashAsset supports whatever native decimals its configured stablecoin
+      // exposes. The gateway validates/read-backs the live ERC-20 value at
+      // startup and every preview keeps amounts in those native units.
+      configuredTokenDecimals: null,
+      scaledUi: false,
+    },
+    ...config.markets
+      // Disabled trading markets remain exit-enabled so collateral is never trapped.
+      .filter((market) => market.contracts !== null && market.collateral.address !== null)
+      .map((market): WithdrawalAssetDefinition => ({
+        assetId: `market:${market.id}`,
+        kind: "market-collateral",
+        marketId: market.id,
+        symbol: market.collateral.symbol,
+        assetAddress: market.contracts!.baseAsset,
+        configuredTokenAddress: market.collateral.address,
+        configuredTokenDecimals: market.collateral.decimals,
+        scaledUi: market.collateral.scaledUi,
+      })),
+  ];
+  const withdrawalStore = config.fundsStorePath
+    ? new JsonlWithdrawalOperationStore(config.fundsStorePath)
+    : new InMemoryWithdrawalOperationStore();
+  const withdrawalGateway = new ViemWithdrawalGateway(publicClient, submitter, {
+    matching: config.matching,
+    withdrawalModule: config.withdrawalModule,
+    subAccounts: config.subAccounts,
+    standardManager: config.standardManager,
+    cashAsset: config.cashAsset,
+  });
+  if (config.withdrawalsEnabled) {
+    await withdrawalGateway.validateConfiguration(withdrawalAssets);
+  }
+  const withdrawals = new WithdrawalEngine({
+    chainId: config.chainId,
+    matching: config.matching,
+    withdrawalModule: config.withdrawalModule,
+    standardManager: config.standardManager,
+    assets: withdrawalAssets,
+    gateway: withdrawalGateway,
+    store: withdrawalStore,
+    reservedCash: (subaccountId) => engine.reservedFor(subaccountId),
+    accountLock,
   });
 
   if (config.storePath) {
@@ -119,7 +187,18 @@ async function main(): Promise<void> {
     console.log(
       `rfq-engine store ${config.storePath}: recovered ` +
         `${recovered.rearmed} re-armed, ${recovered.closed} closed, ` +
-        `${recovered.expired} expired, ${recovered.failed} failed-in-flight`,
+        `${recovered.expired} expired, ${recovered.resolved} reconciled, ` +
+        `${recovered.unresolved} unresolved-in-flight`,
+    );
+  }
+  if (config.fundsStorePath) {
+    const withdrawalRecovery = await withdrawals.recover();
+    // eslint-disable-next-line no-console
+    console.log(
+      `withdrawal store ${config.fundsStorePath}: ` +
+        `${withdrawalRecovery.confirmed} confirmed, ${withdrawalRecovery.reverted} reverted, ` +
+        `${withdrawalRecovery.expired} expired, ${withdrawalRecovery.unknown} unknown, ` +
+        `${withdrawalRecovery.pending} pending`,
     );
   }
 
@@ -135,6 +214,10 @@ async function main(): Promise<void> {
     heartbeatMs: config.heartbeatMs,
     markets: config.markets,
     subaccountDirectory,
+    withdrawals,
+    withdrawalsEnabled: config.withdrawalsEnabled,
+    withdrawalPreviewRateLimitPerMin: config.withdrawalPreviewRateLimitPerMin,
+    withdrawalExecutionRateLimitPerMin: config.withdrawalExecutionRateLimitPerMin,
     marketStatusProvider: async (market) => {
       const status = marketStatus(market);
       if (status.status !== "open" || market.marketHours !== "24/5" || !market.contracts) {
@@ -171,7 +254,8 @@ async function main(): Promise<void> {
       `makers ${config.makerAllowlist.length > 0 ? `allowlist[${config.makerAllowlist.length}]` : "open"}, ` +
       `store ${config.storePath ?? "in-memory"}, ` +
       `directory ${config.subaccountDirectory?.tableName ?? "disabled"})\n` +
-      `  REST: POST /rfq | GET /rfq/:id | POST /rfq/:id/accept | GET /subaccounts | GET /health\n` +
+      `  REST: POST /rfq | GET /rfq/:id | POST /rfq/:id/accept | POST /withdrawals/preview | ` +
+      `POST /withdrawals | POST /withdrawals/:id/submit | GET /withdrawals/:id | GET /subaccounts | GET /health\n` +
       `  WS:   /maker (auth handshake -> RFQ stream + quotes) | /taker`,
   );
 
