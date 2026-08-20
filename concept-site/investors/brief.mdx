@@ -1,0 +1,43 @@
+---
+title: "The CEO investor brief"
+description: "A source-grounded, three-minute company narrative."
+icon: "presentation"
+---
+
+# Hedge in three minutes
+
+## The thesis
+
+Hedge is building an outcome-driven market for people who already own the asset. Long-term holders often know the price at which they would trim, diversify, or rebalance, but today's choices are blunt: wait with an idle position, sell before the target arrives, or navigate a professional derivatives interface. Hedge turns a goal the holder can state into a bounded request that specialist market makers can price.
+
+The category is larger than an options screen. Held assets contain unexpressed intentions—future sell targets, future buy targets, and time-bound risk preferences. The company thesis is that those intentions can become competitive markets when the product translates them clearly and the protocol enforces the agreed outcome.
+
+## The wedge
+
+The first product is a BTCB covered call, framed as “choose a future sell target and get an offer for the upside above it.” The holder selects an amount, target price, and expiry. In return for a premium, the holder gives up the economic upside above that target on the covered amount through expiry.
+
+The trade-off stays visible. If BTC finishes below the target, the option expires without a payout and the holder keeps the covered BTCB plus the premium, subject to fees. If BTC finishes above the target, the premium remains with the holder but the upside above the target is offset through cash settlement. This is paid risk, not free yield.
+
+## The mechanism
+
+The market loop has three steps. First, **collateralize**: the holder commits enough BTCB to back the selected outcome. Second, **quote and accept**: eligible market makers compete with signed premiums, and the holder accepts only if the offer justifies the trade-off. Third, **settle on-chain**: the accepted position and premium move together under risk checks, and the expiry result follows the agreed price reference.
+
+That split keeps the customer surface simple while preserving specialist price discovery and enforceable settlement underneath it.
+
+## The business model
+
+Hedge includes a transaction-linked protocol fee. When a fill creates new open interest, each side pays a configurable cash fee to the configured fee account. This is a monetization mechanism, not a claim of realized revenue. Production economics remain to be finalized and should not be presented as a fixed take rate.
+
+## Proof and status
+
+The product flow, maker coordination, risk and settlement rails, oracle services, and isolated chain-56 staging configuration exist as a connected system. A minimal-value BTCB staging trade has completed, and the tracked staging manifest spans BTC, Gold, the S&P 500, and NVIDIA.
+
+Hedge remains **PRE-LAUNCH**. The chain-56 environment is isolated and capped staging; production deposits and unrestricted production trading are gated. Outstanding production controls and settlement rehearsals prevent staging evidence from being presented as launch readiness.
+
+## The next milestone
+
+The next company-level milestone is one controlled, production-approved loop: a real holder request receives competitive quotes, executes under final controls, settles correctly, and produces observable operating evidence. That proves the user framing, liquidity loop, and operating system together.
+
+<Warning>
+**Before external circulation, add only verified company inputs:** founder and team track record; measured user and maker traction; named customers or partners with permission; market-sizing method and sources; fundraising amount and terms; use of funds; ownership and cap-table facts; and approved financial projections. Until supplied, none of these should be implied.
+</Warning>

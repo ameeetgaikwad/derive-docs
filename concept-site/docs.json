@@ -1,0 +1,77 @@
+{
+  "$schema": "https://mintlify.com/docs.json",
+  "theme": "mint",
+  "name": "Hedge Narrative",
+  "description": "The conceptual story, product thesis, platform case, and launch path for Hedge.",
+  "colors": {
+    "primary": "#F7931A",
+    "light": "#FFA94D",
+    "dark": "#E8830A"
+  },
+  "appearance": {
+    "default": "light"
+  },
+  "fonts": {
+    "family": "Inter"
+  },
+  "icons": {
+    "library": "lucide"
+  },
+  "navigation": {
+    "groups": [
+      {
+        "group": "Start Here",
+        "pages": [
+          "index",
+          "investors/brief"
+        ]
+      },
+      {
+        "group": "The Thesis",
+        "pages": [
+          "thesis/category",
+          "thesis/held-assets"
+        ]
+      },
+      {
+        "group": "Product",
+        "pages": [
+          "product/outcome-first",
+          "product/market-loop"
+        ]
+      },
+      {
+        "group": "Platform",
+        "pages": [
+          "platform/business-model",
+          "platform/market-engine"
+        ]
+      },
+      {
+        "group": "Proof & Path",
+        "pages": [
+          "progress/proof",
+          "progress/roadmap"
+        ]
+      }
+    ]
+  },
+  "navbar": {
+    "primary": {
+      "type": "button",
+      "label": "Read investor brief",
+      "href": "/investors/brief"
+    }
+  },
+  "footer": {
+    "socials": {
+      "github": "https://github.com/Sats-Terminal/derive"
+    }
+  },
+  "search": {
+    "prompt": "Search the Hedge narrative..."
+  },
+  "seo": {
+    "indexing": "navigable"
+  }
+}

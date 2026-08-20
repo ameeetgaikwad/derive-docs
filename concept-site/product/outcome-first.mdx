@@ -1,0 +1,41 @@
+---
+title: "From price target to premium"
+description: "The BTC covered-call wedge, explained as a holder outcome."
+icon: "target"
+---
+
+# Start with the decision the holder already understands
+
+The first Hedge product is a BTC covered call. It asks for three inputs:
+
+1. How much BTCB do you want to cover?
+2. What future price would make you comfortable giving up additional upside?
+3. How long are you willing to make that commitment?
+
+Those choices define a covered call. Market makers then compete to pay a premium for the upside above the selected price through the selected date.
+
+## The exchange
+
+The holder is not receiving free yield. The premium pays for a specific trade-off.
+
+| At expiry | Economic outcome |
+|---|---|
+| BTC finishes below the target | The call expires without a payout. The holder keeps the covered BTCB and the premium, subject to protocol fees. |
+| BTC finishes above the target | The holder keeps the premium but gives up the economic upside above the target on the covered amount through cash settlement. |
+
+The BTCB remains in the holder's protocol account while the cash result reflects the option outcome. A cash shortfall can become borrowing against collateral, so the product must show the full obligation rather than describe the position as risk-free.
+
+<Warning>
+Premium is compensation for capped upside and settlement obligations. It is not guaranteed return, interest, or downside protection for the BTCB price.
+</Warning>
+
+## Why this is a useful wedge
+
+The story is concrete enough for a first product and demanding enough to prove the underlying system:
+
+- The holder must understand the outcome before signing.
+- Makers must price a bespoke combination of amount, target, and date.
+- The market must choose a quote fairly.
+- The protocol must enforce collateral, fees, and settlement.
+
+Solving that loop creates a foundation for other held-asset outcomes without asking the customer to think like a derivatives desk.

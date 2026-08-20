@@ -1,0 +1,126 @@
+{
+  "allowedSources": [
+    "PRODUCTION.md",
+    "protocol/deployments/staging/markets/56.json",
+    "docs-site/how-it-works.mdx",
+    "docs-site/architecture.mdx",
+    "docs-site/reference/fees.mdx",
+    "apps/web/src/components/marketing/PublicLanding.tsx"
+  ],
+  "reviewedContentSha256": "3af8f68c267fa42b88e06c7614e251979f65082c03ccbf2c849a15f6af98aeed",
+  "pageReviews": {
+    "index": {
+      "sources": [
+        "PRODUCTION.md",
+        "docs-site/how-it-works.mdx",
+        "docs-site/architecture.mdx",
+        "apps/web/src/components/marketing/PublicLanding.tsx"
+      ],
+      "approvedClaims": [
+        "Hedge is building an outcome-driven market for people who already own an asset.",
+        "The first expression is a BTC covered call.",
+        "The separate technical docs remain the source for integrations, contracts, and operating procedures."
+      ]
+    },
+    "investors/brief": {
+      "sources": [
+        "PRODUCTION.md",
+        "protocol/deployments/staging/markets/56.json",
+        "docs-site/how-it-works.mdx",
+        "docs-site/architecture.mdx",
+        "docs-site/reference/fees.mdx",
+        "apps/web/src/components/marketing/PublicLanding.tsx"
+      ],
+      "approvedClaims": [
+        "The first product is a BTCB covered call",
+        "Hedge includes a transaction-linked protocol fee.",
+        "A minimal-value BTCB staging trade has completed",
+        "Hedge remains **PRE-LAUNCH**.",
+        "The chain-56 environment is isolated and capped staging; production deposits and unrestricted production trading are gated."
+      ]
+    },
+    "thesis/category": {
+      "sources": [
+        "docs-site/architecture.mdx",
+        "apps/web/src/components/marketing/PublicLanding.tsx"
+      ],
+      "approvedClaims": [
+        "An **outcome-driven market** starts with a result the holder can describe",
+        "prove the loop with BTC covered calls"
+      ]
+    },
+    "thesis/held-assets": {
+      "sources": [
+        "docs-site/how-it-works.mdx",
+        "apps/web/src/components/marketing/PublicLanding.tsx"
+      ],
+      "approvedClaims": [
+        "A covered call exchanges upside above the selected target for a premium.",
+        "Hedge calls this an **outcome-driven market for held assets**."
+      ]
+    },
+    "product/outcome-first": {
+      "sources": [
+        "docs-site/how-it-works.mdx",
+        "apps/web/src/components/marketing/PublicLanding.tsx"
+      ],
+      "approvedClaims": [
+        "The first Hedge product is a BTC covered call.",
+        "The BTCB remains in the holder's protocol account while the cash result reflects the option outcome.",
+        "A cash shortfall can become borrowing against collateral"
+      ]
+    },
+    "product/market-loop": {
+      "sources": [
+        "docs-site/how-it-works.mdx",
+        "docs-site/architecture.mdx"
+      ],
+      "approvedClaims": [
+        "The accepted trade moves the position and premium together under on-chain risk checks.",
+        "Signed terms, risk checks, position changes, cash movement, and expiry settlement are enforced by the protocol."
+      ]
+    },
+    "platform/business-model": {
+      "sources": [
+        "docs-site/reference/fees.mdx"
+      ],
+      "approvedClaims": [
+        "Hedge includes a transaction-linked protocol fee.",
+        "When a fill creates new open interest, each side pays a configurable cash fee to the configured fee account.",
+        "The production rate and minimum are not final"
+      ]
+    },
+    "platform/market-engine": {
+      "sources": [
+        "PRODUCTION.md",
+        "docs-site/architecture.mdx"
+      ],
+      "approvedClaims": [
+        "BTC covered calls are the first packaged outcome.",
+        "stale inputs treated as a stop condition"
+      ]
+    },
+    "progress/proof": {
+      "sources": [
+        "PRODUCTION.md",
+        "protocol/deployments/staging/markets/56.json"
+      ],
+      "approvedClaims": [
+        "A minimal-value BTCB staging trade has completed.",
+        "**Hedge is PRE-LAUNCH.**",
+        "The tracked staging manifest spans **BTC, Gold, the S&P 500, and NVIDIA** as staging-manifest markets",
+        "Production deposits and unrestricted production trading remain gated.",
+        "Stale RWA sources fail closed"
+      ]
+    },
+    "progress/roadmap": {
+      "sources": [
+        "PRODUCTION.md"
+      ],
+      "approvedClaims": [
+        "The roadmap is organized around evidence.",
+        "The next company-level milestone is not a broad launch announcement."
+      ]
+    }
+  }
+}

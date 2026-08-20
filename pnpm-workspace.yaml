@@ -2,6 +2,7 @@ packages:
   - apps/*
   - services/*
   - docs-site
+  - concept-site
 
 allowBuilds:
   bufferutil: true

@@ -1,0 +1,14 @@
+{
+  "name": "hedge-concept-docs",
+  "private": true,
+  "scripts": {
+    "dev": "mint dev",
+    "audit:content": "node scripts/audit-content.mjs",
+    "validate": "mint validate",
+    "check:links": "mint broken-links",
+    "check": "pnpm audit:content && pnpm validate && pnpm check:links"
+  },
+  "devDependencies": {
+    "mint": "^4.2.615"
+  }
+}

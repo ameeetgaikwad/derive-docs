@@ -1,0 +1,43 @@
+---
+title: "The three-step market loop"
+description: "Collateralize, quote and accept, then settle on-chain."
+icon: "refresh-cw"
+---
+
+# A simple request, backed by market infrastructure
+
+The customer experience can be reduced to three durable steps. Each step has a clear job and a clear boundary.
+
+<Steps>
+  <Step title="1. Collateralize" icon="lock-keyhole">
+    The holder chooses an amount, target price, and expiry, then commits enough BTCB to back the covered position. The product can explain this as a future sell target while the protocol treats it as a bounded obligation.
+  </Step>
+  <Step title="2. Quote and accept" icon="badge-dollar-sign">
+    The request is sent to eligible market makers. They submit competing signed premiums for the same outcome. The holder reviews the best available offer and accepts only if the trade-off is worthwhile.
+  </Step>
+  <Step title="3. Settle on-chain" icon="circle-check-big">
+    The accepted trade moves the position and premium together under on-chain risk checks. At expiry, the agreed reference price determines whether the option finishes above or below the target and the cash result is applied.
+  </Step>
+</Steps>
+
+## What stays off-chain—and what does not
+
+The quote process coordinates speed and competition. It does not get the final say over balances. Signed terms, risk checks, position changes, cash movement, and expiry settlement are enforced by the protocol.
+
+That separation gives each layer one job:
+
+- The interface translates intent.
+- Market makers compete on price.
+- The coordinator collects and selects quotes.
+- The protocol enforces the transaction and outcome.
+
+## The loop to improve
+
+Every product decision should strengthen one of four questions:
+
+1. Can a holder state the desired outcome quickly?
+2. Can makers quote it with confidence?
+3. Can the holder compare the trade-off before accepting?
+4. Can the system settle the result reliably?
+
+The platform becomes more valuable when that loop becomes repeatable—not when the interface accumulates more professional terminology.

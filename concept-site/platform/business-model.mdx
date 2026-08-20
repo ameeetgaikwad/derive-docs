@@ -1,0 +1,44 @@
+---
+title: "How the model compounds"
+description: "A transaction-linked fee mechanism and a repeatable market loop."
+icon: "chart-no-axes-combined"
+---
+
+# Monetization follows completed market activity
+
+Hedge includes a transaction-linked protocol fee. When a fill creates new open interest, each side pays a configurable cash fee to the configured fee account.
+
+This is a mechanism already represented in the system—not a claim of realized revenue. The production rate and minimum are not final, so this narrative does not present a fixed take rate or forecast.
+
+## The alignment
+
+The fee is tied to a matched position being created. That makes the commercial question concrete: can Hedge originate outcomes that holders value and that market makers are willing to price?
+
+<CardGroup cols={2}>
+  <Card title="Holder value" icon="circle-user-round">
+    A clear target, a competitive premium, and a visible trade-off.
+  </Card>
+  <Card title="Maker value" icon="candlestick-chart">
+    Structured requests that can be priced, signed, and settled under consistent rules.
+  </Card>
+  <Card title="Protocol value" icon="blocks">
+    A fee when new market activity is successfully created, subject to configured economics.
+  </Card>
+  <Card title="Platform leverage" icon="network">
+    The same origination and settlement rails can support additional markets after their controls are proven.
+  </Card>
+</CardGroup>
+
+## The potential compounding loop
+
+1. A simpler outcome attracts more qualified requests.
+2. Better request quality gives makers clearer flow to price.
+3. Stronger competition can improve the offers holders see.
+4. Reliable execution and settlement make the loop repeatable.
+5. A proven loop can be adapted to the next suitable market.
+
+This is the operating hypothesis. It should be measured with verified funnel, quote, fill, retention, and settlement data after controlled launch—not asserted in advance.
+
+## What the model claims
+
+The current case does not promise a fixed yield or a fixed take rate. It describes one reviewed commercial mechanism: create and settle a market around a holder's chosen outcome, then charge according to configured transaction economics.
